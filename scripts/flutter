@@ -1,0 +1,8 @@
+#!/bin/sh
+set -eu
+FACETRACK_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+export ANDROID_HOME="$FACETRACK_ROOT/.tools/android_sdk"
+export ANDROID_SDK_ROOT="$ANDROID_HOME"
+export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
+export GRADLE_USER_HOME="$FACETRACK_ROOT/.cache/gradle"
+exec "$FACETRACK_ROOT/.tools/flutter/bin/flutter" "$@"

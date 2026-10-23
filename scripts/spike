@@ -1,0 +1,10 @@
+#!/bin/sh
+set -eu
+TASK_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+cd "$TASK_ROOT"
+export PATH="$TASK_ROOT/.tools/bin:$PATH"
+if [ ! -x .venv/bin/facetrack ]; then
+  echo 'Run uv sync with the project Python 3.11 environment first.' >&2
+  exit 1
+fi
+exec .venv/bin/facetrack "$@"

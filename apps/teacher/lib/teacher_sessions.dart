@@ -1,0 +1,830 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:crypto/crypto.dart';
+import 'package:facetrack_capture/facetrack_capture.dart';
+import 'package:facetrack_core/facetrack_core.dart';
+import 'package:facetrack_models/facetrack_models.dart';
+
+import 'teacher_timetable.dart';
+import 'teacher_reports.dart';
+
+String sessionDate(BuildContext context, String stamp) {
+  final d = DateTime.parse(stamp).toLocal(),
+      l = MaterialLocalizations.of(context);
+  return '${l.formatMediumDate(d)} · ${l.formatTimeOfDay(TimeOfDay.fromDateTime(d))}';
+}
+
+String sessionLabel(String state) => switch (state) {
+  'scheduled' => 'Scheduled',
+  'open' => 'Open for capture',
+  'review_required' => 'Ready for review',
+  'no_data' => 'Needs manual assessment',
+  'finalized' => 'Published',
+  'cancelled' => 'Cancelled',
+  _ => 'Closed',
+};
+
+class TeacherSessions extends StatefulWidget {
+  const TeacherSessions({
+    super.key,
+    required this.api,
+    required this.institute,
+    required this.offering,
+    required this.publishableKey,
+  });
+  final ApiClient api;
+  final String institute, offering, publishableKey;
+  @override
+  State<TeacherSessions> createState() => _TeacherSessionsState();
+}
+
+class _TeacherSessionsState extends State<TeacherSessions> {
+  late final PagedController<Json> controller;
+  @override
+  void initState() {
+    super.initState();
+    controller = PagedController(
+      (cursor) async => PageData.fromJson(
+        await widget.api.send(
+          'GET',
+          '/v1/sessions',
+          institute: widget.institute,
+          query: {'offering_id': widget.offering, 'cursor': ?cursor},
+        ),
+        (j) => j,
+      ),
+    );
+    controller.load();
+  }
+
+  @override
+  void dispose() {
+    controller.dispose();
+    super.dispose();
+  }
+
+  Future<void> create() async {
+    final room = TextEditingController();
+    DateTime start = DateTime.now();
+    int minutes = 60;
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => StatefulBuilder(
+        builder: (context, setLocal) => ActionDialog(
+          title: 'Create attendance session',
+          button: 'Create session',
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                'Opening this session freezes its approved student roster. Recognition suggestions require your review.',
+              ),
+              const SizedBox(height: 16),
+              OutlinedButton(
+                onPressed: () async {
+                  final d = await showDatePicker(
+                    context: context,
+                    initialDate: start,
+                    firstDate: DateTime.now().subtract(const Duration(days: 1)),
+                    lastDate: DateTime.now().add(const Duration(days: 180)),
+                  );
+                  if (d == null || !context.mounted) return;
+                  final t = await showTimePicker(
+                    context: context,
+                    initialTime: TimeOfDay.fromDateTime(start),
+                  );
+                  if (t != null) {
+                    setLocal(
+                      () => start = DateTime(
+                        d.year,
+                        d.month,
+                        d.day,
+                        t.hour,
+                        t.minute,
+                      ),
+                    );
+                  }
+                },
+                child: Text(
+                  'Start: ${sessionDate(context, start.toIso8601String())}',
+                ),
+              ),
+              DropdownButtonFormField<int>(
+                initialValue: minutes,
+                decoration: const InputDecoration(labelText: 'Duration'),
+                items: [30, 45, 60, 90, 120]
+                    .map(
+                      (m) =>
+                          DropdownMenuItem(value: m, child: Text('$m minutes')),
+                    )
+                    .toList(),
+                onChanged: (v) => minutes = v!,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: room,
+                maxLength: 100,
+                decoration: const InputDecoration(labelText: 'Room (optional)'),
+              ),
+            ],
+          ),
+          submit: (mutation) async {
+            await widget.api.send(
+              'POST',
+              '/v1/sessions',
+              institute: widget.institute,
+              mutation: mutation,
+              body: {
+                'offering_id': widget.offering,
+                'starts_at': start.toUtc().toIso8601String(),
+                'ends_at': start
+                    .add(Duration(minutes: minutes))
+                    .toUtc()
+                    .toIso8601String(),
+                'room_label': room.text.trim(),
+              },
+            );
+          },
+        ),
+      ),
+    );
+    room.dispose();
+    await controller.load();
+  }
+
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      Wrap(
+        spacing: 12,
+        children: [
+          FilledButton.icon(
+            onPressed: create,
+            icon: const Icon(Icons.add),
+            label: const Text('Create session'),
+          ),
+          OutlinedButton(
+            onPressed: () => controller.load(),
+            child: const Text('Refresh sessions'),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      ExpansionTile(
+        title: const Text('Import timetable'),
+        subtitle: const Text('Upload a CSV and confirm scheduled sessions.'),
+        children: [
+          TeacherTimetable(
+            api: widget.api,
+            institute: widget.institute,
+            offering: widget.offering,
+            publishableKey: widget.publishableKey,
+            changed: () => controller.load(),
+          ),
+        ],
+      ),
+      const SizedBox(height: 16),
+      PagedList<Json>(
+        controller: controller,
+        emptyTitle: 'No sessions yet',
+        emptyMessage: 'Create a session to take attendance for this class.',
+        item: (s) => Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                sessionDate(context, s['starts_at']),
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              Text(
+                '${sessionLabel(s['status'])}${s['room_label'] == '' ? '' : ' · ${s['room_label']}'}',
+              ),
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: () => context.go('/sessions/${s['id']}'),
+                child: const Text('Open session details'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    ],
+  );
+}
+
+class TeacherSessionDetail extends ConsumerStatefulWidget {
+  const TeacherSessionDetail({super.key, required this.id});
+  final String id;
+  @override
+  ConsumerState<TeacherSessionDetail> createState() =>
+      _TeacherSessionDetailState();
+}
+
+class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
+  late final AppServices services;
+  late final String institute;
+  Json? data;
+  AppFailure? error;
+  bool busy = false, ack = false;
+  final decisions = <String, String>{};
+  final camera = GuidedCamera();
+  ResumableUpload? uploader;
+  double? progress;
+  Json? capture;
+  DateTime? recordedAt;
+  final reserve = Mutation(), complete = Mutation();
+  Timer? poll;
+  AppLifecycleListener? lifecycle;
+  @override
+  void initState() {
+    super.initState();
+    services = ref.read(servicesProvider);
+    institute = ref.read(authProvider).institute!;
+    camera.addListener(changed);
+    lifecycle = AppLifecycleListener(
+      onPause: () => camera.interrupt(),
+      onResume: load,
+    );
+    load();
+  }
+
+  void changed() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> load({bool discardChanges = false}) async {
+    if (decisions.isNotEmpty && !busy && !discardChanges) return;
+    try {
+      final result = await services.api.send(
+        'GET',
+        '/v1/sessions/${widget.id}/attendance',
+        institute: institute,
+      );
+      if (!mounted) return;
+      setState(() {
+        data = result;
+        error = null;
+        decisions.clear();
+      });
+      poll?.cancel();
+      if (result['session']['status'] == 'open' ||
+          capture?['status'] == 'queued') {
+        poll = Timer(const Duration(seconds: 5), () => load());
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => error = e is AppFailure
+              ? e
+              : const AppFailure('Could not load this session. Retry.'),
+        );
+      }
+    }
+  }
+
+  Future<void> action(Future<void> Function() fn) async {
+    if (busy) return;
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await fn();
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => error = e is AppFailure
+              ? e
+              : const AppFailure(
+                  'The action did not finish. Retry without leaving this page.',
+                ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> transition(String name) async {
+    if (name == 'close') {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Close this session?'),
+          content: const Text(
+            'New uploads will stop. Accepted processing can finish before you publish.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Keep open'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Close session'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    await action(() async {
+      await services.api.send(
+        'POST',
+        '/v1/sessions/${widget.id}/$name',
+        institute: institute,
+        version: data!['session']['version'],
+        mutation: Mutation(),
+      );
+      await load();
+    });
+  }
+
+  Future<void> cancel() async {
+    final reason = TextEditingController();
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => ActionDialog(
+        title: 'Cancel session',
+        button: 'Cancel session',
+        child: TextFormField(
+          controller: reason,
+          decoration: const InputDecoration(labelText: 'Reason'),
+          validator: requiredText,
+          maxLength: 500,
+        ),
+        submit: (m) async {
+          await services.api.send(
+            'POST',
+            '/v1/sessions/${widget.id}/cancel',
+            institute: institute,
+            version: data!['session']['version'],
+            mutation: m,
+            body: {'reason': reason.text.trim()},
+          );
+        },
+      ),
+    );
+    reason.dispose();
+    await load();
+  }
+
+  Future<void> record() => action(() async {
+    capture = null;
+    reserve.reset();
+    complete.reset();
+    recordedAt = DateTime.now().toUtc();
+    await camera.initialize();
+    await camera.start(const [
+      'classroom',
+      'classroom',
+      'classroom',
+      'classroom',
+      'classroom',
+    ]);
+  });
+  Future<void> upload() => action(() async {
+    final file = camera.clip!;
+    final bytes = await file.length();
+    if (bytes > 26214400) {
+      throw const AppFailure(
+        'Recording exceeds 25 MiB. Retake a shorter recording.',
+      );
+    }
+    final hash = (await sha256.bind(file.openRead()).first).toString();
+    capture ??= await services.api.send(
+      'POST',
+      '/v1/sessions/${widget.id}/captures',
+      institute: institute,
+      mutation: reserve,
+      body: {
+        'source_type': kIsWeb ? 'webcam' : 'phone',
+        'recorded_at': recordedAt!.toIso8601String(),
+        'mime_type': kIsWeb ? 'video/webm' : 'video/mp4',
+        'expected_bytes': bytes,
+      },
+    );
+    Future<void> commit() async {
+      await services.api.send(
+        'POST',
+        '/v1/captures/${capture!['id']}/upload-complete',
+        institute: institute,
+        mutation: complete,
+        body: {
+          'asset_id': capture!['asset_id'],
+          'byte_size': bytes,
+          'sha256': hash,
+        },
+      );
+    }
+
+    bool committed = false;
+    if (capture!['resume_url'] != null) {
+      try {
+        await commit();
+        committed = true;
+      } on AppFailure catch (e) {
+        if (e.code != 'MEDIA_NOT_AVAILABLE') {
+          rethrow;
+        }
+      }
+    }
+    if (!committed) {
+      final grant = await services.api.send(
+        'POST',
+        '/v1/captures/${capture!['id']}/upload-grant',
+        institute: institute,
+      );
+      uploader = ResumableUpload();
+      setState(() => progress = 0);
+      await uploader!.upload(
+        file,
+        grant,
+        services.config.publishableKey,
+        resumeUrl: capture!['resume_url'],
+        progress: (v) {
+          if (mounted) setState(() => progress = v);
+        },
+        checkpoint: (url) async {
+          capture!['resume_url'] = url;
+        },
+      );
+      await commit();
+    }
+    capture!['status'] = 'queued';
+    await camera.discard();
+    await camera.interrupt();
+    progress = null;
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Capture queued. Review suggestions after processing.'),
+        ),
+      );
+    }
+    await load();
+  });
+  Future<void> save(bool publish) async {
+    if (publish) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Publish attendance?'),
+          content: const Text(
+            'Students will see these decisions. Corrections create a new publication revision.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Review again'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Publish'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    await action(() async {
+      await services.api.send(
+        publish ? 'POST' : 'PUT',
+        '/v1/sessions/${widget.id}/${publish ? 'finalize' : 'attendance-review'}',
+        institute: institute,
+        version: data!['session']['version'],
+        mutation: Mutation(),
+        body: {
+          'decisions': decisions.entries
+              .map((e) => {'student_id': e.key, 'status': e.value})
+              .toList(),
+          'acknowledge_unassessed': ack,
+        },
+      );
+      await load();
+    });
+  }
+
+  Future<void> correct(Json row) async {
+    String status = row['status'];
+    final reason = TextEditingController();
+    await showDialog<bool>(
+      context: context,
+      builder: (_) => ActionDialog(
+        title: 'Correct published attendance',
+        button: 'Publish correction',
+        child: Column(
+          children: [
+            Text(row['official_name']),
+            DropdownButtonFormField<String>(
+              initialValue: status,
+              items: [
+                'present',
+                'absent',
+                'late',
+                'excused',
+                'unassessed',
+              ].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+              onChanged: (v) => status = v!,
+            ),
+            TextFormField(
+              controller: reason,
+              validator: requiredText,
+              maxLength: 500,
+              decoration: const InputDecoration(labelText: 'Correction reason'),
+            ),
+          ],
+        ),
+        submit: (m) async {
+          await services.api.send(
+            'POST',
+            '/v1/sessions/${widget.id}/corrections',
+            institute: institute,
+            version: data!['session']['version'],
+            mutation: m,
+            body: {
+              'student_id': row['student_id'],
+              'status': status,
+              'reason': reason.text.trim(),
+              'publication_revision': data!['session']['attendance_revision'],
+            },
+          );
+        },
+      ),
+    );
+    reason.dispose();
+    await load();
+  }
+
+  @override
+  void dispose() {
+    poll?.cancel();
+    lifecycle?.dispose();
+    uploader?.cancel();
+    camera.removeListener(changed);
+    unawaited(camera.discard());
+    camera.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (data == null) {
+      return ContentPage(
+        children: [
+          if (error != null)
+            ErrorView(error!, retry: load)
+          else
+            const Center(child: CircularProgressIndicator()),
+        ],
+      );
+    }
+    final s = data!['session'] as Json;
+    final rows = (data!['items'] as List).cast<Json>();
+    final finalised = s['status'] == 'finalized';
+    final hasUnconfirmedSuggestion = rows.any(
+      (row) =>
+          (decisions[row['student_id']] ?? row['status']) == 'proposed_present',
+    );
+    final editable = ![
+      'scheduled',
+      'cancelled',
+      'finalized',
+    ].contains(s['status']);
+    return ContentPage(
+      children: [
+        TextButton.icon(
+          onPressed: () => context.go('/classes/${s['offering_id']}'),
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('Back to class'),
+        ),
+        PageHeader(
+          title: 'Attendance session',
+          subtitle:
+              '${sessionDate(context, s['starts_at'])} · ${sessionLabel(s['status'])}',
+          action: OutlinedButton(
+            onPressed: busy ? null : () => load(discardChanges: true),
+            child: const Text('Refresh'),
+          ),
+        ),
+        if (error != null) ...[
+          if (decisions.isNotEmpty)
+            const Text(
+              'Refreshing will discard choices that were not saved. Review each student again before publishing.',
+            ),
+          Semantics(
+            liveRegion: true,
+            child: ErrorView(error!, retry: () => load(discardChanges: true)),
+          ),
+        ],
+        Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                s['status'] == 'open'
+                    ? 'After the final capture finishes processing, close this session. Then review each student and publish attendance. Saving decisions while open only saves a draft.'
+                    : 'Open to freeze the roster, capture the classroom, then review and publish. Missing faces stay unassessed.',
+              ),
+              const SizedBox(height: 12),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                children: [
+                  if (s['status'] == 'scheduled')
+                    FilledButton(
+                      onPressed: busy ? null : () => transition('open'),
+                      child: const Text('Open session'),
+                    ),
+                  if (s['status'] == 'open')
+                    OutlinedButton(
+                      onPressed: busy ? null : () => transition('close'),
+                      child: const Text('Close session'),
+                    ),
+                  if (['scheduled', 'open'].contains(s['status']))
+                    TextButton(
+                      onPressed: busy ? null : cancel,
+                      child: const Text('Cancel session'),
+                    ),
+                ],
+              ),
+            ],
+          ),
+        ),
+        if (s['status'] == 'open')
+          Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Classroom capture',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
+                const Text(
+                  'Use good lighting and include every consenting student. Recording lasts 15 seconds with audio off. Keep this page open until upload completes.',
+                ),
+                if (camera.controller != null && camera.clip == null)
+                  AspectRatio(
+                    aspectRatio: camera.controller!.value.aspectRatio,
+                    child: camera.controller!.buildPreview(),
+                  ),
+                if (camera.error != null) Text(camera.error!),
+                if (camera.recording)
+                  Text('Recording ${camera.elapsed} / 15 seconds'),
+                if (camera.clip != null) ...[
+                  ClipPlayback(file: camera.clip!),
+                  if (progress != null)
+                    LinearProgressIndicator(value: progress),
+                  FilledButton(
+                    onPressed: busy ? null : upload,
+                    child: Text(
+                      busy ? 'Uploading…' : 'Upload classroom capture',
+                    ),
+                  ),
+                  TextButton(
+                    onPressed: busy ? null : () => camera.discard(),
+                    child: const Text('Retake recording'),
+                  ),
+                ] else if (!camera.recording)
+                  FilledButton.icon(
+                    onPressed: busy ? null : record,
+                    icon: const Icon(Icons.videocam_outlined),
+                    label: const Text('Record classroom'),
+                  ),
+              ],
+            ),
+          ),
+        if (capture != null)
+          FutureBuilder<Json>(
+            future: services.api.send(
+              'GET',
+              '/v1/captures/${capture!['id']}',
+              institute: institute,
+            ),
+            builder: (c, snapshot) => Text(
+              snapshot.hasData
+                  ? 'Capture: ${snapshot.data!['status']}'
+                  : 'Checking capture status…',
+            ),
+          ),
+        if (rows.isEmpty)
+          const Panel(
+            child: Text(
+              'No students on this roster. Approve class membership before opening a new session.',
+            ),
+          ),
+        for (final row in rows)
+          Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '${row['official_name']} · ${row['enrollment_number']}',
+                  style: Theme.of(context).textTheme.titleMedium,
+                ),
+                Text(
+                  row['recognition_eligible'] == true
+                      ? 'Face enrolment available at session opening'
+                      : 'Manual assessment required',
+                ),
+                const SizedBox(height: 8),
+                if (editable)
+                  DropdownButtonFormField<String>(
+                    key: ValueKey('${row['student_id']}:${s['version']}'),
+                    initialValue: decisions[row['student_id']] ?? row['status'],
+                    decoration: const InputDecoration(
+                      labelText: 'Attendance decision',
+                    ),
+                    items: [
+                      if (row['status'] == 'proposed_present')
+                        const DropdownMenuItem(
+                          value: 'proposed_present',
+                          child: Text('Suggested present — confirm'),
+                        ),
+                      for (final status in [
+                        'unassessed',
+                        'present',
+                        'absent',
+                        'late',
+                        'excused',
+                      ])
+                        DropdownMenuItem(
+                          value: status,
+                          child: Text(
+                            status == 'unassessed'
+                                ? 'Unassessed'
+                                : status[0].toUpperCase() + status.substring(1),
+                          ),
+                        ),
+                    ],
+                    onChanged: busy
+                        ? null
+                        : (v) =>
+                              setState(() => decisions[row['student_id']] = v!),
+                  )
+                else
+                  Text('Attendance: ${row['status']}'),
+                if (row['reason'] != null) Text('Note: ${row['reason']}'),
+                if (finalised)
+                  TextButton(
+                    onPressed: busy ? null : () => correct(row),
+                    child: const Text('Correct attendance'),
+                  ),
+              ],
+            ),
+          ),
+        if (editable) ...[
+          if (hasUnconfirmedSuggestion)
+            const Panel(
+              child: Text(
+                'Recognition suggested a student. Select a verified decision for every “Suggested present — confirm” row before publishing.',
+              ),
+            ),
+          if (s['status'] != 'open')
+            CheckboxListTile(
+              value: ack,
+              onChanged: (v) => setState(() => ack = v ?? false),
+              title: const Text(
+                'I understand that any unassessed students make this publication incomplete.',
+              ),
+            ),
+          Wrap(
+            spacing: 12,
+            children: [
+              OutlinedButton(
+                onPressed: busy ? null : () => save(false),
+                child: const Text('Save draft decisions'),
+              ),
+              if (s['status'] != 'open')
+                FilledButton(
+                  onPressed: busy || hasUnconfirmedSuggestion
+                      ? null
+                      : () => save(true),
+                  child: const Text('Publish attendance'),
+                ),
+            ],
+          ),
+        ],
+        if (finalised)
+          Panel(
+            child: Text(
+              'Published revision ${s['attendance_revision']}. Students can view their own attendance.',
+            ),
+          ),
+        if (!['scheduled', 'open', 'cancelled'].contains(s['status']))
+          TeacherReports(
+            api: services.api,
+            institute: institute,
+            sessionId: widget.id,
+            supabaseUrl: services.config.supabaseUrl,
+            sessionVersion: s['version'] as int,
+          ),
+      ],
+    );
+  }
+}

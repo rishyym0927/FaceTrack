@@ -1,0 +1,28 @@
+name: facetrack_student
+description: FaceTrack Student attendance application
+publish_to: none
+version: 0.1.0+1
+environment:
+  sdk: ^3.13.5
+dependencies:
+  flutter:
+    sdk: flutter
+  facetrack_core:
+    path: ../../packages/app_core
+  facetrack_models:
+    path: ../../packages/domain_models
+  facetrack_capture:
+    path: ../../packages/capture
+  flutter_riverpod: ^3.0.0
+  go_router: ^17.0.0
+  crypto: ^3.0.6
+  dio: ^5.9.0
+dev_dependencies:
+  shared_preferences: ^2.5.3
+  flutter_test:
+    sdk: flutter
+  integration_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+flutter:
+  uses-material-design: true

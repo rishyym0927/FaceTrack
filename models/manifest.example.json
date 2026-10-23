@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "release_id": "scrfd-mobilefacenet-local-candidate",
+  "detector_family": "SCRFD",
+  "recognizer_family": "ArcFace-MobileFaceNet",
+  "detector": {
+    "file": "scrfd.onnx",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "source_url": "REPLACE_WITH_VERIFIED_ARTIFACT_SOURCE",
+    "input_name": "REPLACE_WITH_INSPECTED_INPUT_NAME",
+    "output_names": ["score8", "score16", "score32", "box8", "box16", "box32", "kps8", "kps16", "kps32"]
+  },
+  "recognizer": {
+    "file": "mobilefacenet.onnx",
+    "sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+    "source_url": "REPLACE_WITH_VERIFIED_ARTIFACT_SOURCE",
+    "input_name": "REPLACE_WITH_INSPECTED_INPUT_NAME",
+    "output_names": ["REPLACE_WITH_INSPECTED_OUTPUT_NAME"]
+  },
+  "detector_size": 640,
+  "detector_mean": 127.5,
+  "detector_scale": 128.0,
+  "recognizer_mean": 127.5,
+  "recognizer_scale": 127.5,
+  "dimension": 512,
+  "alignment": "arcface-112-five-point-v1",
+  "license": {
+    "status": "unreviewed",
+    "intended_use": "local_poc",
+    "evidence_file": null,
+    "evidence_sha256": null,
+    "reviewed_by": null,
+    "reviewed_at": null,
+    "permitted_uses": []
+  }
+}

@@ -1,0 +1,58 @@
+# FaceTrack development checkpoint
+
+**Reviewed:** 23 October 2026 (Asia/Kolkata)
+**Deployment:** Mac FastAPI, loopback Redis, Celery solo CPU worker and outbound agent; hosted free Supabase Auth/PostgreSQL/private Storage. Teacher web 5300, Student web 5301, API 8000; Android uses USB forwarding. HTTPS API/cloud inference remain later.
+**Current:** Phase 3A account/class acceptance is complete. Code through classroom recognition, attendance publication, timetable CSV and private CSV/PDF report downloads is implemented. Hosted schema head 0006 has **36 forced-RLS business tables** and both private buckets are provisioned. API readiness returned 200. A real low-light classroom capture processed; its session was teacher-published at revision 1. The user confirmed both final report downloads open and a student sees their own published Present history. A live timetable import created one scheduled Monday session. Better-lit recognition and recovery checks remain; keep milestones 3B–7 open.
+**ML:** Independent prototype recognition acceptance remains **1/6 held-out cases**. No >95% accuracy, ≤2-second response, liveness or 20-class capacity claim. Frozen model/profile/source/lock/template receipt remains unchanged.
+
+Read `AGENTS.md`, `MASTER_DESIGN.md` (architecture authority), `ROADMAP.md` (milestone gates) and service/app READMEs. Preserve private settings and active enrolment; never stage ignored local data or model artifacts.
+
+## Verified foundation and enrolment
+
+- Approved Supabase student/teacher identities, memberships, tenant RLS, academic offerings, join codes, pending requests/approval, audit, idempotency and rate limits work against hosted development. Student/Teacher Android and web class flows were user-confirmed.
+- One real enrolment completed consent → Android capture → signed private upload → local CPU processing → encrypted candidate vectors → human review/approval → active templates. Post-decision review media was deleted. User confirmed a second consenting student's active approval; a read-only hosted aggregate check found **two** approved class members with active consent/templates. The first active set was preserved.
+- A real Android upload exposed Supabase object info with top-level `content_type` and `metadata: null`; normalized MIME handling and regression tests fixed it without bypassing media checks.
+- Phase 3A acceptance closed: the user verified Teacher and Student session restoration after full close/reopen, logout returning to Login with protected data hidden, Student invalid-code rejection without creating a request, and Teacher web keyboard focus/screen-reader navigation. Controlled 3B interrupted upload, worker restart, rejection/replacement/withdrawal, orientation, web capture and retention recovery remain. Do not approve identity/poses on the user's behalf.
+
+## Implemented demo slices
+
+- Migration **0005_attendance** (hosted/local): sessions, frozen roster, captures, recognition evidence, attendance decisions and immutable publication revisions. Opening freezes approved members and current eligible consented templates. The worker receives only job-scoped vectors in memory, uses pinned recognition inference and returns corroborated presence suggestions. Teacher decisions/publications are authoritative; missed/unknown/failed faces stay unassessed. Student history is limited to own latest published revision.
+- Migration **0006_timetable_reports** (hosted/local): rooms, timetable imports/series/future exceptions, reports and deliveries. A private 25 MiB CSV/PDF bucket was provisioned. Existing worker credential was preserved while permitted jobs expanded to enrolment, recognition, timetable, report and optional delivery. Structured 14-column CSV upload/preview/term-revision confirmation creates scheduled sessions; automatic opening is future work. Report jobs use immutable snapshots, private CSV/PDF assets, 60-second authorized download grants and a retry path.
+- Student adds guided enrolment progress/active confirmation, clearer class statuses and own published history. Teacher adds Sessions, classroom capture/upload, review/publication/correction, CSV import/room creation and report downloads. Teacher web class/import UI was visually inspected. A real publish attempt exposed confusing suggestion confirmation and a stale-record Retry loop; Teacher guidance now explicitly distinguishes drafts, requires every recognition suggestion to receive a human decision, and makes Retry refresh the latest version. Updated builds/device tests remain open.
+- Resend is **not configured**: no account/permitted sender yet. Email remains disabled with downloads available. Provider acceptance/inbox delivery is unverified. A synthetic 80-student multi-page PDF was rendered and visually inspected; institute-script font coverage remains a release check.
+- Teacher web must be built with `--dart-define-from-file=../../.local/flutter/development.json` as in its README. An omitted flag briefly produced a local “Setup required” build; it was rebuilt with the configuration. Android builds use `scripts/flutter` so JDK 17 and the project-local SDK/cache are set.
+- Updated Teacher Android debug APK built and installed on the USB-connected phone; the user confirmed the assigned class, published revision and Final report load there. USB `tcp:8000` reverse remains active. The operator database password was rotated and the new private connection passed `SELECT 1`; API readiness remained 200. Only public Supabase configuration is present in Flutter builds; the actual Storage secret is absent from the Teacher web bundle.
+- A one-row demo timetable file is at ignored `.local/demo/timetable.csv` for CS401/CSE-5A. The teacher added room `DEMO-101`, uploaded the CSV and confirmed it. Two first confirmations on Friday created the weekly series but zero dated sessions because the CSV specifies Monday. After selecting Monday 26 October, the user confirmed a scheduled session appeared. Hosted read-only verification found one active series, one scheduled session at 09:00 Asia/Kolkata, and zero duplicate occurrence keys. The app now defaults to the next matching weekday, explains single-day materialization and displays the created count. The API rejects a nonmatching date with `NO_SESSION_ON_DATE` instead of committing zero sessions.
+- A real report exposed unused reservation metadata after completion. The API now closes those rows atomically when finalizing the report; a focused PostgreSQL regression passes. Four previously unlinked reservations from the two completed demo reports were closed without changing uploaded assets, reports or publications.
+
+## Latest checks
+
+| Check | Verified result |
+|---|---|
+| Backend isolated PostgreSQL, mocked Auth/Storage | **41 passed** after timetable date guard and report cleanup: tenant boundaries, consent, leases, recognition/manual lock, timetable conflict/preview/retry, report snapshot/access/retry. |
+| Worker | **5 passed**: synthetic FFmpeg rotation/audio/corrupt cases, report/CSV rendering. |
+| Backend Ruff | Passed. |
+| Teacher Flutter | Analysis, 6 widget/unit tests (including next valid timetable date), configured web build and debug APK build passed. Latest APK installed on the USB-connected phone; the user confirmed the Monday scheduled session appears. Earlier published session/report view passed on phone. Suggestion/Retry guidance still needs acceptance. |
+| Student Flutter | Analysis and enrolment widget test passed; user-confirmed published own history on web. Native history and targeted account/accessibility checks remain. |
+| Hosted | 0005/0006 applied; private documents bucket and preserved worker capability configured; readiness **200**; aggregate two eligible consented members. A two-person low-light capture processed: 12 sampled frames, 23 detections, 14 quality rejects, one corroborated suggestion (7 hits), one unassessed roster member before review. Worker pipeline total **356.505 ms**, excluding upload/network/UI and start-to-finish latency. Raw capture media was deleted. The teacher explicitly confirmed both present and published revision **1**; hosted read-only verification found one immutable publication, two present rows, and ready draft/final CSV/PDF report jobs. User confirmed Final CSV/PDF downloads open **and their class/session details and both Present rows are correct**; Student own published Present history appears. |
+| Private media retention | Hosted aggregate read found all 1 classroom and 3 enrolment raw assets marked deleted; zero overdue raw assets. Four generated report artifacts remain uploaded as intended; unused report reservations and timetable source assets are tombstoned. This checks database state, not independent provider-object reconciliation. |
+| Frozen ML | Sixteen receipt-pinned files checked unchanged after timetable work. Recheck before participant processing. |
+
+Synthetic PDF and rendered first page are ignored under `.local/reports/`; no student biometrics or participant-level findings appear in tracked docs.
+
+## Exact next action
+
+1. Use a fresh, better-lit session to retest both enrolled students; separately test absent, unknown and poor/no-face clips. Do not alter the frozen matching profile. The independent held-out 1/6 gate remains separate.
+2. Verify Teacher suggestion/Retry behavior and complete 3B lifecycle/recovery checks with controlled consenting data. Report contents were user-confirmed correct.
+3. Latest Teacher APK is installed and USB forwarding restored; its scheduled-session view is user-confirmed. Rehearse the complete flow twice and keep the first active enrolment intact. Email remains disabled until a permitted Resend sender is available.
+
+## Run and privacy notes
+
+- API from `services/api`: `.venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log`; `/health/ready` must return 200.
+- Root: `redis-server .local/enrollment/redis.conf`. Worker: documented Celery solo command and `.venv/bin/python -m facetrack_worker.agent` from `services/worker`. Credentials are already provisioned; do not regenerate routinely.
+- Backend tests: `services/api/.venv/bin/python -m pytest services/api/tests -q` from root or `.venv/bin/python -m pytest tests -q` from service. Start managed local PostgreSQL via `tools.local_db start`. Tests truncate only the guarded local test database.
+- Never commit credentials, tokens, recordings, embeddings, templates or participant results. Integrated cleanup runs while Mac is awake; inspect backlog after restart. Root spike media/Downloads retention is separate.
+
+## Frozen prototype evidence
+
+Private profile `.local/spike/profiles/frozen-phase1b-v1.json`, templates `.local/spike/experiments/calibration-v3`, manifest `.local/spike/models/buffalo_sc/manifest.json`, and receipt `.local/spike/held-out-freeze-v2.json` remain. The receipt pins 16 source/model/profile/template/lock files and exclusion hashes. Six calibration scenarios passed three fresh-process repeats, which do not establish independent accuracy. One fresh both-known Test clip passed three repeats without changing frozen inputs; `.local/spike/held-out-progress-v1.json` records **1/6**. A re-exported calibration clip was excluded from Test. Five independent scenarios remain; never tune on held-out clips.

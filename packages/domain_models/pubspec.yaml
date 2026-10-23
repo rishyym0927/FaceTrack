@@ -1,0 +1,5 @@
+name: facetrack_models
+publish_to: none
+version: 0.1.0
+environment:
+  sdk: ^3.13.5

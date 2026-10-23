@@ -1,0 +1,36 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "facetrack-ml"
+version = "0.1.0"
+description = "Local, permission-gated FaceTrack camera/recognition proof of concept"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "numpy>=2.2,<3",
+  "opencv-python-headless>=4.11,<5",
+  "onnxruntime>=1.20,<2",
+  "cryptography>=44,<48",
+  "pydantic>=2.10,<3",
+  "imageio-ffmpeg>=0.6,<0.7",
+]
+
+[dependency-groups]
+dev = ["pytest>=8,<10", "ruff>=0.11,<1", "onnx>=1.17,<2"]
+
+[project.scripts]
+facetrack = "facetrack_ml.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["services/worker/src/facetrack_ml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "I"]

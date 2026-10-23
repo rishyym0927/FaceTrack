@@ -1,0 +1,8 @@
+#!/bin/sh
+# Reconnect the development API after USB reconnects. Run from any directory.
+set -eu
+FACETRACK_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+ADB="$FACETRACK_ROOT/.tools/android_sdk/platform-tools/adb"
+"$ADB" get-state
+"$ADB" reverse tcp:8000 tcp:8000
+"$ADB" reverse --list
