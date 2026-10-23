@@ -3,6 +3,8 @@
 **Target:** Working demonstration by 28 October 2026.
 **Current step:** Demo code through timetable/report downloads is implemented and locally verified; development schema/bucket/worker are provisioned. Phase 3A account/class acceptance is complete. Two approved, consented class members have active templates. A real low-light classroom capture produced one recognition suggestion; the teacher confirmed both students Present and published revision 1. User confirmed final CSV/PDF downloads and own student history work. A real CSV import created one Monday scheduled session after the correct date was selected. Next: better-lit and negative recognition cases, 3B lifecycle/recovery and rehearsals. API/worker remain on Mac; cloud deployment is pending. Independent ML tests remain on hold at 1/6 passed.
 
+**Current enhancement:** Local live pose guidance is coded; the user confirmed Chrome guidance plus Android upright preview, matching left/right prompts and upright playback. Full five-pose, edge-case and live upload/review acceptance remains. Guidance is advisory and does not close milestone 3B or recognition acceptance.
+
 The user authorized backend work in parallel with the remaining ML tests. Check a milestone only after its acceptance passes. Technical decisions stay in `MASTER_DESIGN.md`; exact verified state is in `PROGRESS.md`.
 
 ## Demonstration milestones

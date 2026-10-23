@@ -9,6 +9,11 @@ import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'student_pose_analyzer_stub.dart'
+    if (dart.library.io) 'student_pose_analyzer_io.dart'
+    as pose_platform;
+import 'student_camera_orientation.dart';
+
 class StudentEnrolment extends ConsumerStatefulWidget {
   const StudentEnrolment({super.key});
   @override
@@ -18,7 +23,10 @@ class StudentEnrolment extends ConsumerStatefulWidget {
 class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
   late final AppServices services;
   late final String institute, owner;
-  final camera = GuidedCamera();
+  final camera = GuidedCamera(
+    enrollmentGuidance: true,
+    analyzerFactory: pose_platform.createStudentAnalyzer,
+  );
   final createMutation = Mutation(), consentMutation = Mutation();
   BiometricState? state;
   Json? notice;
@@ -115,6 +123,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
         mime: kIsWeb ? 'video/webm' : 'video/mp4',
         completeKey: Mutation().key,
         created: a.expiresAt.subtract(const Duration(hours: 24)),
+        missedGuidance: camera.missingPoses,
       );
       final saved = await PendingClips.retain(record);
       if (services.client.auth.currentUser?.id != owner) {
@@ -211,7 +220,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
     }
     if (a.status != 'awaiting_upload') return;
     await camera.initialize();
-    if (camera.controller != null) await camera.start(a.poses);
+    if (camera.ready) await camera.start(a.poses);
   });
   Future<void> upload() => action(() async {
     final clip = pending!, a = state!.attempt!;
@@ -301,6 +310,26 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
       uploader = null;
     }
   });
+  Future<void> retake() => action(() async {
+    final attempt = state?.attempt;
+    if (attempt == null || attempt.status != 'awaiting_upload') return;
+    if (pending?.uploadUrl != null) {
+      throw const AppFailure(
+        'This upload has started. Retry it or cancel this enrolment before recording a replacement.',
+      );
+    }
+    await camera.initialize();
+    if (!camera.ready) {
+      throw const AppFailure(
+        'Camera unavailable. Your current recording is still saved; allow camera access and retry.',
+      );
+    }
+    await PendingClips.clear();
+    camera.clip = null;
+    if (mounted) setState(() => pending = null);
+    await camera.start(attempt.poses);
+  });
+
   Future<void> cancel() async {
     final a = state!.attempt!;
     final confirmed = await showDialog<bool>(
@@ -511,22 +540,113 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Use good lighting, keep only yourself in frame and make sure your face is clear. Follow each prompt for the full 15 seconds. Audio stays off.',
+                    'Use good lighting and keep only yourself in frame. Hold each prompted direction until its circle fills. Recording lasts 10–25 seconds; audio stays off.',
                   ),
                   const SizedBox(height: 16),
                 ],
                 if (camera.controller != null && pending == null)
                   AspectRatio(
-                    aspectRatio: camera.controller!.value.aspectRatio,
-                    child: camera.controller!.buildPreview(),
+                    aspectRatio:
+                        cameraQuarterTurns(
+                          camera.controller!.description,
+                          camera.controller!.value.deviceOrientation,
+                        ).isOdd
+                        ? 1 / camera.controller!.value.aspectRatio
+                        : camera.controller!.value.aspectRatio,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: [
+                        // Rotate the CameraX texture using the same sensor
+                        // orientation as ML Kit. Guidance stays upright.
+                        RotatedBox(
+                          quarterTurns: cameraQuarterTurns(
+                            camera.controller!.description,
+                            camera.controller!.value.deviceOrientation,
+                          ),
+                          child: camera.controller!.buildPreview(),
+                        ),
+                        IgnorePointer(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final face = camera.guidance?.faceBounds;
+                              if (face == null) {
+                                return Center(
+                                  child: Container(
+                                    width: 220,
+                                    height: 280,
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(140),
+                                      border: Border.all(
+                                        color: Colors.white,
+                                        width: 3,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              }
+                              return Stack(
+                                children: [
+                                  Positioned(
+                                    left:
+                                        (1 - face.right) * constraints.maxWidth,
+                                    top: face.top * constraints.maxHeight,
+                                    width: face.width * constraints.maxWidth,
+                                    height: face.height * constraints.maxHeight,
+                                    child: DecoratedBox(
+                                      decoration: BoxDecoration(
+                                        borderRadius: BorderRadius.circular(12),
+                                        border: Border.all(
+                                          color:
+                                              camera.guidance?.hint ==
+                                                  'Hold still…'
+                                              ? Colors.greenAccent
+                                              : Colors.white,
+                                          width: 3,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              );
+                            },
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 if (camera.recording) ...[
                   const SizedBox(height: 16),
                   Text(
-                    'Look ${camera.poses[(camera.elapsed ~/ 3).clamp(0, 4)]}',
+                    camera.guidance?.current == null
+                        ? 'All directions captured'
+                        : 'Look ${camera.guidance!.current}',
                     style: Theme.of(context).textTheme.headlineMedium,
                   ),
-                  Text('${camera.elapsed} / 15 seconds · audio off'),
+                  if (camera.guidance != null) ...[
+                    const SizedBox(height: 8),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(camera.guidance!.hint),
+                    ),
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        for (final pose in camera.poses)
+                          Chip(
+                            avatar: Icon(
+                              camera.guidance!.completed.contains(pose)
+                                  ? Icons.check_circle
+                                  : Icons.circle_outlined,
+                              size: 20,
+                            ),
+                            label: Text(pose),
+                          ),
+                      ],
+                    ),
+                  ],
+                  Text('${camera.elapsed} / 25 seconds · audio off'),
                 ],
                 if (camera.error != null)
                   Padding(
@@ -546,6 +666,10 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   const Text(
                     'Check that only you are visible and all five poses are shown. Audio is disabled.',
                   ),
+                  if (pending!.missedGuidance.isNotEmpty)
+                    Text(
+                      'Live guidance did not capture: ${pending!.missedGuidance.join(', ')}. Review the video; you can retake it or upload for teacher review.',
+                    ),
                   if (uploadProgress != null) ...[
                     const SizedBox(height: 12),
                     LinearProgressIndicator(value: uploadProgress),
@@ -560,6 +684,16 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                           : 'Upload for processing',
                     ),
                   ),
+                  TextButton(
+                    onPressed: busy || pending!.uploadUrl != null
+                        ? null
+                        : retake,
+                    child: const Text('Retake video'),
+                  ),
+                  if (pending!.uploadUrl != null)
+                    const Text(
+                      'This upload has started. Retry the upload or cancel this enrolment before recording again.',
+                    ),
                   if (error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 12),

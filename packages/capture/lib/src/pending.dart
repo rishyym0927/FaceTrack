@@ -18,10 +18,12 @@ class PendingClip {
     required this.mime,
     required this.completeKey,
     required this.created,
+    this.missedGuidance = const [],
     this.uploadUrl,
   });
   final String owner, institute, attempt, path, mime, completeKey;
   final DateTime created;
+  final List<String> missedGuidance;
   String? uploadUrl;
   XFile get file => XFile(path);
   Map<String, dynamic> toJson() => {
@@ -32,6 +34,7 @@ class PendingClip {
     'mime': mime,
     'complete_key': completeKey,
     'created': created.toUtc().toIso8601String(),
+    'missed_guidance': missedGuidance,
     'upload_url': uploadUrl,
   };
   factory PendingClip.fromJson(Map<String, dynamic> j) => PendingClip(
@@ -42,6 +45,8 @@ class PendingClip {
     mime: j['mime'],
     completeKey: j['complete_key'],
     created: DateTime.parse(j['created']),
+    missedGuidance:
+        (j['missed_guidance'] as List<dynamic>?)?.cast<String>() ?? const [],
     uploadUrl: j['upload_url'],
   );
 }
@@ -79,6 +84,7 @@ class PendingClips {
       mime: clip.mime,
       completeKey: clip.completeKey,
       created: clip.created,
+      missedGuidance: clip.missedGuidance,
       uploadUrl: clip.uploadUrl,
     );
     await save(retained);

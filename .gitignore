@@ -13,6 +13,7 @@ dist/
 .dart_tool/
 .flutter-plugins*
 .gradle/
+.kotlin/
 .idea/
 **/local.properties
 **/key.properties
