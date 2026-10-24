@@ -65,14 +65,18 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
         ),
         services.api.send('GET', '/v1/privacy/notice'),
       ]);
+      if (!mounted || current != generation) return;
       final next = BiometricState.fromJson(values[0]);
       await PendingClips.expire(owner: owner);
+      if (!mounted || current != generation) return;
       var saved = await PendingClips.read();
+      if (!mounted || current != generation) return;
       if (saved != null &&
           (saved.institute != institute ||
               saved.owner != owner ||
               saved.attempt != next.attempt?.id ||
               next.attempt?.status != 'awaiting_upload')) {
+        if (!mounted || current != generation) return;
         await PendingClips.clear();
         saved = null;
       }
@@ -434,7 +438,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
             label: const Text('Refresh'),
           ),
         ),
-        if (error != null)
+        if (error != null && pending == null)
           Padding(
             padding: const EdgeInsets.only(bottom: 16),
             child: ErrorView(error!, retry: load),
@@ -519,6 +523,13 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   const SizedBox(height: 8),
                   Text(a.reason!),
                 ],
+                if (['expired', 'rejected', 'failed'].contains(a.status))
+                  const Padding(
+                    padding: EdgeInsets.only(top: 12),
+                    child: Text(
+                      'This recording cannot be retried. Start a new guided recording when you are ready; your previous active enrolment, if any, stays active until a replacement is approved.',
+                    ),
+                  ),
                 if (['queued', 'processing'].contains(a.status))
                   const Padding(
                     padding: EdgeInsets.only(top: 12),

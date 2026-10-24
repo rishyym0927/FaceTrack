@@ -80,10 +80,29 @@ No confirmed Critical or High backend defect was established by this review. Exi
 3. [x] Fix FT-02/FT-03 and reduce FT-05 request waste with focused tests, including background polling.
 4. [x] Apply FT-06 consistently across shared, Student and Teacher task screens without route or permission changes.
 5. [x] Run Flutter analysis/core/capture/app suites and configured web/Android builds. Inspect the available Student session; record remaining visual gaps.
-6. [ ] Review staged paths, update checkpoints, commit and push without force.
+6. [x] Review staged paths, update checkpoints, commit and push without force (`7a36913`, verified on `origin/main`).
 
 ## Final verification
 
-Implementation and verification completed except Git delivery and external visual/device checks. Backend baseline **41/41** and worker baseline **5/5** passed; neither codebase changed. Flutter analysis found no issues in shared core, capture, Student or Teacher. Tests passed: shared core **20/20**, capture **7/7**, Student **4/4**, Teacher **8/8**. Both configured release web builds and both Android debug APKs built successfully. The existing Student web session was read-only inspected at phone width: approved class and published-history pages loaded with accessible actions and no visible clipping. That running 5301 instance predates the new release bundles; it does not establish visual acceptance of every changed authenticated screen.
+The first audit pass was committed and pushed at `7a36913`. External visual/device checks remain. Backend baseline **41/41** and worker baseline **5/5** passed; neither codebase changed. Flutter analysis found no issues in shared core, capture, Student or Teacher. Tests passed: shared core **20/20**, capture **7/7**, Student **4/4**, Teacher **8/8**. Both configured release web builds and both Android debug APKs built successfully. The existing Student web session was read-only inspected at phone width: approved class and published-history pages loaded with accessible actions and no visible clipping. That running 5301 instance predates the new release bundles; it does not establish visual acceptance of every changed authenticated screen.
 
 The responsive regression checks cover 360, 390, 768 and 1440 px with enlarged text; they are synthetic layout checks, not a physical-device claim. The Teacher and Student authenticated release bundles were not visually inspected at every breakpoint, and the phone was not reinstalled during this review. Participant-dependent biometric, recognition, destructive lifecycle and email checks remain deferred. Frozen ML code, profiles, templates and root lock were untouched. `git diff --check` passed.
+
+
+## Follow-up frontend review — 24 October 2026
+
+This pass is limited to Flutter Student, Teacher and shared web/Android UI. No backend, schema, worker, camera or ML code changed. The worktree began clean at `7a36913`; `docs/CLIENT_PROJECT_DOCUMENT.md` appeared as an unrelated untracked file and is preserved outside this delivery.
+
+| ID | Severity / evidence | Resolution and verification |
+|---|---|---|
+| FT-08 | **Medium, confirmed source risk:** resource detail routes reused unkeyed state across class/session IDs. `ProductApp` detail builders and stateful Student history/Teacher class/session screens lacked resource keys. | Key class and session subtrees by ID. A navigation regression confirms a class ID switch creates new screen state. |
+| FT-09 | **High, confirmed source risk:** Student enrolment reconciled and could clear private pending media from an older API response before checking refresh generation. | Reject stale responses before pending-clip reconciliation, with checks after storage reads. An overlapping-refresh regression keeps the current synthetic private clip intact. A concurrent storage write during a clear remains a separate lifecycle hardening case. |
+| FT-10 | **Medium, confirmed usability loss:** leaving Teacher session with edited, unsaved decisions silently discarded them. Explicit refresh also discarded choices. | GoRouter session exit asks Stay or Discard; explicit Refresh asks the same. Navigation test verifies Stay preserves the screen and Discard exits. Saving remains explicit. |
+| FT-11 | **Medium, confirmed request waste:** the capture-status `FutureBuilder` created a new GET future on unrelated screen rebuilds. | Cache by capture ID and invalidate after load/upload. Synthetic request-count test verifies one GET across unrelated rebuilds. |
+| FT-12 | **Low, confirmed request waste:** timetable validation poll loop could issue another GET after its screen was disposed. | Generation/disposal guard stops further requests. Widget regression confirms no second GET after disposal. |
+| FT-13 | **Medium, reproduced accessibility defect:** Teacher attendance dropdown overflowed 102 px at 360 px and 72 px at 390 px with 200% text. | Expand the dropdown within its field and constrain labels. Authenticated session matrix now passes at 360/390/768/1440 px with 200% text. |
+| FT-14 | **Low, design improvement:** Student upload errors could appear twice; session list actions and timetable instructions obscured the next step. | Keep upload error by the upload button, distinguish expired recording from retryable upload, label session actions by state, and show concise timetable steps/date/result. |
+
+**Follow-up checks:** all four Flutter analyzers reported no issues. Complete suites passed: shared/core **22**, capture **7**, Student **9**, Teacher **14**. Configured Student and Teacher release web builds and Android debug APKs passed. Responsive Student active-enrolment and Teacher attendance-review tests passed at 360/390/768/1440 px with 200% text. No backend or worker source changed, so their previously passing suites were not repeated.
+
+**Still pending:** newly built authenticated release screens were not visually inspected with a live Teacher session, and the physical phone was not reinstalled during this pass. The existing Student web tab is an older running preview, so it cannot verify the latest bundle. Recognition acceptance, participant-dependent tests, Resend delivery and cloud deployment are separate milestones.

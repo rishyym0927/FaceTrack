@@ -14,6 +14,32 @@ import 'widgets.dart';
 typedef DetailBuilder = Widget Function(BuildContext, String);
 SemanticsHandle? _webSemantics;
 
+/// Tracks unsaved teacher decisions for the currently open session route.
+class SessionExitGuard {
+  String? sessionId;
+  bool dirty = false;
+  bool busy = false;
+  void enter(String id) {
+    sessionId = id;
+    dirty = false;
+    busy = false;
+  }
+
+  void leave(String id) {
+    if (sessionId == id) {
+      sessionId = null;
+      dirty = false;
+      busy = false;
+    }
+  }
+
+  bool protects(String id) => sessionId == id;
+}
+
+final sessionExitGuardProvider = Provider<SessionExitGuard>(
+  (ref) => SessionExitGuard(),
+);
+
 Future<void> launchProduct(
   AppConfig config, {
   required WidgetBuilder classesBuilder,
@@ -145,14 +171,51 @@ class _ProductAppState extends ConsumerState<ProductApp> {
             if (widget.sessionBuilder != null)
               GoRoute(
                 path: '/sessions/:id',
-                builder: (c, s) =>
-                    widget.sessionBuilder!(c, s.pathParameters['id']!),
+                builder: (c, s) => KeyedSubtree(
+                  key: ValueKey('session:${s.pathParameters['id']}'),
+                  child: widget.sessionBuilder!(c, s.pathParameters['id']!),
+                ),
+                onExit: (context, state) async {
+                  final guard = ref.read(sessionExitGuardProvider);
+                  final id = state.pathParameters['id']!;
+                  if (!guard.protects(id) ||
+                      !auth.signedIn ||
+                      auth.error != null) {
+                    return true;
+                  }
+                  if (guard.busy) return false;
+                  if (!guard.dirty) return true;
+                  return await showDialog<bool>(
+                        context: context,
+                        builder: (dialogContext) => AlertDialog(
+                          title: const Text('Discard unsaved decisions?'),
+                          content: const Text(
+                            'Your attendance choices have not been saved. Stay to save a draft, or discard these changes.',
+                          ),
+                          actions: [
+                            TextButton(
+                              onPressed: () =>
+                                  Navigator.pop(dialogContext, false),
+                              child: const Text('Stay'),
+                            ),
+                            FilledButton(
+                              onPressed: () =>
+                                  Navigator.pop(dialogContext, true),
+                              child: const Text('Discard changes'),
+                            ),
+                          ],
+                        ),
+                      ) ??
+                      false;
+                },
               ),
             if (widget.detailBuilder != null)
               GoRoute(
                 path: '/classes/:id',
-                builder: (c, s) =>
-                    widget.detailBuilder!(c, s.pathParameters['id']!),
+                builder: (c, s) => KeyedSubtree(
+                  key: ValueKey('class:${s.pathParameters['id']}'),
+                  child: widget.detailBuilder!(c, s.pathParameters['id']!),
+                ),
               ),
           ],
         ),

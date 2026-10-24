@@ -5,6 +5,7 @@
 
 **Current enhancement:** Local live pose guidance is coded; the user confirmed Chrome guidance plus Android upright preview, matching left/right prompts and upright playback. Full five-pose, edge-case and live upload/review acceptance remains. Guidance is advisory and does not close milestone 3B or recognition acceptance.
 **Presentation audit checkpoint:** The issue register is `docs/APPLICATION_REVIEW.md`. Responsive sign-in/header fixes, Student history race protection, Teacher report refresh/polling fixes and the unified visual polish are implemented. Shared/capture/Student/Teacher tests pass **20/7/4/8**; all four analyses, both configured web builds and both debug APK builds pass. Existing Student web class/history screens were read-only inspected; newly built authenticated screens and physical-phone visual acceptance remain open. This checkpoint does not close milestones 3B–7.
+**Frontend follow-up:** Resource navigation, saved-recording refresh safety, unsaved Teacher decision warning, bounded capture/timetable requests and narrow large-text attendance controls are implemented. All four analyses and **22/7/9/14** shared/capture/Student/Teacher tests pass; both configured web and Android builds pass. The existing milestone gates remain unchanged; newly built authenticated release visual/device checks are still open.
 
 The user authorized backend work in parallel with the remaining ML tests. Check a milestone only after its acceptance passes. Technical decisions stay in `MASTER_DESIGN.md`; exact verified state is in `PROGRESS.md`.
 

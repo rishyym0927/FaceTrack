@@ -61,11 +61,18 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
   Uint8List? selected;
   String? filename;
   String? resumeUrl;
+  int pollGeneration = 0;
 
   @override
   void initState() {
     super.initState();
     unawaited(prepare());
+  }
+
+  @override
+  void dispose() {
+    pollGeneration++;
+    super.dispose();
   }
 
   Future<void> prepare() async {
@@ -253,13 +260,15 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
 
   Future<void> poll() async {
     if (importId == null) return;
+    final current = ++pollGeneration;
     for (var n = 0; n < 25; n++) {
+      if (!mounted || current != pollGeneration) return;
       final response = await widget.api.send(
         'GET',
         '/v1/timetable-imports/$importId',
         institute: widget.institute,
       );
-      if (!mounted) return;
+      if (!mounted || current != pollGeneration) return;
       setState(() {
         preview = response;
         if (response['status'] == 'ready') {
@@ -331,7 +340,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
           Text('Timetable CSV', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 6),
           const Text(
-            '1. Add each room code used by the CSV. 2. Choose and upload the CSV. 3. Review the preview and confirm. Sessions still open manually.',
+            '1 · Add rooms used by your CSV.\n2 · Choose a CSV and validate it.\n3 · Check the date and entries, then confirm. Sessions open manually.',
           ),
           const SizedBox(height: 8),
           Wrap(
@@ -358,7 +367,11 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
           const Text(
             'Use one row per weekly period. Match the approved term, course, class, faculty email and room code. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as CS401-A-Mon-09.',
           ),
-          if (filename != null && selected != null) Text('Selected: $filename'),
+          if (filename != null && selected != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 8),
+              child: Text('Selected file: $filename'),
+            ),
           if (selected != null)
             FilledButton(
               onPressed: busy || termId == null ? null : upload,
@@ -377,7 +390,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
           if (preview?['status'] == 'ready') ...[
             const SizedBox(height: 12),
             Text(
-              '${rows.length} timetable entries validated',
+              '${rows.length} valid timetable ${rows.length == 1 ? 'entry' : 'entries'}',
               style: Theme.of(context).textTheme.titleMedium,
             ),
             for (final row in rows.take(12))

@@ -207,7 +207,12 @@ class _TeacherSessionsState extends State<TeacherSessions> {
               const SizedBox(height: 12),
               OutlinedButton(
                 onPressed: () => context.go('/sessions/${s['id']}'),
-                child: const Text('Open session details'),
+                child: Text(switch (s['status']) {
+                  'finalized' => 'View published attendance',
+                  'review_required' || 'no_data' => 'Review attendance',
+                  'open' => 'Continue session',
+                  _ => 'View session',
+                }),
               ),
             ],
           ),
@@ -236,7 +241,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   ResumableUpload? uploader;
   double? progress;
   Json? capture;
+  Future<Json>? captureStatusRequest;
+  String? captureStatusId;
   DateTime? recordedAt;
+  late final SessionExitGuard exitGuard;
   final reserve = Mutation(), complete = Mutation();
   Timer? poll;
   AppLifecycleListener? lifecycle;
@@ -245,6 +253,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     super.initState();
     services = ref.read(servicesProvider);
     institute = ref.read(authProvider).institute!;
+    exitGuard = ref.read(sessionExitGuardProvider)..enter(widget.id);
     camera.addListener(changed);
     lifecycle = AppLifecycleListener(
       onPause: () => camera.interrupt(),
@@ -255,6 +264,55 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   void changed() {
     if (mounted) setState(() {});
+  }
+
+  Future<Json> captureStatus(String id) {
+    if (captureStatusId != id || captureStatusRequest == null) {
+      captureStatusId = id;
+      captureStatusRequest = services.api.send(
+        'GET',
+        '/v1/captures/$id',
+        institute: institute,
+      );
+    }
+    return captureStatusRequest!;
+  }
+
+  void syncExitGuard() {
+    final rows = (data?['items'] as List?)?.cast<Json>() ?? const <Json>[];
+    exitGuard.dirty = decisions.entries.any(
+      (choice) => rows.any(
+        (row) =>
+            row['student_id'] == choice.key && row['status'] != choice.value,
+      ),
+    );
+  }
+
+  Future<void> refreshWithConfirmation() async {
+    syncExitGuard();
+    if (exitGuard.dirty) {
+      final discard = await showDialog<bool>(
+        context: context,
+        builder: (c) => AlertDialog(
+          title: const Text('Discard unsaved decisions?'),
+          content: const Text(
+            'Refreshing will discard your unsaved attendance choices.',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(c, false),
+              child: const Text('Stay'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(c, true),
+              child: const Text('Discard changes'),
+            ),
+          ],
+        ),
+      );
+      if (discard != true) return;
+    }
+    await load(discardChanges: true);
   }
 
   Future<void> load({bool discardChanges = false}) async {
@@ -270,6 +328,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         data = result;
         error = null;
         decisions.clear();
+        syncExitGuard();
+        captureStatusRequest = null;
       });
       poll?.cancel();
       if (result['session']['status'] == 'open' ||
@@ -293,6 +353,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       busy = true;
       error = null;
     });
+    exitGuard.busy = true;
     try {
       await fn();
     } catch (e) {
@@ -306,6 +367,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         );
       }
     } finally {
+      exitGuard.busy = false;
       if (mounted) setState(() => busy = false);
     }
   }
@@ -376,6 +438,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   Future<void> record() => action(() async {
     capture = null;
+    captureStatusRequest = null;
+    captureStatusId = null;
     reserve.reset();
     complete.reset();
     recordedAt = DateTime.now().toUtc();
@@ -457,6 +521,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       await commit();
     }
     capture!['status'] = 'queued';
+    captureStatusRequest = null;
     await camera.discard();
     await camera.interrupt();
     progress = null;
@@ -563,6 +628,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   @override
   void dispose() {
+    exitGuard.leave(widget.id);
     poll?.cancel();
     lifecycle?.dispose();
     uploader?.cancel();
@@ -611,7 +677,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           eyebrow: 'SESSION WORKSPACE',
           icon: Icons.videocam_outlined,
           action: OutlinedButton(
-            onPressed: busy ? null : () => load(discardChanges: true),
+            onPressed: busy ? null : refreshWithConfirmation,
             child: const Text('Refresh'),
           ),
         ),
@@ -622,7 +688,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             ),
           Semantics(
             liveRegion: true,
-            child: ErrorView(error!, retry: () => load(discardChanges: true)),
+            child: ErrorView(error!, retry: refreshWithConfirmation),
           ),
         ],
         Panel(
@@ -704,14 +770,12 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           ),
         if (capture != null)
           FutureBuilder<Json>(
-            future: services.api.send(
-              'GET',
-              '/v1/captures/${capture!['id']}',
-              institute: institute,
-            ),
+            future: captureStatus(capture!['id'] as String),
             builder: (c, snapshot) => Text(
               snapshot.hasData
                   ? 'Capture: ${snapshot.data!['status']}'
+                  : snapshot.hasError
+                  ? 'Capture status unavailable. Refresh this session to retry.'
                   : 'Checking capture status…',
             ),
           ),
@@ -738,6 +802,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 const SizedBox(height: 8),
                 if (editable)
                   DropdownButtonFormField<String>(
+                    isExpanded: true,
                     key: ValueKey('${row['student_id']}:${s['version']}'),
                     initialValue: decisions[row['student_id']] ?? row['status'],
                     decoration: const InputDecoration(
@@ -747,7 +812,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                       if (row['status'] == 'proposed_present')
                         const DropdownMenuItem(
                           value: 'proposed_present',
-                          child: Text('Suggested present — confirm'),
+                          child: Text(
+                            'Suggested present — confirm',
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       for (final status in [
                         'unassessed',
@@ -762,13 +830,16 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                             status == 'unassessed'
                                 ? 'Unassessed'
                                 : status[0].toUpperCase() + status.substring(1),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                     ],
                     onChanged: busy
                         ? null
-                        : (v) =>
-                              setState(() => decisions[row['student_id']] = v!),
+                        : (v) => setState(() {
+                            decisions[row['student_id']] = v!;
+                            syncExitGuard();
+                          }),
                   )
                 else
                   Text('Attendance: ${row['status']}'),
