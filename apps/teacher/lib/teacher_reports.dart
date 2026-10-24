@@ -28,13 +28,31 @@ class _TeacherReportsState extends State<TeacherReports> {
   final details = <String, Json>{};
   String? error;
   bool busy = false;
+  bool loading = true, foreground = true;
+  int generation = 0;
+  Future<void>? inFlight;
+  AppLifecycleListener? lifecycle;
   Timer? timer;
   @override
   void initState() {
     super.initState();
     unawaited(refresh());
+    lifecycle = AppLifecycleListener(
+      onHide: () => foreground = false,
+      onPause: () => foreground = false,
+      onResume: () {
+        foreground = true;
+        unawaited(refresh());
+      },
+    );
     timer = Timer.periodic(const Duration(seconds: 8), (_) {
-      if (reports.any((r) => ['queued', 'processing'].contains(r['status']))) {
+      if (foreground &&
+          (reports.any((r) => ['queued', 'processing'].contains(r['status'])) ||
+              details.values.any(
+                (r) => (r['deliveries'] as List? ?? []).any(
+                  (d) => ['queued', 'processing'].contains(d['status']),
+                ),
+              ))) {
         unawaited(refresh());
       }
     });
@@ -43,16 +61,44 @@ class _TeacherReportsState extends State<TeacherReports> {
   @override
   void didUpdateWidget(covariant TeacherReports oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.sessionVersion != widget.sessionVersion) unawaited(refresh());
+    if (oldWidget.sessionId != widget.sessionId ||
+        oldWidget.institute != widget.institute) {
+      generation++;
+      inFlight = null;
+      reports = [];
+      details.clear();
+      error = null;
+      unawaited(refresh());
+    } else if (oldWidget.sessionVersion != widget.sessionVersion) {
+      unawaited(refreshAfterCurrent());
+    }
   }
 
   @override
   void dispose() {
     timer?.cancel();
+    lifecycle?.dispose();
+    generation++;
     super.dispose();
   }
 
-  Future<void> refresh() async {
+  Future<void> refreshAfterCurrent() async {
+    await inFlight;
+    if (mounted) await refresh();
+  }
+
+  Future<void> refresh() {
+    if (inFlight != null) return inFlight!;
+    final current = ++generation;
+    final future = loadReports(current);
+    inFlight = future;
+    return future.whenComplete(() {
+      if (identical(inFlight, future)) inFlight = null;
+    });
+  }
+
+  Future<void> loadReports(int current) async {
+    setState(() => loading = true);
     try {
       final list = await widget.api.send(
         'GET',
@@ -60,8 +106,11 @@ class _TeacherReportsState extends State<TeacherReports> {
         institute: widget.institute,
       );
       final items = (list['items'] as List).cast<Json>();
+      if (!mounted || current != generation) return;
+      // Only published reports expose delivery actions and metadata.
+      final finals = items.where((r) => r['kind'] == 'final').toList();
       final metadata = await Future.wait(
-        items.map(
+        finals.map(
           (r) => widget.api.send(
             'GET',
             '/v1/reports/${r['id']}',
@@ -69,16 +118,27 @@ class _TeacherReportsState extends State<TeacherReports> {
           ),
         ),
       );
-      if (!mounted) return;
+      if (!mounted || current != generation) return;
       setState(() {
         reports = items;
-        for (var i = 0; i < items.length; i++) {
-          details[items[i]['id'] as String] = metadata[i];
+        details.clear();
+        for (var i = 0; i < finals.length; i++) {
+          details[finals[i]['id'] as String] = metadata[i];
         }
         error = null;
       });
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted && current == generation) {
+        setState(() {
+          error = e.toString();
+          if (e is AppFailure && [401, 403, 404].contains(e.status)) {
+            reports = [];
+            details.clear();
+          }
+        });
+      }
+    } finally {
+      if (mounted && current == generation) setState(() => loading = false);
     }
   }
 
@@ -90,7 +150,7 @@ class _TeacherReportsState extends State<TeacherReports> {
     });
     try {
       await job();
-      await refresh();
+      await refreshAfterCurrent();
     } catch (e) {
       if (mounted) setState(() => error = e.toString());
     } finally {
@@ -179,7 +239,7 @@ class _TeacherReportsState extends State<TeacherReports> {
           'Drafts follow closed sessions; final reports use the published attendance revision.',
         ),
         TextButton(
-          onPressed: busy ? null : refresh,
+          onPressed: busy || loading ? null : refresh,
           child: const Text('Refresh reports'),
         ),
         if (error != null)
@@ -190,7 +250,9 @@ class _TeacherReportsState extends State<TeacherReports> {
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-        if (reports.isEmpty && error == null)
+        if (loading)
+          const LinearProgressIndicator(semanticsLabel: 'Loading reports'),
+        if (reports.isEmpty && error == null && !loading)
           const Text('No reports yet. Close a session or publish attendance.'),
         for (final report in reports) ...[
           const Divider(),
@@ -198,7 +260,9 @@ class _TeacherReportsState extends State<TeacherReports> {
             '${report['kind'] == 'final' ? 'Published' : 'Draft'} · revision ${report['source_version']}',
             style: Theme.of(context).textTheme.titleMedium,
           ),
-          Text('Status: ${report['status']}'),
+          const SizedBox(height: 8),
+          StatusBadge(report['status']),
+          const SizedBox(height: 12),
           if (report['status'] == 'ready')
             Wrap(
               spacing: 8,

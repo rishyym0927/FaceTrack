@@ -1,11 +1,12 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 23 October 2026 (Asia/Kolkata)
+**Reviewed:** 24 October 2026 (Asia/Kolkata)
 **Deployment:** Mac FastAPI, loopback Redis, Celery solo CPU worker and outbound agent; hosted free Supabase Auth/PostgreSQL/private Storage. Teacher web 5300, Student web 5301, API 8000; Android uses USB forwarding. HTTPS API/cloud inference remain later.
 **Current:** Phase 3A account/class acceptance is complete. Code through classroom recognition, attendance publication, timetable CSV and private CSV/PDF report downloads is implemented. Hosted schema head 0006 has **36 forced-RLS business tables** and both private buckets are provisioned. API readiness returned 200. A real low-light classroom capture processed; its session was teacher-published at revision 1. The user confirmed both final report downloads open and a student sees their own published Present history. A live timetable import created one scheduled Monday session. Better-lit recognition and recovery checks remain; keep milestones 3B–7 open.
 **ML:** Independent prototype recognition acceptance remains **1/6 held-out cases**. No >95% accuracy, ≤2-second response, liveness or 20-class capacity claim. Frozen model/profile/source/lock/template receipt remains unchanged.
 **Repository:** Initial source and documentation are published on the public GitHub `origin/main` branch. The root README is a concise local startup guide; detailed spike instructions are in `docs/ML_SPIKE.md`. Private configuration, model weights, recordings and templates remain Git-ignored.
 **Active enhancement:** Student live pose guidance is implemented for Android and Chrome. The user confirmed Chrome guidance, and on the physical Samsung phone confirmed upright preview, matching left/right prompts and upright saved-video playback. These are capture observations, not identity/liveness/ML accuracy claims. Code review fixed sensor/device-aware preview rotation, browser outline alignment, an interrupted-start race and unsafe retake after upload begins. Capture 7/7, Student 3/3 and Teacher 6/6 tests plus Flutter analysis, Student web/Android builds and JS syntax check pass. Frozen ML receipt remains 16/16 unchanged. Full five-pose completion, no/two-face/low-light/denied-permission and resumable-upload acceptance with this feature remain open; active templates are untouched.
+**Application audit and presentation polish:** `docs/APPLICATION_REVIEW.md` is the issue register. The new deep-teal design now has responsive sign-in/header behavior, clearer class/enrolment/history/session/report hierarchy, semantic statuses and reduced-motion-aware transitions. Student history discards stale summaries and clears them on denied access. Teacher reports coalesce refreshes, discard switched-session results, skip draft detail fetches and pause background polling. No backend, worker, ML, schema or route change was made. Shared/capture/Student/Teacher analysis reports no issues; tests pass **20/7/4/8** respectively. Both configured release web builds and Android debug APKs pass. The existing Student web session's class/history pages were read-only inspected at phone width; the running preview predates the new release bundles, and full authenticated release visual/device acceptance remains open. No live participant data was changed during this review.
 
 Read `AGENTS.md`, `MASTER_DESIGN.md` (architecture authority), `ROADMAP.md` (milestone gates) and service/app READMEs. Preserve private settings and active enrolment; never stage ignored local data or model artifacts.
 
@@ -45,10 +46,7 @@ Synthetic PDF and rendered first page are ignored under `.local/reports/`; no st
 
 ## Exact next action
 
-0. With consenting participants, finish the full five-pose and no/two-face/low-light/denied-camera checks on Android and Chrome, then test one fresh upload/review without altering existing active templates until teacher approval. Verify 10–25-second stop, 25 MiB limit and recovery. Do not accept consent or approve identity/poses on the user's behalf.
-1. Use a fresh, better-lit session to retest both enrolled students; separately test absent, unknown and poor/no-face clips. Do not alter the frozen matching profile. The independent held-out 1/6 gate remains separate.
-2. Verify Teacher suggestion/Retry behavior and complete 3B lifecycle/recovery checks with controlled consenting data. Report contents were user-confirmed correct.
-3. Latest Teacher APK is installed and USB forwarding restored; its scheduled-session view is user-confirmed. Rehearse the complete flow twice and keep the first active enrolment intact. Email remains disabled until a permitted Resend sender is available.
+Review the newly built Student and Teacher authenticated release UI on web and an idle physical phone at narrow/desktop widths, then rehearse the presentation flow without changing accepted biometric data. Continue the separately open better-lit and negative recognition cases, 3B recovery checks, and permitted email setup when participants/provider access are available. Do not claim recognition accuracy or device acceptance from this UI audit.
 
 ## Run and privacy notes
 

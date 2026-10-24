@@ -11,6 +11,8 @@ void main() {
   testWidgets(
     'Consent is explicit before capture and processing cannot start another upload',
     (tester) async {
+      await tester.binding.setSurfaceSize(const Size(800, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
       SharedPreferences.setMockInitialValues({});
       final h = (await tester.runAsync(() => harness()))!;
       addTearDown(() => tester.runAsync(h.dispose));
@@ -101,7 +103,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Face enrolment active'), findsOneWidget);
       expect(find.text('Record guided video'), findsNothing);
-      await tester.ensureVisible(find.text('Replace recording'));
+      await tester.drag(find.byType(ListView), const Offset(0, -250));
       await tester.tap(find.text('Replace recording'));
       await tester.pumpAndSettle();
       expect(find.text('Record guided video'), findsOneWidget);

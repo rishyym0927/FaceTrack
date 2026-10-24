@@ -171,6 +171,8 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
       PageHeader(
         title: 'Your attendance classes',
         subtitle: 'Manage class membership and student requests.',
+        eyebrow: 'TEACHER WORKSPACE',
+        icon: Icons.space_dashboard_outlined,
         action: Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -194,18 +196,61 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
         emptyMessage:
             'Create an attendance class or ask your institute to assign one.',
         item: (Offering o) => Panel(
+          accent: true,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(o.title, style: Theme.of(context).textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(o.subtitle),
-              const SizedBox(height: 8),
-              Text(o.termCode),
-              const SizedBox(height: 20),
-              OutlinedButton.icon(
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary
+                          .withValues(alpha: .08),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.class_outlined,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          o.title,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          o.subtitle,
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                o.termCode,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 16),
+              FilledButton.icon(
                 onPressed: () => open(o.id),
-                icon: const Icon(Icons.arrow_forward),
+                icon: const Icon(Icons.arrow_forward_rounded),
                 label: const Text('Manage class'),
               ),
             ],
@@ -472,8 +517,11 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             ),
           ),
           PageHeader(
+            compact: true,
             title: o.title,
             subtitle: '${o.subtitle} · ${o.termCode}',
+            eyebrow: 'TEACHER WORKSPACE',
+            icon: Icons.space_dashboard_outlined,
             action: Wrap(
               spacing: 8,
               runSpacing: 8,
@@ -491,41 +539,52 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
               ],
             ),
           ),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              ChoiceChip(
-                label: const Text('Sessions'),
-                selected: tab == 3,
-                onSelected: (_) => setState(() => tab = 3),
-              ),
-              ChoiceChip(
-                label: const Text('Join requests'),
-                selected: tab == 0,
-                onSelected: (_) => setState(() => tab = 0),
-              ),
-              ChoiceChip(
-                label: const Text('Face reviews'),
-                selected: tab == 2,
-                onSelected: (_) => setState(() => tab = 2),
-              ),
-              ChoiceChip(
-                label: const Text('Students'),
-                selected: tab == 1,
-                onSelected: (_) => setState(() => tab = 1),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          Text(
-            tab == 3
-                ? 'Create a session, capture the classroom and review attendance before publishing.'
-                : tab == 2
-                ? 'Review each recording before activating face enrolment. Class membership is approved separately.'
-                : tab == 0
-                ? 'Approve requests only after confirming the student belongs in this class.'
-                : 'These approved students can be included when a classroom session opens.',
+          Panel(
+            padding: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    ChoiceChip(
+                      label: const Text('Sessions'),
+                      selected: tab == 3,
+                      onSelected: (_) => setState(() => tab = 3),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Join requests'),
+                      selected: tab == 0,
+                      onSelected: (_) => setState(() => tab = 0),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Face reviews'),
+                      selected: tab == 2,
+                      onSelected: (_) => setState(() => tab = 2),
+                    ),
+                    ChoiceChip(
+                      label: const Text('Students'),
+                      selected: tab == 1,
+                      onSelected: (_) => setState(() => tab = 1),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  tab == 3
+                      ? 'Create a session, capture the classroom and review attendance before publishing.'
+                      : tab == 2
+                      ? 'Review each recording before activating face enrolment. Class membership is approved separately.'
+                      : tab == 0
+                      ? 'Approve requests only after confirming the student belongs in this class.'
+                      : 'These approved students can be included when a classroom session opens.',
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
           ),
           const SizedBox(height: 20),
           if (tab == 3)

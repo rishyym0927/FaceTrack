@@ -426,6 +426,8 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
           title: 'Face enrolment',
           subtitle:
               'Record once, then ask your teacher to verify your identity.',
+          eyebrow: 'STUDENT SPACE',
+          icon: Icons.face_retouching_natural_outlined,
           action: OutlinedButton.icon(
             onPressed: busy ? null : load,
             icon: const Icon(Icons.refresh),
@@ -502,7 +504,15 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  biometricStatus(a.status),
+                  state!.active &&
+                          [
+                            'expired',
+                            'cancelled',
+                            'rejected',
+                            'failed',
+                          ].contains(a.status)
+                      ? 'Replacement ${biometricStatus(a.status).toLowerCase()}'
+                      : biometricStatus(a.status),
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 if (a.reason != null) ...[
@@ -771,9 +781,13 @@ class EnrolmentSteps extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 12),
-        LinearProgressIndicator(
-          value: (current + 1) / labels.length,
-          semanticsLabel: 'Face enrolment progress',
+        ClipRRect(
+          borderRadius: BorderRadius.circular(100),
+          child: LinearProgressIndicator(
+            value: (current + 1) / labels.length,
+            minHeight: 7,
+            semanticsLabel: 'Face enrolment progress',
+          ),
         ),
         const SizedBox(height: 12),
         Wrap(
@@ -781,10 +795,23 @@ class EnrolmentSteps extends StatelessWidget {
           runSpacing: 8,
           children: List.generate(
             labels.length,
-            (i) => Text(
-              '${i < current ? '✓' : '${i + 1}.'} ${labels[i]}',
-              style: TextStyle(
-                fontWeight: i == current ? FontWeight.w600 : FontWeight.normal,
+            (i) => Container(
+              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+              decoration: BoxDecoration(
+                color: i == current
+                    ? Theme.of(context).colorScheme.primary
+                          .withValues(alpha: .10)
+                    : Theme.of(context).colorScheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(100),
+              ),
+              child: Text(
+                '${i < current ? '✓' : '${i + 1}.'} ${labels[i]}',
+                style: TextStyle(
+                  color: i == current
+                      ? Theme.of(context).colorScheme.primary
+                      : Theme.of(context).colorScheme.onSurfaceVariant,
+                  fontWeight: i == current ? FontWeight.w700 : FontWeight.w500,
+                ),
               ),
             ),
           ),

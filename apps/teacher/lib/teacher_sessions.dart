@@ -604,9 +604,12 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           label: const Text('Back to class'),
         ),
         PageHeader(
+          compact: true,
           title: 'Attendance session',
           subtitle:
               '${sessionDate(context, s['starts_at'])} · ${sessionLabel(s['status'])}',
+          eyebrow: 'SESSION WORKSPACE',
+          icon: Icons.videocam_outlined,
           action: OutlinedButton(
             onPressed: busy ? null : () => load(discardChanges: true),
             child: const Text('Refresh'),

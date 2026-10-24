@@ -5,54 +5,126 @@ import 'api.dart';
 
 ThemeData appTheme() {
   const primary = Color(0xff176451),
-      ink = Color(0xff172d27),
-      border = Color(0xffdfe6e2);
+      ink = Color(0xff17322a),
+      muted = Color(0xff587067),
+      border = Color(0xffdce7e1),
+      canvas = Color(0xfff2f6f4);
   return ThemeData(
     useMaterial3: true,
-    colorScheme: ColorScheme.fromSeed(
-      seedColor: primary,
-      brightness: Brightness.light,
-    ).copyWith(primary: primary, surface: Colors.white, onSurface: ink),
-    scaffoldBackgroundColor: const Color(0xfff5f7f5),
+    colorScheme:
+        ColorScheme.fromSeed(
+          seedColor: primary,
+          brightness: Brightness.light,
+        ).copyWith(
+          primary: primary,
+          onPrimary: Colors.white,
+          surface: Colors.white,
+          onSurface: ink,
+          onSurfaceVariant: muted,
+          outline: border,
+          surfaceContainerLowest: canvas,
+        ),
+    scaffoldBackgroundColor: canvas,
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      centerTitle: false,
+      shape: Border(bottom: BorderSide(color: border)),
     ),
     cardTheme: CardThemeData(
-      elevation: 0,
+      elevation: 1,
+      shadowColor: const Color(0xff133d35).withValues(alpha: .08),
       color: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(12),
+        borderRadius: BorderRadius.circular(20),
         side: const BorderSide(color: border),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
       filled: true,
       fillColor: Colors.white,
       contentPadding: const EdgeInsets.all(16),
     ),
     filledButtonTheme: FilledButtonThemeData(
-      style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+      style: FilledButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
-      style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+      style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+        side: const BorderSide(color: border),
+        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+      ),
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+    ),
+    navigationBarTheme: NavigationBarThemeData(
+      height: 72,
+      backgroundColor: Colors.white,
+      elevation: 0,
+      indicatorColor: const Color(0xffdcefe5),
+      labelTextStyle: WidgetStateProperty.all(
+        const TextStyle(fontSize: 12, fontWeight: FontWeight.w600),
+      ),
+    ),
+    navigationRailTheme: const NavigationRailThemeData(
+      backgroundColor: Colors.white,
+      indicatorColor: Color(0xffdcefe5),
+      elevation: 0,
+    ),
+    chipTheme: ChipThemeData(
+      backgroundColor: Colors.white,
+      selectedColor: const Color(0xffdcefe5),
+      side: const BorderSide(color: border),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
     ),
     visualDensity: VisualDensity.standard,
   );
 }
 
 class Panel extends StatelessWidget {
-  const Panel({super.key, required this.child, this.padding = 24});
+  const Panel({
+    super.key,
+    required this.child,
+    this.padding = 24,
+    this.accent = false,
+  });
   final Widget child;
   final double padding;
+  final bool accent;
   @override
   Widget build(BuildContext context) => Card(
     margin: EdgeInsets.zero,
-    child: Padding(padding: EdgeInsets.all(padding), child: child),
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(20),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (accent)
+            Container(
+              height: 5,
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  colors: [Color(0xff146653), Color(0xffa9d78c)],
+                ),
+              ),
+            ),
+          Padding(padding: EdgeInsets.all(padding), child: child),
+        ],
+      ),
+    ),
   );
 }
 
@@ -62,42 +134,146 @@ class PageHeader extends StatelessWidget {
     required this.title,
     required this.subtitle,
     this.action,
+    this.eyebrow,
+    this.icon = Icons.auto_awesome_outlined,
+    this.compact = false,
   });
   final String title, subtitle;
   final Widget? action;
+  final String? eyebrow;
+  final IconData icon;
+  final bool compact;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 24),
-    child: LayoutBuilder(
-      builder: (context, c) {
-        final text = Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              title,
-              style: Theme.of(context).textTheme.headlineMedium
-                  ?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 8),
-            Text(subtitle, style: Theme.of(context).textTheme.bodyLarge),
-          ],
-        );
-        if (c.maxWidth < 600)
-          return Column(
+    child: ClipRRect(
+      borderRadius: BorderRadius.circular(24),
+      child: LayoutBuilder(
+        builder: (context, c) {
+          final stacked =
+              c.maxWidth < 900 ||
+              MediaQuery.textScalerOf(context).scale(1) > 1.3;
+          final text = Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              text,
-              if (action != null) ...[const SizedBox(height: 16), action!],
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, color: const Color(0xffb9e9af), size: 17),
+                  const SizedBox(width: 8),
+                  Flexible(
+                    child: Text(
+                      (eyebrow ?? 'FACETRACK').toUpperCase(),
+                      style: const TextStyle(
+                        color: Color(0xffc8e9dd),
+                        fontSize: 11,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 2,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style:
+                    (compact || stacked
+                            ? Theme.of(context).textTheme.headlineMedium
+                            : Theme.of(context).textTheme.headlineLarge)
+                        ?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: -1.1,
+                          color: Colors.white,
+                        ),
+              ),
+              const SizedBox(height: 10),
+              Text(
+                subtitle,
+                style: Theme.of(context).textTheme.bodyLarge
+                    ?.copyWith(color: const Color(0xffd5e9e2), height: 1.5),
+              ),
             ],
           );
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Expanded(child: text),
-            if (action != null) action!,
-          ],
-        );
-      },
+          final actionSurface = action == null
+              ? null
+              : Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(17),
+                  ),
+                  child: action,
+                );
+          return Stack(
+            children: [
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: const BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Color(0xff102f32),
+                        Color(0xff145d54),
+                        Color(0xff218772),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: -38,
+                top: -105,
+                child: Container(
+                  width: 290,
+                  height: 290,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white24, width: 1),
+                  ),
+                ),
+              ),
+              Positioned(
+                right: 40,
+                top: -28,
+                child: Container(
+                  width: 175,
+                  height: 175,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white12, width: 1),
+                  ),
+                ),
+              ),
+              Padding(
+                padding: EdgeInsets.all(compact || stacked ? 20 : 34),
+                child: stacked
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          text,
+                          if (actionSurface != null) ...[
+                            const SizedBox(height: 22),
+                            actionSurface,
+                          ],
+                        ],
+                      )
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Expanded(child: text),
+                          if (actionSurface != null) ...[
+                            const SizedBox(width: 24),
+                            actionSurface,
+                          ],
+                        ],
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
     ),
   );
 }
@@ -108,22 +284,54 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (status) {
-      'active' => const Color(0xff176451),
-      'requested' => const Color(0xff805500),
-      'rejected' => const Color(0xffa22f2f),
+      'active' || 'ready' || 'present' => const Color(0xff176451),
+      'requested' ||
+      'queued' ||
+      'processing' ||
+      'late' => const Color(0xff805500),
+      'rejected' || 'failed' || 'absent' => const Color(0xffa22f2f),
       _ => const Color(0xff465650),
     };
+    final label = switch (status) {
+      'ready' => 'Ready to download',
+      'queued' => 'Queued',
+      'processing' => 'Processing',
+      'failed' => 'Needs attention',
+      'present' => 'Present',
+      'late' => 'Late',
+      'absent' => 'Absent',
+      'excused' => 'Excused',
+      'unassessed' => 'Unassessed',
+      _ => statusLabel(status),
+    };
     return Semantics(
-      label: 'Status: ' + statusLabel(status),
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.09),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: Text(
-          statusLabel(status),
-          style: TextStyle(color: color, fontWeight: FontWeight.w600),
+      label: 'Status: $label',
+      child: ExcludeSemantics(
+        child: AnimatedContainer(
+          duration: MediaQuery.disableAnimationsOf(context)
+              ? Duration.zero
+              : const Duration(milliseconds: 180),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(100),
+            border: Border.all(color: color.withValues(alpha: 0.16)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 7,
+                height: 7,
+                decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                label,
+                style: TextStyle(color: color, fontWeight: FontWeight.w700),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -146,7 +354,19 @@ class MessageView extends StatelessWidget {
     child: Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Icon(icon, size: 36, color: Theme.of(context).colorScheme.primary),
+        Container(
+          width: 64,
+          height: 64,
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.primary.withValues(alpha: .08),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Icon(
+            icon,
+            size: 30,
+            color: Theme.of(context).colorScheme.primary,
+          ),
+        ),
         const SizedBox(height: 16),
         Text(
           title,
@@ -154,7 +374,13 @@ class MessageView extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 8),
-        Text(message, textAlign: TextAlign.center),
+        Text(
+          message,
+          textAlign: TextAlign.center,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
         if (action != null) ...[const SizedBox(height: 20), action!],
       ],
     ),
@@ -244,41 +470,58 @@ class PagedList<T> extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: controller,
     builder: (context, _) {
-      if (controller.loading && controller.items.isEmpty)
-        return const Padding(
+      late final Widget content;
+      if (controller.loading && controller.items.isEmpty) {
+        content = const Padding(
+          key: ValueKey('loading'),
           padding: EdgeInsets.all(48),
           child: Center(child: CircularProgressIndicator()),
         );
-      if (controller.error != null && controller.items.isEmpty)
-        return ErrorView(controller.error!, retry: () => controller.load());
-      if (controller.items.isEmpty)
-        return MessageView(
+      } else if (controller.error != null && controller.items.isEmpty) {
+        content = KeyedSubtree(
+          key: const ValueKey('error'),
+          child: ErrorView(controller.error!, retry: () => controller.load()),
+        );
+      } else if (controller.items.isEmpty) {
+        content = MessageView(
+          key: const ValueKey('empty'),
           title: emptyTitle,
           message: emptyMessage,
           icon: Icons.groups_outlined,
         );
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (controller.loading) const LinearProgressIndicator(),
-          for (final value in controller.items)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 12),
-              child: item(value),
-            ),
-          if (controller.error != null)
-            ErrorView(controller.error!, retry: () => controller.retry()),
-          if (controller.cursor != null)
-            Align(
-              alignment: Alignment.center,
-              child: OutlinedButton(
-                onPressed: controller.loading
-                    ? null
-                    : () => controller.load(reset: false),
-                child: const Text('Load more'),
+      } else {
+        content = Column(
+          key: const ValueKey('items'),
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (controller.loading) const LinearProgressIndicator(),
+            for (final value in controller.items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: item(value),
               ),
-            ),
-        ],
+            if (controller.error != null)
+              ErrorView(controller.error!, retry: () => controller.retry()),
+            if (controller.cursor != null)
+              Align(
+                alignment: Alignment.center,
+                child: OutlinedButton(
+                  onPressed: controller.loading
+                      ? null
+                      : () => controller.load(reset: false),
+                  child: const Text('Load more'),
+                ),
+              ),
+          ],
+        );
+      }
+      return AnimatedSwitcher(
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 220),
+        switchInCurve: Curves.easeOutCubic,
+        switchOutCurve: Curves.easeInCubic,
+        child: content,
       );
     },
   );

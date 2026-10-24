@@ -17,23 +17,33 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
   late final String institute;
   late final PagedController<Json> controller;
   Json? summary;
+  int summaryGeneration = 0;
   @override
   void initState() {
     super.initState();
     api = ref.read(servicesProvider).api;
     institute = ref.read(authProvider).institute!;
     controller = PagedController((cursor) async {
-      final result = await api.send(
-        'GET',
-        '/v1/me/attendance',
-        institute: institute,
-        query: {
-          'offering_id': widget.offering,
-          'cursor': ?cursor,
-        },
-      );
-      summary = result['summary'];
-      return PageData.fromJson(result, (j) => j);
+      final current = ++summaryGeneration;
+      try {
+        final result = await api.send(
+          'GET',
+          '/v1/me/attendance',
+          institute: institute,
+          query: {'offering_id': widget.offering, 'cursor': ?cursor},
+        );
+        if (mounted && current == summaryGeneration) {
+          summary = result['summary'];
+        }
+        return PageData.fromJson(result, (j) => j);
+      } on AppFailure catch (e) {
+        if (mounted &&
+            current == summaryGeneration &&
+            [401, 403, 404].contains(e.status)) {
+          summary = null;
+        }
+        rethrow;
+      }
     });
     controller.load();
     watchLifecycle();
@@ -57,8 +67,11 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         label: const Text('Your classes'),
       ),
       PageHeader(
+        compact: true,
         title: 'Your published attendance',
         subtitle: 'Only teacher-published decisions appear here. Processing suggestions are not final attendance.',
+        eyebrow: 'ATTENDANCE HISTORY',
+        icon: Icons.fact_check_outlined,
         action: OutlinedButton(
           onPressed: () => controller.load(),
           child: const Text('Refresh'),
@@ -68,11 +81,39 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         animation: controller,
         builder: (c, _) => summary == null
             ? const SizedBox()
-            : Panel(
-                child: Text(
-                  summary!['percentage'] == null
-                      ? 'No assessed sessions yet. Unassessed and excused results do not count toward a percentage.'
-                      : '${(summary!['percentage'] as num).toStringAsFixed(1)}% · ${summary!['present_or_late']} present or late / ${summary!['assessed']} assessed · ${summary!['unassessed']} unassessed',
+            : Padding(
+                padding: const EdgeInsets.only(bottom: 20),
+                child: Panel(
+                  accent: true,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Published attendance overview',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                      const SizedBox(height: 12),
+                      if (summary!['percentage'] != null) ...[
+                        Text(
+                          '${(summary!['percentage'] as num).toStringAsFixed(1)}%',
+                          style: Theme.of(context).textTheme.displaySmall
+                              ?.copyWith(
+                                fontWeight: FontWeight.w800,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          '${summary!['present_or_late']} present or late · ${summary!['assessed']} assessed · ${summary!['unassessed']} unassessed',
+                        ),
+                      ] else
+                        const Text('No assessed sessions yet.'),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Unassessed and excused results are excluded from the percentage.',
+                      ),
+                    ],
+                  ),
                 ),
               ),
       ),
@@ -90,10 +131,9 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                 Text(
                   '${l.formatMediumDate(d)} · ${l.formatTimeOfDay(TimeOfDay.fromDateTime(d))}',
                 ),
-                Text(
-                  '${r['status'][0].toUpperCase()}${r['status'].substring(1)}',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
+                const SizedBox(height: 12),
+                StatusBadge(r['status']),
+                const SizedBox(height: 12),
                 Text('Publication revision ${r['revision']}'),
                 if (r['reason'] != null) Text('Teacher note: ${r['reason']}'),
               ],

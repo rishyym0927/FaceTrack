@@ -87,6 +87,8 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
       PageHeader(
         title: 'Your attendance classes',
         subtitle: 'Join a class and follow your membership requests.',
+        eyebrow: 'STUDENT SPACE',
+        icon: Icons.school_outlined,
         action: Wrap(
           spacing: 8,
           runSpacing: 8,
@@ -110,20 +112,60 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
         emptyMessage:
             'Enter a join code from your teacher to request membership.',
         item: (Enrollment e) => Panel(
+          accent: true,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(
-                e.offering!.title,
-                style: Theme.of(context).textTheme.titleLarge,
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Container(
+                    width: 44,
+                    height: 44,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary
+                          .withValues(alpha: .08),
+                      borderRadius: BorderRadius.circular(14),
+                    ),
+                    child: Icon(
+                      Icons.menu_book_outlined,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                  ),
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          e.offering!.title,
+                          style: Theme.of(context).textTheme.titleLarge
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          e.offering!.subtitle,
+                          style: TextStyle(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
-              const SizedBox(height: 8),
-              Text(e.offering!.subtitle),
-              const SizedBox(height: 8),
-              Text(e.offering!.termCode),
               const SizedBox(height: 16),
+              Text(
+                e.offering!.termCode,
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: 12),
               StatusBadge(e.status),
-              const SizedBox(height: 8),
+              const SizedBox(height: 12),
               Text(switch (e.status) {
                 'requested' => 'Your teacher needs to approve this request. You do not need to send it again.',
                 'active' => 'Your class membership is approved. Face enrolment is reviewed separately.',
@@ -136,9 +178,10 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
               if (e.status == 'active')
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
-                  child: OutlinedButton(
+                  child: OutlinedButton.icon(
                     onPressed: () => context.go('/classes/${e.offeringId}'),
-                    child: const Text('View published attendance'),
+                    icon: const Icon(Icons.arrow_forward),
+                    label: const Text('View attendance'),
                   ),
                 ),
               if (['rejected', 'withdrawn'].contains(e.status))

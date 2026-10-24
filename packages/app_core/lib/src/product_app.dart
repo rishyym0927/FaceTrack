@@ -143,7 +143,11 @@ class _ProductAppState extends ConsumerState<ProductApp> {
                 builder: (c, s) => widget.enrollmentBuilder!(c),
               ),
             if (widget.sessionBuilder != null)
-              GoRoute(path: '/sessions/:id',builder: (c,s)=>widget.sessionBuilder!(c,s.pathParameters['id']!)),
+              GoRoute(
+                path: '/sessions/:id',
+                builder: (c, s) =>
+                    widget.sessionBuilder!(c, s.pathParameters['id']!),
+              ),
             if (widget.detailBuilder != null)
               GoRoute(
                 path: '/classes/:id',
@@ -210,12 +214,35 @@ class ProductShell extends StatelessWidget {
           final wide = c.maxWidth >= 800;
           return Scaffold(
             appBar: AppBar(
-              title: Text(
-                config.title,
-                style: const TextStyle(
-                  fontSize: 19,
-                  fontWeight: FontWeight.w600,
-                ),
+              title: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Container(
+                    width: 34,
+                    height: 34,
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.primary,
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    child: const Icon(
+                      Icons.center_focus_strong,
+                      color: Colors.white,
+                      size: 21,
+                    ),
+                  ),
+                  const SizedBox(width: 11),
+                  Flexible(
+                    child: Text(
+                      config.title,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ),
+                ],
               ),
               actions: [
                 if (auth.instituteName.isNotEmpty)
@@ -227,6 +254,10 @@ class ProductShell extends StatelessWidget {
                         auth.instituteName,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          fontSize: 12,
+                        ),
                       ),
                     ),
                   ),
@@ -310,7 +341,10 @@ class ContentPage extends StatelessWidget {
   final List<Widget> children;
   @override
   Widget build(BuildContext context) => ListView(
-    padding: const EdgeInsets.all(24),
+    padding: EdgeInsets.symmetric(
+      horizontal: MediaQuery.sizeOf(context).width < 600 ? 16 : 32,
+      vertical: MediaQuery.sizeOf(context).width < 600 ? 20 : 32,
+    ),
     children: [
       Center(
         child: ConstrainedBox(
@@ -338,44 +372,136 @@ class AuthFrame extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
     body: SafeArea(
       child: LayoutBuilder(
-        builder: (context, c) => SingleChildScrollView(
-          padding: const EdgeInsets.all(24),
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              minHeight: (c.maxHeight - 48).clamp(0, double.infinity),
+        builder: (context, c) {
+          final wide = c.maxWidth >= 900;
+          final brand = Container(
+            padding: const EdgeInsets.all(36),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(28),
+              gradient: const LinearGradient(
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+                colors: [
+                  Color(0xff102f32),
+                  Color(0xff146b59),
+                  Color(0xff26947a),
+                ],
+              ),
             ),
-            child: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 440),
-                child: Panel(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Align(
-                        alignment: Alignment.centerLeft,
-                        child: Icon(
-                          Icons.fact_check_outlined,
-                          size: 40,
-                          color: Theme.of(context).colorScheme.primary,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                const Row(
+                  children: [
+                    Icon(
+                      Icons.center_focus_strong,
+                      color: Colors.white,
+                      size: 30,
+                    ),
+                    SizedBox(width: 12),
+                    Flexible(
+                      child: Text(
+                        'FaceTrack',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 23,
+                          fontWeight: FontWeight.w800,
                         ),
                       ),
-                      const SizedBox(height: 24),
-                      Text(
-                        title,
-                        style: Theme.of(context).textTheme.headlineMedium,
-                      ),
-                      const SizedBox(height: 8),
-                      Text(subtitle),
-                      const SizedBox(height: 28),
-                      child,
-                    ],
+                    ),
+                  ],
+                ),
+                if (wide) ...[
+                  const SizedBox(height: 80),
+                  const Icon(
+                    Icons.auto_awesome_outlined,
+                    color: Color(0xffbbe9af),
+                    size: 44,
                   ),
+                  const SizedBox(height: 24),
+                  const Text(
+                    'Attendance, with clarity.',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 36,
+                      fontWeight: FontWeight.w800,
+                      height: 1.1,
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    'A calmer way to manage classes, enrolment and attendance.',
+                    style: TextStyle(
+                      color: Color(0xffd5e9e2),
+                      fontSize: 16,
+                      height: 1.5,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          );
+          final form = ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 460),
+            child: Panel(
+              padding: wide ? 40 : 26,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -.7,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Text(
+                    subtitle,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      height: 1.5,
+                    ),
+                  ),
+                  const SizedBox(height: 30),
+                  child,
+                ],
+              ),
+            ),
+          );
+          return SingleChildScrollView(
+            padding: EdgeInsets.all(wide ? 28 : 18),
+            child: ConstrainedBox(
+              constraints: BoxConstraints(
+                minHeight: (c.maxHeight - (wide ? 56 : 36)).clamp(
+                  0,
+                  double.infinity,
+                ),
+              ),
+              child: Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 1100),
+                  child: wide
+                      ? Row(
+                          children: [
+                            Expanded(child: brand),
+                            const SizedBox(width: 28),
+                            Expanded(child: form),
+                          ],
+                        )
+                      : Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [brand, const SizedBox(height: 16), form],
+                        ),
                 ),
               ),
             ),
-          ),
-        ),
+          );
+        },
       ),
     ),
   );
