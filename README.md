@@ -5,6 +5,7 @@ Student and Teacher Flutter apps for human-reviewed, face-assisted attendance. T
 ## Choose your platform
 
 - **Windows:** follow the beginner-friendly [Windows setup](docs/WINDOWS_SETUP.md), then run `.\scripts\windows\start-demo.ps1`.
+- **Nontechnical Windows handoff:** give the client the [Claude setup prompt](docs/CLIENT_WINDOWS_HANDOFF.md) plus the private configuration package through a secure channel.
 - **macOS (configured demo machine):** use the six commands below.
 
 Private configuration, permitted model files and controlled accounts are intentionally absent from Git. A fresh clone cannot run real face processing until an authorized operator provisions them.
