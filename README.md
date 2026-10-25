@@ -1,6 +1,6 @@
 # FaceTrack
 
-Student and Teacher Flutter apps for human-reviewed, face-assisted attendance. The verified demo uses a **Mac-hosted FastAPI/Redis/Celery CPU worker**, a computer or phone camera, and a **free Supabase development project** for Auth, PostgreSQL and private Storage. Windows is supported through native Flutter plus Docker Desktop Linux containers. Teacher web runs on **5300**, Student web on **5301**, and the API on **8000**. This is a local demo, not an institute deployment.
+Student and Teacher Flutter apps for human-reviewed, face-assisted attendance. The verified demo uses a **Mac-hosted FastAPI/Redis/Celery CPU worker**, a computer or phone camera, and a **free Supabase development project** for Auth, PostgreSQL and private Storage. The implemented Windows path uses native Flutter plus Docker Desktop Linux containers; its physical-host acceptance remains pending. Teacher web runs on **5300**, Student web on **5301**, and the API on **8000**. This is a local demo, not an institute deployment.
 
 ## Choose your platform
 

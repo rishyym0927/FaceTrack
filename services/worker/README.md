@@ -6,7 +6,7 @@ The verified demo uses one CPU slot on the Mac for enrolment, classroom recognit
 
 Windows users should use [the root Windows guide](../../docs/WINDOWS_SETUP.md). Celery is not supported as a dependable native Windows worker, so `compose.windows.yaml` runs Celery and Redis on Linux while Flutter remains native.
 
-Use this service's Python 3.11 `.venv` and `uv.lock`, leaving the root ML environment/lock untouched. Provisioning is described in `../api/README.md`; existing private `.env` and root `.local/enrollment/redis.conf` are already configured. Never print either file. The worker receives a scoped token, local broker URL and verified model/profile paths, never database credentials or the Storage secret. Its token expires 30 days after provisioning; revocation/reprovisioning is an operator action.
+For the verified macOS path, use this service's Python 3.11 `.venv` and `uv.lock`, leaving the root ML environment/lock untouched. Provisioning is described in `../api/README.md`; existing private `.env` and root `.local/enrollment/redis.conf` are already configured. Never print either file. The worker receives a scoped token, local broker URL and verified model/profile paths, never database credentials or the Storage secret. Its token expires 30 days after provisioning; revocation/reprovisioning is an operator action.
 
 From the repository root, start Redis in a dedicated terminal:
 
@@ -32,7 +32,7 @@ The API authorizes a short-lived input download. The worker checks origin, size 
 
 Timetable jobs parse the exact bounded UTF-8 CSV and the API validates academic references/overlaps. Report jobs receive an immutable publication snapshot, render bounded CSV/PDF with pandas/ReportLab, and return bytes to the API; only the API writes private Storage artifacts. Optional Resend delivery uses the API's secret and a verified faculty recipient; no email provider is configured now. Keep a single worker slot for the USB demo and measure actual throughput before claiming institute capacity.
 
-Temporary files use private managed directories and are removed on completion/failure. Abandoned owned directories are reconciled at startup/periodically. Storage cleanup runs on agent startup and every minute while awake, removing decided/expired recordings and reconciling late uploads through signed-grant expiry. Sleeping/offline Mac infrastructure delays cleanup. The agent emits a sanitized backlog warning; investigate rather than claim a continuous retention guarantee.
+Temporary files use private managed directories and are removed on completion/failure. Abandoned owned directories are reconciled at startup/periodically. Storage cleanup runs on agent startup and every minute while awake, removing decided/expired recordings and reconciling late uploads through signed-grant expiry. A sleeping/offline development computer delays cleanup. The agent emits a sanitized backlog warning; investigate rather than claim a continuous retention guarantee.
 
 ## Verification
 
@@ -40,4 +40,4 @@ Temporary files use private managed directories and are removed on completion/fa
 .venv/bin/python -m pytest tests -q
 ```
 
-Five worker tests exercise real FFmpeg on synthetic rotated/audio/corrupt inputs and deterministic timetable/report output. They do not validate participant recognition. Backend lifecycle tests separately cover leases, duplicate effects, consent/replacement/revocation, ownership, timetable conflicts and reports. Record actual fresh-device processing and human teacher decisions before completing any attendance milestone. Model permissions remain limited to the approved non-commercial academic experiment.
+Seven worker tests exercise real FFmpeg on synthetic rotated/audio/corrupt inputs, deterministic timetable/report output and the restricted container-network configuration. They do not validate participant recognition. Backend lifecycle tests separately cover leases, duplicate effects, consent/replacement/revocation, ownership, timetable conflicts and reports. Record actual fresh-device processing and human teacher decisions before completing any attendance milestone. Model permissions remain limited to the approved non-commercial academic experiment.

@@ -32,7 +32,7 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\scripts\windows\setup.ps1
 ```
 
-The setup script downloads locked Flutter packages, creates safe configuration templates, and builds the Linux service images. It does not download private model weights or invent credentials.
+The first build needs internet access and can take several minutes. The setup script downloads locked Flutter packages, creates safe configuration templates, and builds the Linux service images. It does not download private model weights or invent credentials.
 
 ## 3. Add private configuration
 
@@ -59,6 +59,14 @@ For example, the hidden Auth-key prompt is:
 ```powershell
 docker compose -f compose.windows.yaml run --rm api /opt/venv/bin/python -m tools.configure_auth
 ```
+
+For the migration command, replace `.venv/bin/alembic` with:
+
+```powershell
+docker compose -f compose.windows.yaml run --rm api /opt/venv/bin/alembic upgrade head
+```
+
+Run one provisioning command at a time. Each new container reloads changes written to the ignored host `.env` and `.local` files. Commands in the backend guide that reference `../../.local` continue to work because the container starts in `services/api` and mounts the repository at `/workspace`.
 
 Provisioning is an operator task. Do not rerun seeding or worker provisioning for the existing demo project.
 
@@ -108,7 +116,7 @@ flutter run -d PHONE_DEVICE_ID --dart-define-from-file=..\..\.local\flutter\deve
 
 Use `apps\teacher` for the Teacher app. Repeat `android-connect.ps1` after reconnecting the cable. The phone depends on USB forwarding while the API remains local.
 
-Presentation builds use the same public configuration:
+From the repository root in a new PowerShell window, presentation builds use the same public configuration:
 
 ```powershell
 cd apps\student
@@ -121,7 +129,7 @@ flutter build apk --debug --target-platform android-arm64 --dart-define-from-fil
 
 ## 6. Safe verification
 
-Run frontend checks natively:
+From the repository root, run frontend checks natively:
 
 ```powershell
 cd apps\student
@@ -135,7 +143,7 @@ flutter test
 Run the worker tests in its Linux container:
 
 ```powershell
-docker compose -f compose.windows.yaml run --rm worker /opt/venv/bin/python -m pytest tests -q
+docker compose -f compose.windows.yaml run --rm --no-deps worker /opt/venv/bin/python -m pytest tests -q
 ```
 
 Backend tests use a guarded, disposable PostgreSQL cluster rather than the hosted project. Contributors who need them should also install Python 3.11, [uv](https://docs.astral.sh/uv/getting-started/installation/) and PostgreSQL 16 with `initdb`/`pg_ctl` on `PATH`, then run:
@@ -159,4 +167,4 @@ These automated checks do not establish recognition accuracy. Real recognition s
 - **Phone cannot reach API:** keep USB connected and rerun `android-connect.ps1`.
 - **Ports already in use:** stop the earlier FaceTrack processes before retrying; the fixed demo ports are 8000, 5300 and 5301.
 
-Windows execution is designed and scripted, but it remains an acceptance item until the complete flow is exercised on a physical Windows host. The current verified demo host is macOS.
+Windows execution is implemented and documented, but it remains an acceptance item until the complete flow is exercised on a physical Windows host. The current verified demo host is macOS.

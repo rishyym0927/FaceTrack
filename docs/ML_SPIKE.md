@@ -1,6 +1,6 @@
 # Local ML spike
 
-Run shell commands below from the repository root unless a section says otherwise. This is the detailed local experiment guide; the active product architecture is in ../MASTER_DESIGN.md.
+Run shell commands below from the repository root unless a section says otherwise. This guide records the verified macOS research experiment; Windows users should use `docs/WINDOWS_SETUP.md` to run the product and translate `.venv/bin/python` to `.venv\Scripts\python` only for authorized local ML experiments. The active product architecture is in ../MASTER_DESIGN.md.
 
 ## Installed environment
 
@@ -181,7 +181,7 @@ cd apps/teacher
 ../../scripts/flutter build web -t lib/main_spike.dart --output build/spike
 ```
 
-Run shared product tests separately from `packages/app_core` with `../../scripts/flutter test`; backend tests use the isolated service environment and commands in `services/api/README.md`. Last recorded results: 30 ML, 21 backend, 11 shared Flutter and five capture tests. These suites were not rerun for this documentation-only review.
+Run shared product tests separately from `packages/app_core` with `../../scripts/flutter test`; backend tests use the isolated service environment and commands in `services/api/README.md`. Current verified counts are maintained in `PROGRESS.md`; do not infer recognition accuracy from any automated-test count.
 
 Python tests use mathematical vectors, synthetic ONNX graphs and generated non-biometric MP4/WebM videos. Capture tests use a fake camera; shared product tests use explicitly synthetic Auth/API fixtures. These verify implementation behavior, not recognition quality or real camera permission/recording.
 

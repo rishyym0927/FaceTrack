@@ -4,7 +4,7 @@ Start here if you are new to FaceTrack. **Tests use synthetic data** and need no
 
 ## 1. Clone and run the safe tests
 
-Install Python **3.11**, [`uv`](https://docs.astral.sh/uv/getting-started/installation/) and FFmpeg/FFprobe. On the existing Mac these are already available. From a terminal:
+Install Python **3.11**, [`uv`](https://docs.astral.sh/uv/getting-started/installation/) and FFmpeg/FFprobe. On the existing Mac these are already available. From macOS/Linux:
 
 ```sh
 git clone https://github.com/rishyym0927/FaceTrack.git
@@ -16,7 +16,19 @@ uv sync --locked
 .venv/bin/python -m pytest tests -q
 ```
 
-Expected locally on 25 October: root **34 passing, one expected failure** documenting a frozen alignment limitation; worker **5 passing**. A fresh clone may report a different count after new tests land. If a command fails, copy the **error code and command**, not private `.env` contents, into your team issue. `uv sync` installs into each directory's own `.venv`; do not use the system Python or change the root `uv.lock` for worker dependencies.
+From Windows PowerShell, use the environment's `Scripts` directory:
+
+```powershell
+git clone https://github.com/rishyym0927/FaceTrack.git
+cd FaceTrack
+uv sync --locked --python 3.11
+.venv\Scripts\python -m pytest tests -q
+cd services\worker
+uv sync --locked --python 3.11
+.venv\Scripts\python -m pytest tests -q
+```
+
+Expected locally on 25 October: root **34 passing, one expected failure** documenting a frozen alignment limitation; worker **7 passing**. A fresh clone may report a different count after new tests land. If a command fails, copy the **error code and command**, not private `.env` contents, into your team issue. `uv sync` installs into each directory's own `.venv`; do not use the system Python or change the root `uv.lock` for worker dependencies.
 
 ## 2. Understand the ML flow
 
@@ -36,7 +48,7 @@ From the existing provisioned Mac, first run:
 python3 scripts/check_ml_freeze.py
 ```
 
-It should say **16/16 verified**. If not, stop real held-out testing; do not regenerate the receipt or overwrite frozen files. To start the demo, follow the six-terminal table in the root `README.md`, then open `http://127.0.0.1:8000/health/ready`. Use `scripts/android-connect` after a USB reconnect. Follow `docs/ML_SPIKE.md` for consented capture, 24-hour raw-media cleanup and held-out evaluation.
+It should say **16/16 verified**. If not, stop real held-out testing; do not regenerate the receipt or overwrite frozen files. To start the demo on macOS, follow the six-terminal table in the root `README.md`; on Windows use `docs/WINDOWS_SETUP.md`. Then open `http://127.0.0.1:8000/health/ready`. Restore the platform's USB forwarding after a reconnect. Follow `docs/ML_SPIKE.md` for consented capture, 24-hour raw-media cleanup and held-out evaluation.
 
 After a private held-out evaluation, this prints **aggregate counts only**; it treats repeated runs of one clip as a stability check, not extra accuracy samples:
 

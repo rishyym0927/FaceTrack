@@ -19,7 +19,7 @@ cd services/api
 
 PostgreSQL 16 binaries (`initdb`, `pg_ctl`) must be on PATH. The managed cluster uses loopback port 55432 and a private Unix socket, with separate `facetrack_dev` and `facetrack_test` databases. It creates `services/api/.env` only when absent. Private state and credentials are under `.local/backend`; do not commit or print them. Stop only this cluster with `.venv/bin/python -m tools.local_db stop`.
 
-Tests use actual PostgreSQL constraints, transactions and RLS, synthetic identities and locally signed ES256 tokens with an explicitly mocked Auth HTTP provider. The fixture truncates **only the managed test database**, guarded by socket/database assertions. It does not operate on hosted Supabase. A passing local suite does not establish live Supabase compatibility.
+Tests use actual PostgreSQL constraints, transactions and RLS, synthetic identities and locally signed ES256 tokens with an explicitly mocked Auth HTTP provider. The fixture truncates **only the managed test database**, guarded by database plus local Unix-socket/macOS or loopback-host/Windows assertions. It does not operate on hosted Supabase. A passing local suite does not establish live Supabase compatibility.
 
 Start the API from `services/api`:
 
