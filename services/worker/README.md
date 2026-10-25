@@ -1,8 +1,10 @@
 # FaceTrack local processing worker
 
-The demo uses one CPU slot on the Mac for enrolment, classroom recognition, timetable parsing and CSV/PDF report rendering; optional faculty delivery also uses the durable job path. PostgreSQL owns job state; private loopback Redis carries only job/lease identifiers. The outbound agent claims scoped work and performs periodic reconciliation. Real classroom processing remains an acceptance gate: do not infer it from synthetic tests or worker startup.
+The verified demo uses one CPU slot on the Mac for enrolment, classroom recognition, timetable parsing and CSV/PDF report rendering; Windows runs the same worker inside the provided Linux container. PostgreSQL owns job state; private local Redis carries only job/lease identifiers. The outbound agent claims scoped work and performs periodic reconciliation. Real classroom processing remains an acceptance gate: do not infer it from synthetic tests or worker startup.
 
 ## Environment and startup
+
+Windows users should use [the root Windows guide](../../docs/WINDOWS_SETUP.md). Celery is not supported as a dependable native Windows worker, so `compose.windows.yaml` runs Celery and Redis on Linux while Flutter remains native.
 
 Use this service's Python 3.11 `.venv` and `uv.lock`, leaving the root ML environment/lock untouched. Provisioning is described in `../api/README.md`; existing private `.env` and root `.local/enrollment/redis.conf` are already configured. Never print either file. The worker receives a scoped token, local broker URL and verified model/profile paths, never database credentials or the Storage secret. Its token expires 30 days after provisioning; revocation/reprovisioning is an operator action.
 

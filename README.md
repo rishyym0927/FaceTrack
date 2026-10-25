@@ -1,8 +1,15 @@
 # FaceTrack
 
-Student and Teacher Flutter apps for human-reviewed, face-assisted attendance. The current demo uses a **Mac-hosted FastAPI/Redis/Celery CPU worker**, a Mac or phone camera, and a **free Supabase development project** for Auth, PostgreSQL and private Storage. Teacher web runs on **5300**, Student web on **5301**, and the API on **8000**. Android reaches the Mac over USB forwarding. This is a local demo, not an institute deployment.
+Student and Teacher Flutter apps for human-reviewed, face-assisted attendance. The verified demo uses a **Mac-hosted FastAPI/Redis/Celery CPU worker**, a computer or phone camera, and a **free Supabase development project** for Auth, PostgreSQL and private Storage. Windows is supported through native Flutter plus Docker Desktop Linux containers. Teacher web runs on **5300**, Student web on **5301**, and the API on **8000**. This is a local demo, not an institute deployment.
 
-## Run the current demo
+## Choose your platform
+
+- **Windows:** follow the beginner-friendly [Windows setup](docs/WINDOWS_SETUP.md), then run `.\scripts\windows\start-demo.ps1`.
+- **macOS (configured demo machine):** use the six commands below.
+
+Private configuration, permitted model files and controlled accounts are intentionally absent from Git. A fresh clone cannot run real face processing until an authorized operator provisions them.
+
+## Run the current demo on macOS
 
 The existing Mac has private configuration in `.local/` and service `.env` files; Git does not include credentials, model weights, recordings or templates. On a fresh clone, follow the [backend setup](services/api/README.md) and [worker setup](services/worker/README.md) before starting. Keep the Mac awake and use a separate terminal for each process:
 

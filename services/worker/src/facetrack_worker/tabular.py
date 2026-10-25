@@ -55,17 +55,18 @@ def safe(value):
 
 
 def report(snapshot):
-    import pandas as pd
-    from reportlab.lib import colors
-    from reportlab.lib.styles import getSampleStyleSheet
-    from reportlab.lib.pagesizes import A4
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, LongTable, TableStyle
-    from reportlab.pdfbase import pdfmetrics
-    from reportlab.pdfbase.ttfonts import TTFont
     from pathlib import Path
+
+    import pandas as pd
 
     # ReportLab's bundled Vera font gives consistent Latin/Greek/Cyrillic coverage; deployment font coverage remains a release check.
     import reportlab
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet
+    from reportlab.pdfbase import pdfmetrics
+    from reportlab.pdfbase.ttfonts import TTFont
+    from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, TableStyle
 
     font = Path(reportlab.__file__).parent / "fonts/Vera.ttf"
     if "FaceTrackVera" not in pdfmetrics.getRegisteredFontNames():

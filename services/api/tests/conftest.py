@@ -1,6 +1,7 @@
 """Real private PostgreSQL; synthetic signed JWTs and an explicitly mocked Auth provider."""
 
 import json
+import os
 import sys
 import time
 from pathlib import Path
@@ -30,7 +31,11 @@ async def backend():
     owner_url = make_url(urls["owner"])
     # Never truncate a remotely configured database, even if an operator exported unrelated URLs.
     assert owner_url.database == "facetrack_test"
-    assert Path(owner_url.query["host"]).resolve() == ROOT / ".local/backend/socket"
+    if os.name == "nt":
+        assert owner_url.host in {"127.0.0.1", "localhost"}
+        assert owner_url.port == 55432
+    else:
+        assert Path(owner_url.query["host"]).resolve() == ROOT / ".local/backend/socket"
     labels = ["teacher", "unassigned", "other_teacher", "student1", "student2", "other_student"]
     users = {
         label: {"id": str(uid("user:" + label)), "email": label + "@example.test"}

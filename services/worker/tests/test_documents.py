@@ -1,8 +1,9 @@
 """Actual bounded report rendering/CSV parsing on synthetic academic rows."""
 
 import base64
-from pathlib import Path
+
 import pytest
+
 from facetrack_worker.tabular import COLUMNS, parse_csv, report
 
 

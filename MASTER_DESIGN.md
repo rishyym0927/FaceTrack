@@ -114,7 +114,7 @@ The worker agent is a small module, not another hosted service. It lets the Mac 
 | Redis/Celery/ML | Existing Mac; CPU baseline | Persistent CPU/GPU worker group, Runpod if approved |
 | Reports/email | Worker group on Mac | Always-on CPU worker group |
 
-The target demo is **cloud-hosted control/data with local processing**. Today only Auth/database are hosted: FastAPI runs on the Mac, Android uses USB forwarding, and product Storage/worker integration is not implemented. It is not an entirely cloud-executed inference system. Free hosting may sleep, and the Mac must stay awake. Institute deployment removes these availability limitations through funded capacity, without replacing the domain model or APIs.
+The target demo is **cloud-hosted data with local application processing**. Supabase Auth, PostgreSQL and private Storage are hosted; FastAPI, Redis, Celery and inference run on the development computer, and Android uses USB forwarding. The verified host is macOS. Windows uses native Flutter with the same Linux API/Redis/worker services in Docker Desktop, because native Windows Celery and Redis are not a supported runtime. It is not an entirely cloud-executed inference system. The local computer must stay awake. Institute deployment removes these availability limitations through funded capacity, without replacing the domain model or APIs.
 
 ## 3. Code structure
 
@@ -519,7 +519,7 @@ Flutter config: public Supabase URL/publishable key, API URL, environment label.
 5. Build student/teacher Android APKs and teacher web; test real camera/codec path and intended email recipient.
 6. Run the full demonstration script and restart/retry tests before presentation.
 
-Docker defines reproducible API/worker deployment. Use native Python for Mac acceleration experiments; GPU production image is a separate target sharing application code. GitHub Actions runs lint/tests/contracts, builds artifacts and checks secrets/dependencies; deployment runs ordered migrations before compatible app release. Use additive migrations and roll back application image/config before attempting destructive schema rollback.
+Docker defines reproducible API/worker deployment. The Windows development profile runs API, private Redis, one Celery solo worker and the outbound agent on a private Compose network; only API port 8000 is bound to host loopback. Flutter remains native so browser and Android tooling retain camera access. Container service hostnames are accepted only behind the explicit `FACETRACK_CONTAINER_NETWORK=1` guard; arbitrary plaintext worker endpoints remain rejected. Private `.env`, model and profile files are mounted at runtime and excluded from image build context. Use native Python for Mac acceleration experiments; GPU production image is a separate target sharing application code. GitHub Actions runs lint/tests/contracts, builds artifacts and checks secrets/dependencies; deployment runs ordered migrations before compatible app release. Use additive migrations and roll back application image/config before attempting destructive schema rollback.
 
 ### Minimum operations
 

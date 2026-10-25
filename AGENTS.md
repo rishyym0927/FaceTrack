@@ -31,6 +31,7 @@ Applies to this directory and its descendants.
 - Phase 3A account/class flows are complete in separate Student/Teacher Android + web apps: the user explicitly confirmed both apps' session restoration/logout, invalid-code recovery, and Teacher web keyboard/screen-reader navigation. Phase 3B consent/private media/durable biometric enrolment is implemented but its recovery/lifecycle acceptance remains in progress. Admin interface is later and web-only. Public signup remains deferred. Sessions/attendance/publication/timetable/report slices are implemented with remaining real-world gates tracked separately. Keep API/Redis/Celery/CPU on Mac; private Storage uses the existing free Supabase project. Worker dependencies belong in a separate worker environment/lock, never the frozen root environment.
 - Preserve camera spike as `main_spike.dart`; product Teacher/Student ports are 5300/5301 and spike 5302. Keep app session stores isolated and infer permissions from API memberships/profiles.
 - Use the user's physical Android phone; verify USB authorization and restore reverse port forwarding after reconnects with `scripts/android-connect`. Do not claim physical-device acceptance from an APK build. Keep native cleartext development-only and frontend config public-only.
+- Windows development uses native Flutter plus `compose.windows.yaml` Linux services. Follow `docs/WINDOWS_SETUP.md`; do not attempt native Windows Celery/Redis or claim Windows acceptance until it is exercised on a real Windows host.
 
 ## Implementation safeguards
 

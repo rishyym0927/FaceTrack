@@ -18,6 +18,38 @@ LOCAL = ROOT / ".local/backend"
 DATA = LOCAL / "postgres"
 SOCKET = LOCAL / "socket"
 PORT = 55432
+WINDOWS = os.name == "nt"
+
+
+def owner_connection(database):
+    """Return guarded owner connection arguments for this checkout only."""
+    if WINDOWS:
+        return {
+            "dbname": database,
+            "host": "127.0.0.1",
+            "port": PORT,
+            "user": "facetrack_owner",
+            "password": (LOCAL / "owner.pw").read_text(),
+        }
+    return {"dbname": database, "host": str(SOCKET), "port": PORT, "user": "facetrack_owner"}
+
+
+def owner_url(database):
+    if WINDOWS:
+        return URL.create(
+            "postgresql+psycopg",
+            username="facetrack_owner",
+            password=(LOCAL / "owner.pw").read_text(),
+            host="127.0.0.1",
+            port=PORT,
+            database=database,
+        ).render_as_string(hide_password=False)
+    return URL.create(
+        "postgresql+psycopg",
+        username="facetrack_owner",
+        database=database,
+        query={"host": str(SOCKET), "port": str(PORT)},
+    ).render_as_string(hide_password=False)
 
 
 def private_write(path, value):
@@ -32,7 +64,8 @@ def main():
     args = parser.parse_args()
     LOCAL.mkdir(parents=True, exist_ok=True, mode=0o700)
     LOCAL.chmod(0o700)
-    SOCKET.mkdir(exist_ok=True, mode=0o700)
+    if not WINDOWS:
+        SOCKET.mkdir(exist_ok=True, mode=0o700)
     marker = LOCAL / "managed.json"
     if DATA.exists() and not marker.exists():
         raise RuntimeError("Refusing to operate an unrecognized cluster.")
@@ -41,6 +74,9 @@ def main():
     if args.action == "stop":
         subprocess.run(["pg_ctl", "-D", str(DATA), "-m", "fast", "-w", "stop"], check=True)
         return
+    start_options = f"-h 127.0.0.1 -p {PORT}"
+    if not WINDOWS:
+        start_options += f" -k {shlex.quote(str(SOCKET))}"
     if not DATA.exists():
         private_write(LOCAL / "owner.pw", secrets.token_urlsafe(32))
         subprocess.run(
@@ -72,7 +108,7 @@ def main():
                 "-l",
                 str(LOCAL / "postgres.log"),
                 "-o",
-                f"-h 127.0.0.1 -p {PORT} -k {shlex.quote(str(SOCKET))}",
+                start_options,
                 "-w",
                 "start",
             ],
@@ -83,9 +119,7 @@ def main():
     if not secrets_file.exists():
         private_write(secrets_file, secrets.token_urlsafe(32))
     password = secrets_file.read_text()
-    with psycopg.connect(
-        dbname="postgres", host=str(SOCKET), port=PORT, user="facetrack_owner", autocommit=True
-    ) as conn:
+    with psycopg.connect(**owner_connection("postgres"), autocommit=True) as conn:
         if not conn.execute("SELECT 1 FROM pg_roles WHERE rolname='facetrack_api'").fetchone():
             conn.execute(
                 sql.SQL(
@@ -99,12 +133,7 @@ def main():
                 )
     config = {}
     for label, name in [("development", "facetrack_dev"), ("test", "facetrack_test")]:
-        owner = URL.create(
-            "postgresql+psycopg",
-            username="facetrack_owner",
-            database=name,
-            query={"host": str(SOCKET), "port": str(PORT)},
-        ).render_as_string(hide_password=False)
+        owner = owner_url(name)
         runtime = URL.create(
             "postgresql+psycopg",
             username="facetrack_api",
@@ -114,9 +143,7 @@ def main():
             database=name,
         ).render_as_string(hide_password=False)
         config[label] = {"owner": owner, "runtime": runtime}
-        with psycopg.connect(
-            dbname=name, host=str(SOCKET), port=PORT, user="facetrack_owner", autocommit=True
-        ) as conn:
+        with psycopg.connect(**owner_connection(name), autocommit=True) as conn:
             conn.execute("REVOKE CREATE ON SCHEMA public FROM PUBLIC")
             conn.execute("CREATE SCHEMA IF NOT EXISTS auth")
             # Relational fixture only. This does NOT emulate Supabase Auth or mint login tokens.

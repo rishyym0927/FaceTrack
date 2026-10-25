@@ -4,6 +4,8 @@ The architecture authority is the root `MASTER_DESIGN.md`. This file contains ex
 
 ## Local verification
 
+The commands in this section are the verified macOS path. Windows users should run the API in its Linux container using the root [Windows guide](../../docs/WINDOWS_SETUP.md). The hosted Supabase configuration and security rules are identical on both platforms.
+
 From the repository root, install the **separate backend environment**, preserving the frozen root ML lock/environment:
 
 ```sh

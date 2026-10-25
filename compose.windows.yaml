@@ -1,0 +1,83 @@
+name: facetrack
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+    networks: [facetrack-private]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: services/api/.env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./services/api:/workspace/services/api
+      - ./services/worker:/workspace/services/worker
+      - ./.local:/workspace/.local
+    restart: unless-stopped
+    networks: [facetrack-private]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    env_file:
+      - path: services/worker/.env
+        required: false
+    environment: &worker-environment
+      FACETRACK_CONTAINER_NETWORK: "1"
+      API_BASE_URL: http://api:8000
+      REDIS_URL: redis://redis:6379/0
+      MANIFEST_PATH: /workspace/.local/spike/models/buffalo_sc/manifest.json
+      PROFILE_PATH: /workspace/.local/spike/profiles/frozen-phase1b-v1.json
+      TEMP_ROOT: /workspace/.local/enrollment/tmp
+    volumes: &worker-volumes
+      - ./services/worker:/workspace/services/worker
+      - ./.local:/workspace/.local
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [facetrack-private]
+
+  agent:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    command: ["/opt/venv/bin/python", "-m", "facetrack_worker.agent"]
+    env_file:
+      - path: services/worker/.env
+        required: false
+    environment: *worker-environment
+    volumes: *worker-volumes
+    depends_on:
+      worker:
+        condition: service_started
+    restart: unless-stopped
+    networks: [facetrack-private]
+
+networks:
+  facetrack-private:
+    driver: bridge

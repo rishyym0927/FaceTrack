@@ -13,7 +13,9 @@ From this app directory, using the already configured ignored public-only file:
 ../../scripts/flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=../../.local/flutter/development.json
 ```
 
-The API must be running on Mac port 8000. Login reaches hosted Supabase, but classes require this local API; internet access alone is insufficient in the current development setup. For Android, authorize USB debugging and run `../../scripts/android-connect` after reconnecting the cable. Install `build/app/outputs/flutter-apk/app-debug.apk` with `../../.tools/android_sdk/platform-tools/adb install -r build/app/outputs/flutter-apk/app-debug.apk`. App ID: `dev.facetrack.teacher`. Use `../../scripts/flutter devices` then `run -d DEVICE_ID` with the same configuration for interactive development.
+On Windows, use the global `flutter` command and backslash paths, or start the full application with `..\..\scripts\windows\start-demo.ps1` from PowerShell. See the [Windows guide](../../docs/WINDOWS_SETUP.md). Do not use the macOS-only `scripts/flutter` wrapper on Windows.
+
+The API must be running on local port 8000. Login reaches hosted Supabase, but classes require this local API; internet access alone is insufficient in the current development setup. On macOS, authorize USB debugging and run `../../scripts/android-connect` after reconnecting the cable. On Windows, run `..\..\scripts\windows\android-connect.ps1`. App ID: `dev.facetrack.teacher`. Use `flutter devices` and the same public configuration for interactive development.
 
 Debug network policy permits HTTP only to localhost/127.0.0.1. Release requires HTTPS and your release signing configuration. Android Studio/emulator and iOS are not required for this slice.
 
