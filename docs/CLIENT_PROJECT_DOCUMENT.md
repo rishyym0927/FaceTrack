@@ -52,55 +52,34 @@ The apps are designed for everyday faculty and students with zero learning curve
 
 ---
 
-## 4. Deployment Cost Analysis
+## 4. Deployment Cost Analysis (revised 25 October 2026)
 
-The figures below are planning estimates, not provider quotes or measured production capacity. Pricing, taxes, data transfer, support and required compute must be revalidated before procurement. FaceTrack has not yet demonstrated institute-scale throughput.
+Full workings, sources and assumptions are in [COST_AND_RELIABILITY.md](COST_AND_RELIABILITY.md). Provider prices were read on 25 October 2026 at **₹94.95 per US$**; the earlier ₹84 rate understated rupee costs by about 13%. Totals are infrastructure only. They exclude staff time, room cameras and the **model licence**, which is unpriced (see below). Availability figures are planning targets, not SLAs or measurements. FaceTrack has not yet demonstrated institute-scale throughput.
 
-### Baseline Reference: Mid-Sized College Campus
-- **Student Body:** 3,000 active students | **Faculty:** 120 teaching faculty members
-- **Active Classrooms:** 60 lecture halls & labs (6 sessions/day = 360 sessions daily)
-- **Monthly Volume:** ~7,200 attendance scans per month
+### What changed from the earlier estimate
+- **No GPU.** The measured worker pipeline took 356 ms for a 12-frame clip on a CPU, and matching is limited to the 40–60 students enrolled in the class. A CPU server is sufficient at every scale below.
+- **One server** runs the API, Redis and the recognition worker, instead of separate paid services.
+- **Maintenance staffing** ($150/mo before) is a support decision, not infrastructure, and is listed separately.
+- **Cheap European VPS prices no longer hold.** Hetzner raised prices in April and June 2026; the orderable 2 vCPU/4 GB plan is €19.99, and servers are in the EU. An AWS Mumbai server is cheaper and keeps video in India.
 
----
+### Cost and reliability by institution size
 
-### Monthly & Annual Infrastructure Cost Breakdown (Full Campus)
+| Scenario | Students | Sessions/day | Monthly (USD) | Monthly (INR) | Availability target | Notes |
+|---|---|---|---|---|---|---|
+| Demo | 20–50 | few | $0 | ₹0 | Demo only | Mac + free Supabase |
+| Free pilot | up to ~100 | ~20 | $0 | ₹0 | 95–98% | Free Supabase allows 5 GB egress and pauses after a week idle, with no backups |
+| Small paid | up to 1,000 | up to 120 | ≈ $44 | ≈ ₹4,200 | ≈ 99% | Supabase Pro + one 2 vCPU/4 GB server |
+| Mid-sized college | 3,000 | 360 | ≈ $79 (HA ≈ $130) | ≈ ₹7,500 (₹12,300) | 99–99.5% (HA 99.9%) | Adds a 2-slot worker; HA needs a passed failover test |
+| Large university | 10,000–20,000 | up to 2,400 | ≈ $220–290 | ≈ ₹20,900–27,500 | HA design + load test | Egress overage and more worker slots |
 
-| Component | Purpose & Provider | Monthly (USD) | Annual (USD) | Annual (INR @ ₹84/$)|
-|---|---|---|---|---|
-| **Core API & App Hosting** | High-availability backend services (AWS / Render) | $35 / mo | $420 / yr | ₹35,280 |
-| **Managed Database & Auth** | Secure PostgreSQL, user authentication, daily backups (Supabase / AWS RDS) | $25 / mo | $300 / yr | ₹25,200 |
-| **AI Processing Workers** | Dedicated CPU/GPU compute during academic hours (Runpod / AWS EC2) | $75 / mo | $900 / yr | ₹75,600 |
-| **Storage & Bandwidth** | Temporary video buffer (24-hr purge) & report storage (AWS S3) | $15 / mo | $180 / yr | ₹15,120 |
-| **Task Queue & Cache** | High-speed task management broker (Redis) | $10 / mo | $120 / yr | ₹10,080 |
-| **Operational Services** | Health monitoring, edge protection, automated PDF reports (Sentry / Cloudflare) | $45 / mo | $540 / yr | ₹45,360 |
-| **Maintenance & Operations** | Ongoing updates, patching, database tuning, security audits | $150 / mo | $1,800 / yr | ₹1,51,200 |
-| **TOTAL** | | **$355 / mo** | **$4,260 / yr** | **₹3,57,840** |
+The previous table priced the mid-sized college at $355/month (₹33,700 at today's rate) and the large university at $780/month.
 
----
+### How reliable is recognition?
+- Teachers review and publish every result. A missed or uncertain face stays **Unassessed**; it is never marked absent automatically.
+- The chosen model reports 95.02% on the IJB-C verification benchmark and 99.70% on LFW. These are controlled datasets. Small, dim or turned faces in a classroom are harder, and an independent study found ArcFace at 77.27% top-1 on a mixed-quality dataset.
+- FaceTrack's own evidence so far is one real two-person capture in low light, where one of two students was recognised, and 1 of 6 independent test scenarios passed. **No classroom accuracy percentage can be promised yet.** A supervised pilot (at least 100 students, 30 sessions, 3 rooms or days) will produce the first defensible figure.
 
-### Scaling Across Institutional Sizes
-
-| Institutional Tier | Student Size | Daily Classes | Monthly (USD) | Annual (USD) | Annual (INR) |
-|---|---|---|---|---|---|
-| **Pilot / Small Test Cohort** | 50 – 200 | 5 – 20 | **$12 – $15 / mo** | $144 – $180 / yr | ₹12,000 – ₹15,120 |
-| **Tier 1: Small School / Dept** | 500 – 1,000 | 60 – 120 | **$180 / mo** | $2,160 / yr | ₹1,81,440 |
-| **Tier 2: Mid-Sized College (Baseline)** | 2,500 – 5,000 | 300 – 600 | **$355 / mo** | $4,260 / yr | ₹3,57,840 |
-| **Tier 3: Large University Campus** | 10,000 – 20,000 | 1,200 – 2,400 | **$780 / mo** | $9,360 / yr | ₹7,86,240 |
-
----
-
-### Ultra-Low-Cost Online Setup for Small Test Users (50–200 Students)
-
-For a department, club, or pilot school wanting to run a **100% online cloud deployment** with real devices over mobile 4G/5G/Wi-Fi (no USB cables, no local laptops tethered), FaceTrack runs smoothly on lightweight, budget-friendly cloud tiers:
-
-| Component | Cost-Effective Cloud Service | Monthly Cost (USD) | Monthly Cost (INR) |
-|---|---|---|---|
-| **Core API & Web Hosting** | Render Starter or Fly.io (Containerized FastAPI with free HTTPS/SSL) | ~$5 – $7 / mo | ₹420 – ₹580 |
-| **Database & User Auth** | Supabase Free/Hobby Tier (PostgreSQL + Auth + 1 GB storage) | $0 / mo | ₹0 |
-| **AI Inference & Worker** | 1 Basic Cloud VPS (Hetzner / DigitalOcean 2 vCPU) running CPU ONNX + Redis | ~$5 – $6 / mo | ₹420 – ₹500 |
-| **Edge & Domain Security** | Cloudflare Free SSL / DNS + automated 24-hr video purge | $0 / mo | ₹0 |
-| **TOTAL TEST PILOT DEPLOYMENT**| **Fully autonomous online system for test users** | **~$12 – $15 / mo** | **~₹1,000 – ₹1,260 / mo** |
-
-- **Zero Local Hardware Dependencies:** Completely live on the internet. Teachers and students test directly on their personal Android phones or web browsers from any classroom.
-- **Performance must be measured:** The local demo has measured worker-only processing on one short clip, but upload, queue and end-to-end latency plus multi-class capacity remain unverified. Pilot sizing must follow load tests on the chosen cloud machine.
-- **Seamless Upgrade Path:** When expanding from 100 students to 3,000 students, the exact same database and API are retained—only the background worker compute expands to GPU capacity.
+### Items that must be settled before paid rollout
+1. **Model licence.** The detector and recognizer files are published for non-commercial research only. A commercial licence from InsightFace (price not published) or an alternative, re-evaluated model is required for institute use.
+2. **Supabase Pro ($25/month)** before real enrolment, for backups, no inactivity pause and enough bandwidth.
+3. **Measured clip size and processing time** on the chosen server, which replace the estimates in the table.

@@ -50,7 +50,7 @@ A demonstration must use actual capture, inference, and persisted records. Test 
 | Daily sessions | A few rehearsals | 20 rooms × 8 = 160 |
 | Classroom video | Prefer 5–15 seconds, no audio | Maximum 30 seconds |
 | Enrolment video | Guided 10–20 seconds | Maximum 30 seconds |
-| Cost | Target ₹0 incremental using existing equipment and free tiers | Institute funds always-on services |
+| Cost | Target ₹0 incremental using existing equipment and free tiers | Institute funds always-on services; CPU-only estimates ≈ $44–$290/month by size (`docs/COST_AND_RELIABILITY.md`), excluding the unpriced model licence |
 
 These are planning assumptions, not measured institute facts. Verified development baseline: Apple M4 with 16 GB RAM and a working Mac-camera recording path. Classroom coverage, uplink and concurrent processing capacity remain unmeasured.
 
@@ -66,7 +66,7 @@ These are planning assumptions, not measured institute facts. Verified developme
 | PostgreSQL is authoritative | Redis loss or worker retries cannot erase attendance or job state |
 | Exact, roster-scoped cosine matching | Tens of identities per class do not require an approximate vector index |
 | Human-reviewed publication | Unrecognized or hidden students must not automatically become absent |
-| Local worker for demo; Runpod worker later | Supports minimal cost while retaining the same processing interface |
+| Local worker for demo; always-on CPU worker later | Supports minimal cost while retaining the same processing interface; Runpod/GPU stays optional after measurement |
 | CSV timetable first | Deterministic import; PDF/OCR and ERP integration can feed the same normalized model later |
 
 Retain pandas/openpyxl, ReportLab, Resend, Docker, Sentry and GitHub Actions. No React rewrite, MongoDB/Firebase Auth migration, Kubernetes or new message platform.
@@ -111,7 +111,7 @@ The worker agent is a small module, not another hosted service. It lets the Mac 
 | Auth/database/files | Supabase free project | Funded plan with tested backups |
 | API | Render free web service | Always-on application host |
 | Teacher web | Static Flutter web hosting | Same build, institute domain |
-| Redis/Celery/ML | Existing Mac; CPU baseline | Persistent CPU/GPU worker group, Runpod if approved |
+| Redis/Celery/ML | Existing Mac; CPU baseline | Persistent CPU worker group on one always-on server (AWS Mumbai estimated); GPU is not required at the measured 356 ms pipeline time and is reconsidered only if benchmarks or continuous camera streaming demand it |
 | Reports/email | Worker group on Mac | Always-on CPU worker group |
 
 The target demo is **cloud-hosted data with local application processing**. Supabase Auth, PostgreSQL and private Storage are hosted; FastAPI, Redis, Celery and inference run on the development computer, and Android uses USB forwarding. The verified host is macOS. Windows uses native Flutter with the same Linux API/Redis/worker services in Docker Desktop, because native Windows Celery and Redis are not a supported runtime. It is not an entirely cloud-executed inference system. The local computer must stay awake. Institute deployment removes these availability limitations through funded capacity, without replacing the domain model or APIs.
