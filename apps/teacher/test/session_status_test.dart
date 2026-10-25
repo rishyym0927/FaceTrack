@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_teacher/teacher_sessions.dart';
 import 'package:flutter/material.dart';
@@ -131,6 +134,142 @@ void main() {
     state.setState(() {});
     await tester.pumpAndSettle();
     expect(captureReads, 1);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Older session response cannot replace a newer attendance view', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    final older = Completer<ResponseBody>();
+    var reads = 0;
+    Map<String, dynamic> response(int version, String name) => {
+      'session': {
+        'id': 'session',
+        'offering_id': 'class',
+        'status': 'review_required',
+        'starts_at': '2026-10-24T09:00:00Z',
+        'version': version,
+        'attendance_revision': 0,
+      },
+      'items': [
+        {
+          'student_id': 'student',
+          'official_name': name,
+          'enrollment_number': '0001',
+          'status': 'unassessed',
+          'recognition_eligible': false,
+        },
+      ],
+    };
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/sessions/session/attendance') {
+        reads++;
+        if (reads == 2) return older.future;
+        return jsonResponse(
+          response(
+            reads == 1 ? 1 : 3,
+            reads == 1 ? 'Initial Student' : 'Current Student',
+          ),
+        );
+      }
+      if (r.path == '/v1/sessions/session/reports') {
+        return jsonResponse({'items': []});
+      }
+      throw StateError('Unexpected request: ${r.path}');
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(
+          classesBuilder: (_) => Builder(
+            builder: (context) => TextButton(
+              onPressed: () => context.go('/sessions/session'),
+              child: const Text('Open session fixture'),
+            ),
+          ),
+          sessionBuilder: (_, id) => TeacherSessionDetail(id: id),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open session fixture'));
+    await tester.pumpAndSettle();
+    final state = tester.state(find.byType(TeacherSessionDetail)) as dynamic;
+    unawaited(state.load(discardChanges: true) as Future<void>);
+    await tester.pump();
+    unawaited(state.load(discardChanges: true) as Future<void>);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Current Student'), findsOneWidget);
+    older.complete(jsonResponse(response(2, 'Stale Student')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Current Student'), findsOneWidget);
+    expect(find.textContaining('Stale Student'), findsNothing);
+    expect(state.data['session']['version'], 3);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Terminal capture stops closed-session polling', (tester) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    var attendanceReads = 0, captureReads = 0;
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/sessions/session/attendance') {
+        attendanceReads++;
+        return jsonResponse({
+          'session': {
+            'id': 'session',
+            'offering_id': 'class',
+            'status': 'review_required',
+            'starts_at': '2026-10-24T09:00:00Z',
+            'version': attendanceReads,
+            'attendance_revision': 0,
+          },
+          'items': [],
+        });
+      }
+      if (r.path == '/v1/sessions/session/reports') {
+        return jsonResponse({'items': []});
+      }
+      if (r.path == '/v1/captures/capture') {
+        captureReads++;
+        return jsonResponse({'id': 'capture', 'status': 'review_required'});
+      }
+      throw StateError('Unexpected request: ${r.path}');
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(
+          classesBuilder: (_) => Builder(
+            builder: (context) => TextButton(
+              onPressed: () => context.go('/sessions/session'),
+              child: const Text('Open session fixture'),
+            ),
+          ),
+          sessionBuilder: (_, id) => TeacherSessionDetail(id: id),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open session fixture'));
+    await tester.pumpAndSettle();
+    final state = tester.state(find.byType(TeacherSessionDetail)) as dynamic;
+    state.setState(() => state.capture = {'id': 'capture', 'status': 'queued'});
+    unawaited(state.load(discardChanges: true) as Future<void>);
+    await tester.pumpAndSettle();
+    expect(captureReads, 1);
+    expect(find.text('Capture: ready for attendance review'), findsOneWidget);
+    final settledReads = attendanceReads;
+    await tester.pump(const Duration(seconds: 6));
+    expect(attendanceReads, settledReads);
     await tester.pumpWidget(const SizedBox());
   });
 }

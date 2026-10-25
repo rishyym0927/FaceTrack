@@ -248,6 +248,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   final reserve = Mutation(), complete = Mutation();
   Timer? poll;
   AppLifecycleListener? lifecycle;
+  int loadGeneration = 0;
   @override
   void initState() {
     super.initState();
@@ -269,13 +270,28 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   Future<Json> captureStatus(String id) {
     if (captureStatusId != id || captureStatusRequest == null) {
       captureStatusId = id;
-      captureStatusRequest = services.api.send(
-        'GET',
-        '/v1/captures/$id',
-        institute: institute,
-      );
+      captureStatusRequest = _loadCaptureStatus(id);
     }
     return captureStatusRequest!;
+  }
+
+  Future<Json> _loadCaptureStatus(String id) async {
+    final result = await services.api.send(
+      'GET',
+      '/v1/captures/$id',
+      institute: institute,
+    );
+    if (!mounted || capture?['id'] != id) return result;
+    final next = result['status'] as String?;
+    if (next != null && capture?['status'] != next) {
+      setState(() => capture = {...capture!, 'status': next});
+      final sessionStatus = (data?['session'] as Json?)?['status'];
+      if (sessionStatus != 'open' && !_captureIsPending(next)) {
+        poll?.cancel();
+        poll = null;
+      }
+    }
+    return result;
   }
 
   void syncExitGuard() {
@@ -317,13 +333,14 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   Future<void> load({bool discardChanges = false}) async {
     if (decisions.isNotEmpty && !busy && !discardChanges) return;
+    final current = ++loadGeneration;
     try {
       final result = await services.api.send(
         'GET',
         '/v1/sessions/${widget.id}/attendance',
         institute: institute,
       );
-      if (!mounted) return;
+      if (!mounted || current != loadGeneration) return;
       setState(() {
         data = result;
         error = null;
@@ -333,11 +350,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       });
       poll?.cancel();
       if (result['session']['status'] == 'open' ||
-          capture?['status'] == 'queued') {
+          _captureIsPending(capture?['status'])) {
         poll = Timer(const Duration(seconds: 5), () => load());
       }
     } catch (e) {
-      if (mounted) {
+      if (mounted && current == loadGeneration) {
         setState(
           () => error = e is AppFailure
               ? e
@@ -628,6 +645,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   @override
   void dispose() {
+    loadGeneration++;
     exitGuard.leave(widget.id);
     poll?.cancel();
     lifecycle?.dispose();
@@ -773,7 +791,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             future: captureStatus(capture!['id'] as String),
             builder: (c, snapshot) => Text(
               snapshot.hasData
-                  ? 'Capture: ${snapshot.data!['status']}'
+                  ? 'Capture: ${captureStatusLabel(snapshot.data!['status'] as String)}'
                   : snapshot.hasError
                   ? 'Capture status unavailable. Refresh this session to retry.'
                   : 'Checking capture status…',
@@ -902,3 +920,16 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     );
   }
 }
+
+bool _captureIsPending(Object? status) =>
+    const {'awaiting_upload', 'queued', 'processing'}.contains(status);
+
+String captureStatusLabel(String status) => switch (status) {
+  'awaiting_upload' => 'waiting for upload',
+  'queued' => 'waiting for processing',
+  'processing' => 'processing video',
+  'review_required' => 'ready for attendance review',
+  'failed' => 'processing failed — review manually',
+  'expired' => 'upload expired',
+  _ => status.replaceAll('_', ' '),
+};

@@ -27,7 +27,13 @@ async def request(b, code, *, label="student1", key="request"):
 
 async def test_health_auth_and_validation(backend):
     b = backend
-    assert (await b.client.get("/health/live")).status_code == 200
+    live = await b.client.get("/health/live")
+    assert live.status_code == 200
+    assert live.headers["cache-control"] == "no-store"
+    assert live.headers["x-content-type-options"] == "nosniff"
+    assert live.headers["x-frame-options"] == "DENY"
+    assert live.headers["referrer-policy"] == "no-referrer"
+    assert live.headers["permissions-policy"] == "camera=(), microphone=(), geolocation=()"
     ready = await b.client.get("/health/ready")
     assert ready.status_code == 200, ready.text
     assert (await b.client.get("/v1/me")).status_code == 401
@@ -53,6 +59,16 @@ async def test_health_auth_and_validation(backend):
     )
     assert r.status_code == 422 and "input" not in r.text
     assert (await b.client.get("/v1/offerings?limit=201", headers=b.headers())).status_code == 422
+
+    oversized = await b.client.post(
+        "/v1/identity/claim",
+        content=b"x" * (1024 * 1024 + 1),
+        headers={"content-type": "application/json"},
+    )
+    assert oversized.status_code == 413
+    assert oversized.json()["error"]["code"] == "BODY_TOO_LARGE"
+    assert oversized.headers["cache-control"] == "no-store"
+    assert oversized.headers["x-frame-options"] == "DENY"
 
 
 async def test_claim_live_confirmed_email_and_no_role_escalation(backend):

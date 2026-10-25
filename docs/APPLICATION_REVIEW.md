@@ -106,3 +106,32 @@ This pass is limited to Flutter Student, Teacher and shared web/Android UI. No b
 **Follow-up checks:** all four Flutter analyzers reported no issues. Complete suites passed: shared/core **22**, capture **7**, Student **9**, Teacher **14**. Configured Student and Teacher release web builds and Android debug APKs passed. Responsive Student active-enrolment and Teacher attendance-review tests passed at 360/390/768/1440 px with 200% text. No backend or worker source changed, so their previously passing suites were not repeated.
 
 **Still pending:** newly built authenticated release screens were not visually inspected with a live Teacher session, and the physical phone was not reinstalled during this pass. The existing Student web tab is an older running preview, so it cannot verify the latest bundle. Recognition acceptance, participant-dependent tests, Resend delivery and cloud deployment are separate milestones.
+
+## Non-ML demo closure review — 25 October 2026
+
+This pass reviews the complete non-ML demo surface before the 28 October presentation. Frozen inference code, model artifacts, profiles and recognition thresholds are out of scope until the separate ML session. Baseline checks passed before further edits: backend **41**, worker **5**, shared core **22**, capture **7**, Student **9** and Teacher **14** tests; Ruff and all four Flutter analyzers were clean. The repository-managed PostgreSQL service was restored without touching hosted data.
+
+| ID | Severity / evidence | Planned resolution and completion check |
+|---|---|---|
+| FT-15 | **High, confirmed race; fixed:** `TeacherSessionDetail.load` allowed timer, resume, refresh and post-mutation loads to overlap, so an older response could replace a newer authoritative version. | A resource generation guard rejects stale results and errors. A deliberately reversed-response regression passes. |
+| FT-16 | **Medium, confirmed request leak; fixed:** terminal capture results were not reconciled into local state, so a closed session could continue polling after processing completed. | Capture status now updates local state and terminal closed-session polling stops. Request-count regression passes. |
+| FT-17 | **Medium, confirmed lifecycle race; fixed:** pending-media read/save/retain/clear operations could interleave with logout, cleanup or upload checkpoints. | Operations now use one FIFO critical section. Late checkpoints update only the same still-current recording and cannot resurrect cleared metadata. Capture and complete Student suites pass. |
+| FT-18 | **Low, confirmed UX issue; fixed:** full institute labels consumed narrow app-bar space; generic failures used the same connection icon and recovery copy. | Wide layouts show a styled institute label; narrow/large-text layouts expose a compact semantic badge. Authentication, authorization, missing-resource, rate-limit, service and Mac-connection errors now have distinct icon/title/action context. |
+| FT-19 | **Medium, confirmed security consistency defect; fixed:** the middleware's early oversized-body 413 return bypassed standard response headers and request logging. | All middleware exits now apply request ID, `no-store`, `nosniff`, frame denial, no-referrer and restrictive permissions headers. A 1 MiB boundary regression passes. |
+| FT-20 | **Low, confirmed presentation inconsistency; fixed:** Teacher web still used the old local camera spike title/description. | Student/Teacher source shells now use product-specific metadata and the shared theme color; configured release web builds pass. |
+| OPS-01 | **High, resolved during audit:** the isolated PostgreSQL regression service appeared unavailable because its stale Unix socket could not be used from the restricted test process, while the managed server was still listening on loopback. | Re-ran the repository-owned startup tool and the full backend suite outside the restricted socket boundary: **41 passed**. No cluster deletion, credential rotation or hosted change occurred. |
+
+### Prioritized implementation checklist
+
+1. [x] Fix FT-15 and FT-16 with focused Teacher regressions.
+2. [x] Fix FT-17 without changing upload, Storage or biometric API contracts.
+3. [x] Apply FT-18 in shared UI and verify narrow large-text behavior.
+4. [x] Fix FT-19/FT-20 and run all non-ML analysis/tests and configured Student/Teacher web and Android builds.
+5. [ ] Inspect the newly built authenticated screens with safe live sessions and verify the latest APKs on an idle phone. The available browser instance is an older build, so this remains an external acceptance step.
+6. [x] Synchronize `MASTER_DESIGN.md`, `PROGRESS.md` and `ROADMAP.md`; leave ML acceptance, model training, Resend and cloud deployment open.
+
+### Final non-ML verification
+
+Ruff and all four Flutter analyzers are clean. Tests pass: API **41**, worker **5**, shared core **23**, capture **8**, Student **9** and Teacher **16**. Both configured release web bundles and both Android debug APKs build. Fresh Student mobile-width and Teacher desktop-width release login pages were visually inspected with correct branding, readable actions and no visible clipping. Responsive widget coverage includes 360/390/768/1440 px and 200% text; focused regressions cover reversed Teacher session responses, terminal capture polling, stale private-media checkpoints and the oversized-body middleware path. `git diff --check` passes.
+
+No schema, public endpoint contract, worker behavior, frozen inference code, model artifact, recognition profile, active template or attendance publication changed. Physical-device acceptance of these latest APKs and authenticated visual inspection of these exact release bundles remain pending. Recognition validation, Resend delivery and cloud deployment are intentionally outside this non-ML pass.

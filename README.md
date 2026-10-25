@@ -22,3 +22,5 @@ Check [API readiness](http://127.0.0.1:8000/health/ready) for `{"status":"ready"
 Account/class flows, real biometric enrolment, one teacher-reviewed classroom session, student history, private CSV/PDF reports and one CSV timetable import have been verified. Broader recognition, recovery and rehearsal tests remain. Faculty email is disabled until a permitted Resend sender is configured. No production accuracy, latency or concurrency target has been established.
 
 [Master design](MASTER_DESIGN.md) · [Progress and next actions](PROGRESS.md) · [Roadmap](ROADMAP.md) · [Detailed ML spike guide](docs/ML_SPIKE.md)
+
+New ML contributors: [quickstart and safe test commands](docs/ML_TEAM_QUICKSTART.md).

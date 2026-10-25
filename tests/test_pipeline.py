@@ -3,9 +3,11 @@
 from pathlib import Path
 
 import numpy as np
+import pytest
 from facetrack_ml.config import Profile, canonical_hash
 from facetrack_ml.media import MediaInfo
 from facetrack_ml.pipeline import Pipeline
+from facetrack_ml.runtime import CANONICAL, Face
 from facetrack_ml.store import TemplateStore
 
 
@@ -49,3 +51,62 @@ def test_pipeline_enrol_then_known_unknown_absent_and_repeat(monkeypatch, tmp_pa
     assert first["unassessed"] == ["p02"]
     assert b'"vectors"' not in store.path("p01").read_bytes()
     assert "vectors" not in str(first)
+
+
+def test_no_face_remains_unassessed_and_duplicate_pixels_are_skipped(monkeypatch, tmp_path):
+    model = "a" * 64
+    profile = Profile(model_hash=model, calibration_id="synthetic-no-face",
+                      identity_threshold=0.8, minimum_margin=0.1, enrollment_consistency=0.7)
+    store = TemplateStore(tmp_path / "templates")
+    for person, index in (("p01", 0), ("p02", 1)):
+        store.save(person, np.stack([unit(index)] * 3), model,
+                   canonical_hash(profile.model_dump()))
+
+    class EmptyRuntime:
+        cold_start_ms = 0.0
+        calls = 0
+
+        def detect(self, *_):
+            self.calls += 1
+            return []
+
+    runtime = EmptyRuntime()
+    pipeline = Pipeline(runtime, profile, model)
+    frame = np.zeros((112, 112, 3), np.uint8)
+    monkeypatch.setattr("facetrack_ml.pipeline.probe", lambda *_args, **_kwargs:
+                        MediaInfo(112, 112, 2, "vp9", 1))
+    monkeypatch.setattr("facetrack_ml.pipeline.sampled_frames", lambda *_args:
+                        iter([(100, frame), (700, frame)]))
+    path = tmp_path / "no-face.webm"
+    path.write_bytes(b"synthetic control-flow fixture")
+    result = pipeline.recognize(path, ["p01", "p02"], store)
+    assert result["proposals"] == [] and result["unassessed"] == ["p01", "p02"]
+    assert result["quality"]["duplicate_frames"] == 1 and runtime.calls == 1
+
+
+@pytest.mark.xfail(strict=True, reason="Frozen pipeline aborts clip on one degenerate alignment")
+def test_bad_face_alignment_should_not_discard_other_usable_faces(monkeypatch, tmp_path):
+    """Reproduced limitation; fix in a separately versioned inference candidate."""
+    model = "a" * 64
+    profile = Profile(model_hash=model, calibration_id="synthetic-degenerate-landmarks",
+                      identity_threshold=0.8, minimum_margin=0.1, enrollment_consistency=0.7)
+
+    class TwoFaceRuntime:
+        cold_start_ms = 0.0
+
+        def detect(self, *_):
+            box = np.array([0, 0, 112, 112], dtype=np.float32)
+            return [Face(box, np.full((5, 2), 50, np.float32), 0.99),
+                    Face(box, CANONICAL.copy(), 0.99)]
+
+        def embed(self, crops):
+            return np.stack([unit(0)] * len(crops))
+
+    pipeline = Pipeline(TwoFaceRuntime(), profile, model)
+    frame = np.random.default_rng(1).integers(0, 256, (112, 112, 3), dtype=np.uint8)
+    monkeypatch.setattr("facetrack_ml.pipeline.probe", lambda *_args, **_kwargs:
+                        MediaInfo(112, 112, 2, "vp9", 1))
+    monkeypatch.setattr("facetrack_ml.pipeline.sampled_frames", lambda *_args:
+                        iter([(100, frame)]))
+    observations, _, stats, _ = pipeline.observe(tmp_path / "synthetic.webm", enrollment=False)
+    assert len(observations) == 1 and stats["quality_rejects"] == 1

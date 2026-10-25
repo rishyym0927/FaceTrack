@@ -275,8 +275,12 @@ class ProductShell extends StatelessWidget {
       return LayoutBuilder(
         builder: (context, c) {
           final wide = c.maxWidth >= 800;
+          final showInstituteName =
+              c.maxWidth >= 620 &&
+              MediaQuery.textScalerOf(context).scale(1) <= 1.3;
           return Scaffold(
             appBar: AppBar(
+              titleSpacing: wide ? 24 : 16,
               title: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -310,16 +314,57 @@ class ProductShell extends StatelessWidget {
               actions: [
                 if (auth.instituteName.isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: c.maxWidth * 0.35),
-                      child: Text(
-                        auth.instituteName,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                          fontSize: 12,
+                    padding: const EdgeInsets.only(right: 12),
+                    child: Tooltip(
+                      message: auth.instituteName,
+                      child: Semantics(
+                        label: 'Institute: ${auth.instituteName}',
+                        button: false,
+                        child: Container(
+                          constraints: BoxConstraints(
+                            maxWidth: showInstituteName
+                                ? c.maxWidth * 0.32
+                                : 44,
+                          ),
+                          padding: EdgeInsets.symmetric(
+                            horizontal: showInstituteName ? 12 : 10,
+                            vertical: 8,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Theme.of(context).colorScheme.primary
+                                .withValues(alpha: .07),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(
+                              color: Theme.of(context).colorScheme.outline,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.account_balance_outlined,
+                                size: 18,
+                                color: Theme.of(context).colorScheme.primary,
+                              ),
+                              if (showInstituteName) ...[
+                                const SizedBox(width: 8),
+                                Flexible(
+                                  child: Text(
+                                    auth.instituteName,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                      color: Theme.of(context)
+                                          .colorScheme
+                                          .onSurfaceVariant,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
                         ),
                       ),
                     ),

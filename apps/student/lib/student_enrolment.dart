@@ -287,7 +287,14 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
           },
           checkpoint: (url) async {
             clip.uploadUrl = url;
-            await PendingClips.save(clip);
+            final retained = await PendingClips.update(clip);
+            if (!retained || services.client.auth.currentUser?.id != owner) {
+              currentUploader.cancel();
+              throw const AppFailure(
+                'This recording is no longer available. Sign in and record again.',
+                status: 401,
+              );
+            }
           },
         );
         await commit();

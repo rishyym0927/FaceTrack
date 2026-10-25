@@ -25,6 +25,18 @@ ThemeData appTheme() {
           surfaceContainerLowest: canvas,
         ),
     scaffoldBackgroundColor: canvas,
+    textTheme: const TextTheme(
+      headlineLarge: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -1),
+      headlineMedium: TextStyle(
+        fontWeight: FontWeight.w800,
+        letterSpacing: -.6,
+      ),
+      titleLarge: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.2),
+      titleMedium: TextStyle(fontWeight: FontWeight.w700),
+      labelLarge: TextStyle(fontWeight: FontWeight.w700),
+      bodyLarge: TextStyle(height: 1.45),
+      bodyMedium: TextStyle(height: 1.4),
+    ),
     appBarTheme: const AppBarTheme(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
@@ -89,6 +101,34 @@ ThemeData appTheme() {
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+    ),
+    dividerTheme: const DividerThemeData(color: border, space: 28),
+    tabBarTheme: TabBarThemeData(
+      dividerColor: border,
+      indicatorSize: TabBarIndicatorSize.tab,
+      indicator: BoxDecoration(
+        color: const Color(0xffdcefe5),
+        borderRadius: BorderRadius.circular(12),
+      ),
+      labelColor: ink,
+      unselectedLabelColor: muted,
+      labelStyle: const TextStyle(fontWeight: FontWeight.w700),
+    ),
+    progressIndicatorTheme: const ProgressIndicatorThemeData(
+      color: primary,
+      linearTrackColor: Color(0xffdce7e1),
+    ),
+    tooltipTheme: TooltipThemeData(
+      decoration: BoxDecoration(
+        color: ink,
+        borderRadius: BorderRadius.circular(8),
+      ),
+      textStyle: const TextStyle(color: Colors.white, fontSize: 12),
     ),
     visualDensity: VisualDensity.standard,
   );
@@ -392,24 +432,42 @@ class ErrorView extends StatelessWidget {
   final Object error;
   final VoidCallback retry;
   @override
-  Widget build(BuildContext context) => MessageView(
-    title:
-        error is AppFailure &&
-            (error as AppFailure).code == 'development_api_unreachable'
+  Widget build(BuildContext context) {
+    final failure = error is AppFailure ? error as AppFailure : null;
+    final development = failure?.code == 'development_api_unreachable';
+    final title = development
         ? 'Mac connection unavailable'
-        : error is AppFailure && (error as AppFailure).status == 403
-        ? 'Access unavailable'
-        : 'Could not load this page',
-    message: error is AppFailure
-        ? (error as AppFailure).message
-        : 'Please retry. If this continues, contact your institute.',
-    action: OutlinedButton.icon(
-      onPressed: retry,
-      icon: const Icon(Icons.refresh),
-      label: const Text('Retry'),
-    ),
-    icon: Icons.cloud_off_outlined,
-  );
+        : switch (failure?.status) {
+            401 => 'Session expired',
+            403 => 'Access unavailable',
+            404 => 'Item unavailable',
+            429 => 'Please wait before retrying',
+            503 => 'Service temporarily unavailable',
+            _ => 'Could not load this page',
+          };
+    final icon = development
+        ? Icons.usb_off_outlined
+        : switch (failure?.status) {
+            401 => Icons.lock_clock_outlined,
+            403 => Icons.lock_outline,
+            404 => Icons.search_off_outlined,
+            429 => Icons.hourglass_top_outlined,
+            503 => Icons.cloud_off_outlined,
+            _ => Icons.sync_problem_outlined,
+          };
+    return MessageView(
+      title: title,
+      message:
+          failure?.message ??
+          'Please retry. If this continues, contact your institute.',
+      action: OutlinedButton.icon(
+        onPressed: retry,
+        icon: const Icon(Icons.refresh),
+        label: const Text('Retry'),
+      ),
+      icon: icon,
+    );
+  }
 }
 
 class PagedController<T> extends ChangeNotifier {

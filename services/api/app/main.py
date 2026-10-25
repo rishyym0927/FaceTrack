@@ -90,6 +90,30 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     async def bounded_requests(request, call_next):
         request.state.request_id = str(uuid4())
         start = time.perf_counter()
+
+        def finalize(response):
+            response.headers["X-Request-ID"] = request.state.request_id
+            response.headers["Cache-Control"] = "no-store"
+            response.headers["X-Content-Type-Options"] = "nosniff"
+            response.headers["X-Frame-Options"] = "DENY"
+            response.headers["Referrer-Policy"] = "no-referrer"
+            response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+            return response
+
+        def log(response):
+            route = request.scope.get("route")
+            logger.info(
+                json.dumps(
+                    {
+                        "request_id": request.state.request_id,
+                        "route": getattr(route, "path", "unmatched"),
+                        "status": response.status_code,
+                        "duration_ms": round((time.perf_counter() - start) * 1000, 3),
+                    }
+                )
+            )
+            return response
+
         maximum = 1024 * 1024
         data, total = [], 0
         async for chunk in request.stream():
@@ -98,26 +122,10 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 response = error_response(
                     request, 413, "BODY_TOO_LARGE", "Request body exceeds 1 MiB."
                 )
-                response.headers["X-Request-ID"] = request.state.request_id
-                return response
+                return log(finalize(response))
             data.append(chunk)
         request._body = b"".join(data)
-        response = await call_next(request)
-        response.headers["X-Request-ID"] = request.state.request_id
-        response.headers["Cache-Control"] = "no-store"
-        response.headers["X-Content-Type-Options"] = "nosniff"
-        route = request.scope.get("route")
-        logger.info(
-            json.dumps(
-                {
-                    "request_id": request.state.request_id,
-                    "route": getattr(route, "path", "unmatched"),
-                    "status": response.status_code,
-                    "duration_ms": round((time.perf_counter() - start) * 1000, 3),
-                }
-            )
-        )
-        return response
+        return log(finalize(await call_next(request)))
 
     @app.exception_handler(HTTPException)
     async def http_error(request, error):

@@ -1,3 +1,5 @@
+import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:camera/camera.dart';
@@ -54,7 +56,37 @@ class PendingClip {
 class PendingClips {
   static const key = 'facetrack.private.pending-enrolment.v1';
   static PendingClip? memory;
-  static Future<PendingClip?> read() async {
+  static final Queue<Future<void> Function()> _waiting = Queue();
+  static bool _running = false;
+
+  static Future<T> _exclusive<T>(Future<T> Function() work) {
+    final result = Completer<T>();
+
+    Future<void> run() async {
+      try {
+        result.complete(await work());
+      } catch (error, stackTrace) {
+        result.completeError(error, stackTrace);
+      } finally {
+        if (_waiting.isEmpty) {
+          _running = false;
+        } else {
+          _running = true;
+          unawaited(_waiting.removeFirst()());
+        }
+      }
+    }
+
+    if (_running) {
+      _waiting.add(run);
+    } else {
+      _running = true;
+      unawaited(run());
+    }
+    return result.future;
+  }
+
+  static Future<PendingClip?> _read() async {
     if (kIsWeb) return memory;
     final raw = (await SharedPreferences.getInstance()).getString(key);
     if (raw == null) return null;
@@ -65,7 +97,7 @@ class PendingClips {
     }
   }
 
-  static Future<void> save(PendingClip clip) async {
+  static Future<void> _save(PendingClip clip) async {
     memory = clip;
     if (!kIsWeb)
       await (await SharedPreferences.getInstance()).setString(
@@ -74,7 +106,33 @@ class PendingClips {
       );
   }
 
-  static Future<PendingClip> retain(PendingClip clip) async {
+  static Future<void> _clear() async {
+    final old = await _read();
+    if (old != null) await files.remove(old.path);
+    memory = null;
+    if (!kIsWeb) await (await SharedPreferences.getInstance()).remove(key);
+  }
+
+  static Future<PendingClip?> read() => _exclusive(_read);
+
+  static Future<void> save(PendingClip clip) => _exclusive(() => _save(clip));
+
+  /// Updates an existing recording only. Cleanup/logout winning the race means
+  /// a late upload checkpoint cannot recreate its private capability metadata.
+  static Future<bool> update(PendingClip clip) => _exclusive(() async {
+    final current = await _read();
+    if (current == null ||
+        current.owner != clip.owner ||
+        current.institute != clip.institute ||
+        current.attempt != clip.attempt ||
+        current.path != clip.path) {
+      return false;
+    }
+    await _save(clip);
+    return true;
+  });
+
+  static Future<PendingClip> retain(PendingClip clip) => _exclusive(() async {
     final path = await files.retain(clip.path, clip.attempt);
     final retained = PendingClip(
       owner: clip.owner,
@@ -87,22 +145,17 @@ class PendingClips {
       missedGuidance: clip.missedGuidance,
       uploadUrl: clip.uploadUrl,
     );
-    await save(retained);
+    await _save(retained);
     return retained;
-  }
+  });
 
-  static Future<void> clear() async {
-    final old = await read();
-    if (old != null) await files.remove(old.path);
-    memory = null;
-    if (!kIsWeb) await (await SharedPreferences.getInstance()).remove(key);
-  }
+  static Future<void> clear() => _exclusive(_clear);
 
-  static Future<void> expire({String? owner}) async {
-    final old = await read();
+  static Future<void> expire({String? owner}) => _exclusive(() async {
+    final old = await _read();
     if (old != null &&
         (DateTime.now().difference(old.created) >= const Duration(hours: 24) ||
             (owner != null && old.owner != owner)))
-      await clear();
-  }
+      await _clear();
+  });
 }

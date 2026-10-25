@@ -1,9 +1,22 @@
+import 'dart:io';
+
 import 'package:facetrack_capture/src/pose_guidance.dart';
 import 'package:facetrack_capture/src/pending.dart';
-import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+  TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+      .setMockMethodCallHandler(pathProvider, (call) async {
+        if (call.method == 'getApplicationSupportDirectory' ||
+            call.method == 'getTemporaryDirectory') {
+          return Directory.systemTemp.path;
+        }
+        return null;
+      });
   final start = DateTime.utc(2026, 10, 23);
   PoseObservation observation(
     int milliseconds, {
@@ -89,4 +102,26 @@ void main() {
       expect(PendingClip.fromJson(old).missedGuidance, isEmpty);
     },
   );
+
+  test('late upload checkpoint cannot resurrect cleared private media', () async {
+    SharedPreferences.setMockInitialValues({});
+    final file = File(
+      '${Directory.systemTemp.path}/facetrack-pending-${DateTime.now().microsecondsSinceEpoch}.mp4',
+    )..writeAsBytesSync([1, 2, 3]);
+    final clip = PendingClip(
+      owner: 'owner',
+      institute: 'institute',
+      attempt: '00000000-0000-4000-8000-000000000001',
+      path: file.path,
+      mime: 'video/mp4',
+      completeKey: 'key',
+      created: DateTime.now(),
+    );
+    await PendingClips.save(clip);
+    await PendingClips.clear();
+    clip.uploadUrl = 'https://fixture.invalid/resumable/private';
+    expect(await PendingClips.update(clip), isFalse);
+    expect(await PendingClips.read(), isNull);
+    if (file.existsSync()) file.deleteSync();
+  });
 }

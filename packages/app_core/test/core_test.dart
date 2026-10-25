@@ -236,6 +236,46 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
+  testWidgets(
+    'Narrow large-text app bar keeps product and institute accessible',
+    (tester) async {
+      final h = (await tester.runAsync(() => harness()))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      (h.account['memberships'] as List).first['institute_name'] =
+          'FaceTrack Institute of Engineering and Technology';
+      tester.view.physicalSize = const Size(360, 800);
+      tester.view.devicePixelRatio = 1;
+      tester.platformDispatcher.textScaleFactorTestValue = 2;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [servicesProvider.overrideWithValue(h.services)],
+          child: ProductApp(
+            classesBuilder: (_) => const Text('Classes content'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('FaceTrack Student'), findsOneWidget);
+      expect(find.byIcon(Icons.account_balance_outlined), findsOneWidget);
+      final tooltip = tester.widget<Tooltip>(
+        find.byWidgetPredicate(
+          (widget) =>
+              widget is Tooltip &&
+              widget.message ==
+                  'FaceTrack Institute of Engineering and Technology',
+        ),
+      );
+      expect(
+        tooltip.message,
+        'FaceTrack Institute of Engineering and Technology',
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets('Mutation dialogs suppress repeated taps while saving', (
     tester,
   ) async {
