@@ -45,7 +45,7 @@ Run the complete existing FaceTrack demo locally: Supabase remains hosted; Flutt
 Do this in order:
 
 A. Inspect the computer
-- Confirm this is Windows 10/11 64-bit with virtualization available.
+- Confirm this is Windows 10/11 x64 (AMD64/Intel 64) with virtualization available. Stop and report if it is Windows on ARM because that host is unverified.
 - Check free disk space and whether Git, Flutter stable, Docker Desktop, WSL 2, Chrome or Edge, and Android platform-tools are installed.
 - Run `flutter doctor`, `flutter devices`, `docker version` and `docker info` where available.
 - If a prerequisite is missing, install it from its official source. Prefer winget only after verifying the current package ID with `winget search`. Ask me only when Windows needs administrator approval, a Docker/WSL restart, license acceptance, sign-in or a physical USB action.

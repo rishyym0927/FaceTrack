@@ -10,6 +10,8 @@ Student and Teacher Flutter apps for human-reviewed, face-assisted attendance. T
 
 Private configuration, permitted model files and controlled accounts are intentionally absent from Git. A fresh clone cannot run real face processing until an authorized operator provisions them.
 
+See the [platform support matrix](docs/PLATFORM_SUPPORT.md) before promising an operating system or browser. Current product targets are Android and web; iOS and native desktop apps are not implemented.
+
 ## Run the current demo on macOS
 
 The existing Mac has private configuration in `.local/` and service `.env` files; Git does not include credentials, model weights, recordings or templates. On a fresh clone, follow the [backend setup](services/api/README.md) and [worker setup](services/worker/README.md) before starting. Keep the Mac awake and use a separate terminal for each process:
