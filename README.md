@@ -4,9 +4,17 @@ Student and Teacher Flutter apps for human-reviewed, face-assisted attendance. T
 
 ## Choose your platform
 
-- **Windows:** follow the beginner-friendly [Windows setup](docs/WINDOWS_SETUP.md), then run `.\scripts\windows\start-demo.ps1`.
+The backend runs from one canonical, cross-platform `compose.yaml` (Linux
+containers) on every OS. Same verbs everywhere — `make up|down|logs|console` on
+macOS/Linux, `./run.ps1 up|down|logs|console` on Windows — or `docker compose`
+directly. The only hard requirement for the backend is Docker; the client is
+Flutter **web** in a browser.
+
+- **Any OS with Docker:** `scripts/setup.sh` (or `scripts\windows\setup.ps1`), then `make up` (or `./run.ps1 up`), then open the web apps.
+- **Windows:** beginner guide at [Windows setup](docs/WINDOWS_SETUP.md); `.\scripts\windows\start-demo.ps1` still works.
+- **Linux:** [Linux setup](docs/LINUX_SETUP.md).
 - **Nontechnical Windows handoff:** give the client the [Claude setup prompt](docs/CLIENT_WINDOWS_HANDOFF.md) plus the private configuration package through a secure channel.
-- **macOS (configured demo machine):** use the six commands below.
+- **macOS (configured demo machine):** use the six native commands below (no Docker needed).
 
 Private configuration, permitted model files and controlled accounts are intentionally absent from Git. A fresh clone cannot run real face processing until an authorized operator provisions them.
 

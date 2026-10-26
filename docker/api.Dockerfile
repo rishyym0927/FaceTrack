@@ -10,7 +10,7 @@ WORKDIR /workspace/services/api
 COPY services/api/pyproject.toml services/api/uv.lock ./
 COPY services/api/app ./app
 COPY services/api/alembic.ini ./
-COPY services/api/alembic ./alembic
+COPY services/api/migrations ./migrations
 COPY services/api/tools ./tools
 RUN uv sync --locked
 

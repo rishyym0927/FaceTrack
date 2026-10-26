@@ -1,0 +1,119 @@
+# Canonical cross-platform stack (Linux containers). Runs identically on
+# macOS, Linux and Windows wherever Docker Engine / Docker Desktop is present:
+#   docker compose up -d                 # redis + api + worker + agent
+#   docker compose --profile console up  # add the client model-test page (8010)
+# Convenience verbs: `make up|down|logs|console` (macOS/Linux) or
+# `./run.ps1 up|down|logs|console` (Windows). See docs/LINUX_SETUP.md and
+# docs/WINDOWS_SETUP.md. compose.windows.yaml is a thin alias that includes
+# this file, kept for existing Windows scripts.
+name: facetrack
+
+services:
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+    networks: [facetrack-private]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 2s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/api.Dockerfile
+    env_file: services/api/.env
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./services/api:/workspace/services/api
+      - ./services/worker:/workspace/services/worker
+      - ./.local:/workspace/.local
+    restart: unless-stopped
+    networks: [facetrack-private]
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "/opt/venv/bin/python",
+          "-c",
+          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/ready', timeout=2)",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    env_file:
+      - path: services/worker/.env
+        required: false
+    environment: &worker-environment
+      FACETRACK_CONTAINER_NETWORK: "1"
+      API_BASE_URL: http://api:8000
+      REDIS_URL: redis://redis:6379/0
+      MANIFEST_PATH: /workspace/.local/spike/models/buffalo_sc/manifest.json
+      PROFILE_PATH: /workspace/.local/spike/profiles/frozen-phase1b-v1.json
+      TEMP_ROOT: /workspace/.local/enrollment/tmp
+    volumes: &worker-volumes
+      - ./services/worker:/workspace/services/worker
+      - ./.local:/workspace/.local
+    depends_on:
+      api:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    networks: [facetrack-private]
+
+  agent:
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    command: ["/opt/venv/bin/python", "-m", "facetrack_worker.agent"]
+    env_file:
+      - path: services/worker/.env
+        required: false
+    environment: *worker-environment
+    volumes: *worker-volumes
+    depends_on:
+      worker:
+        condition: service_started
+    restart: unless-stopped
+    networks: [facetrack-private]
+
+  # Client model-test page (docs/MODEL_TEST_CONSOLE.md). Started only with `--profile console`;
+  # needs no API, Redis, Supabase or .env. Volunteer face data lives in a private named volume.
+  console:
+    profiles: ["console"]
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    command: ["/opt/venv/bin/python", "-m", "facetrack_worker.console"]
+    environment:
+      FACETRACK_CONSOLE_HOST: "0.0.0.0"
+      FACETRACK_CONSOLE_PORT: "8010"
+      MANIFEST_PATH: /workspace/.local/spike/models/buffalo_sc/manifest.json
+      PROFILE_PATH: /workspace/.local/spike/profiles/frozen-phase1b-v1.json
+      CONSOLE_WEB_DIR: /workspace/.local/console-web
+      CONSOLE_ROOT: /data/test-console
+    ports:
+      - "127.0.0.1:8010:8010"
+    volumes:
+      - ./services/worker:/workspace/services/worker
+      - ./.local/spike:/workspace/.local/spike:ro
+      - ./.local/console-web:/workspace/.local/console-web:ro
+      - console-data:/data
+    restart: "no"
+    networks: [facetrack-private]
+
+networks:
+  facetrack-private:
+    driver: bridge
+
+volumes:
+  console-data:

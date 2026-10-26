@@ -1,8 +1,33 @@
 #!/bin/sh
+# Flutter wrapper for macOS/Linux. Prefers the repo-bundled toolchain under
+# .tools/ when present (the configured Mac demo host), otherwise falls back to
+# a system-installed Flutter/JDK on PATH so the same command works on Linux.
+# Windows uses scripts/windows/*.ps1 instead.
 set -eu
 FACETRACK_ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-export ANDROID_HOME="$FACETRACK_ROOT/.tools/android_sdk"
-export ANDROID_SDK_ROOT="$ANDROID_HOME"
-export JAVA_HOME="$(/usr/libexec/java_home -v 17)"
+
+# Android SDK: use the bundled one if it exists, else respect the environment.
+if [ -d "$FACETRACK_ROOT/.tools/android_sdk" ]; then
+  ANDROID_HOME="$FACETRACK_ROOT/.tools/android_sdk"
+  ANDROID_SDK_ROOT="$ANDROID_HOME"
+  export ANDROID_HOME ANDROID_SDK_ROOT
+fi
+
+# JDK 17: keep an explicit JAVA_HOME; else discover one on macOS; else rely on
+# whatever `java` is on PATH (the Linux/Windows case).
+if [ -z "${JAVA_HOME:-}" ] && [ -x /usr/libexec/java_home ]; then
+  DISCOVERED=$(/usr/libexec/java_home -v 17 2>/dev/null || true)
+  if [ -n "$DISCOVERED" ]; then
+    JAVA_HOME="$DISCOVERED"
+    export JAVA_HOME
+  fi
+fi
+
+# Repo-local Gradle cache keeps builds reproducible without touching $HOME.
 export GRADLE_USER_HOME="$FACETRACK_ROOT/.cache/gradle"
-exec "$FACETRACK_ROOT/.tools/flutter/bin/flutter" "$@"
+
+# Flutter binary: bundled under .tools if present, otherwise from PATH.
+if [ -x "$FACETRACK_ROOT/.tools/flutter/bin/flutter" ]; then
+  exec "$FACETRACK_ROOT/.tools/flutter/bin/flutter" "$@"
+fi
+exec flutter "$@"

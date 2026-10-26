@@ -1,0 +1,29 @@
+# Normalize line endings so scripts work after checkout on any OS.
+# Shell scripts, YAML and Dockerfiles must stay LF even on Windows checkouts;
+# PowerShell scripts use CRLF.
+* text=auto eol=lf
+
+*.ps1 text eol=crlf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Explicit LF for executables and config that run under sh/docker.
+scripts/flutter text eol=lf
+scripts/spike text eol=lf
+scripts/android-connect text eol=lf
+scripts/build-console text eol=lf
+scripts/test-console text eol=lf
+*.sh text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+
+# Binary assets (never normalize).
+*.png binary
+*.jpg binary
+*.onnx binary
+*.apk binary
+*.zip binary
+*.webm binary
+*.mp4 binary
