@@ -9,6 +9,7 @@ import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'attendance_table.dart';
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
 
@@ -592,39 +593,16 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     });
   }
 
-  Future<void> confirmAllProposals(List<Json> rows) async {
-    final count = rows.where((row) {
-      final value = decisions[row['student_id']] ?? row['status'];
-      return value == 'proposed_present' || value == 'proposed_absent';
-    }).length;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Confirm recognition proposals?'),
-        content: Text(
-          'This will convert $count recognition proposals into draft Present or Absent decisions. Review every row before publishing; “Not recognized” is not proof of absence.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(c, false),
-            child: const Text('Review individually'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(c, true),
-            child: const Text('Confirm drafts'),
-          ),
-        ],
-      ),
-    );
-    if (ok != true || !mounted) return;
+  /// One-click: confirm every AI-matched student (proposed_present) as a draft
+  /// Present. Deliberately leaves "Not recognized" and "Unassessed" untouched --
+  /// the teacher must decide those. Reversible before publishing, so no dialog.
+  void approveAllMatched() {
+    final rows = (data?['items'] as List?)?.cast<Json>() ?? const <Json>[];
     setState(() {
       for (final row in rows) {
         final value = decisions[row['student_id']] ?? row['status'];
         if (value == 'proposed_present') {
           decisions[row['student_id']] = 'present';
-        }
-        if (value == 'proposed_absent') {
-          decisions[row['student_id']] = 'absent';
         }
       }
       syncExitGuard();
@@ -843,112 +821,31 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             child: Text(
               'No students on this roster. Approve class membership before opening a new session.',
             ),
-          ),
-        for (final row in rows)
-          Panel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${row['official_name']} · ${row['enrollment_number']}',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                Text(
-                  row['recognition_eligible'] == true
-                      ? 'Face enrolment available at session opening'
-                      : 'Manual assessment required',
-                ),
-                const SizedBox(height: 8),
-                if (editable)
-                  DropdownButtonFormField<String>(
-                    isExpanded: true,
-                    key: ValueKey('${row['student_id']}:${s['version']}'),
-                    initialValue: decisions[row['student_id']] ?? row['status'],
-                    decoration: const InputDecoration(
-                      labelText: 'Attendance decision',
-                    ),
-                    items: [
-                      if (row['status'] == 'proposed_present')
-                        const DropdownMenuItem(
-                          value: 'proposed_present',
-                          child: Text(
-                            'Suggested present — confirm',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      if (row['status'] == 'proposed_absent')
-                        const DropdownMenuItem(
-                          value: 'proposed_absent',
-                          child: Text(
-                            'Not recognized — confirm',
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      for (final status in [
-                        'unassessed',
-                        'present',
-                        'absent',
-                        'late',
-                        'excused',
-                      ])
-                        DropdownMenuItem(
-                          value: status,
-                          child: Text(
-                            status == 'unassessed'
-                                ? 'Unassessed'
-                                : status[0].toUpperCase() + status.substring(1),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                    ],
-                    onChanged: busy
-                        ? null
-                        : (v) => setState(() {
-                            decisions[row['student_id']] = v!;
-                            syncExitGuard();
-                          }),
-                  )
-                else
-                  Text('Attendance: ${row['status']}'),
-                if (row['reason'] != null) Text('Note: ${row['reason']}'),
-                if (row['assessment_code'] != null) ...[
-                  const SizedBox(height: 8),
-                  Text(switch (row['assessment_code']) {
-                    'recognized' =>
-                      'Evidence: recognized in separate video frames.',
-                    'not_recognized' => 'Evidence: no corroborated match in a usable capture. Verify before marking Absent.',
-                    'template_ineligible' =>
-                      'Evidence: face template unavailable; assess manually.',
-                    'limited_capture' => 'Evidence: capture coverage was insufficient; assess manually.',
-                    'processing_failed' =>
-                      'Evidence: processing failed; assess manually.',
-                    _ => 'Evidence status unavailable.',
-                  }),
-                ],
-                if (finalised)
-                  TextButton(
-                    onPressed: busy ? null : () => correct(row),
-                    child: const Text('Correct attendance'),
-                  ),
-              ],
-            ),
+          )
+        else
+          AttendanceReviewTable(
+            rows: rows,
+            decisions: decisions,
+            editable: editable,
+            finalised: finalised,
+            busy: busy,
+            sessionLabel: sessionLabel(s['status']),
+            onChanged: (id, status) => setState(() {
+              decisions[id] = status;
+              syncExitGuard();
+            }),
+            onApproveAllMatched: approveAllMatched,
+            onCorrect: correct,
           ),
         if (editable) ...[
-          if (hasUnconfirmedProposal)
-            Panel(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Recognition proposals are drafts. Confirm every suggested Present and every Not recognized row before publishing.',
-                  ),
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: busy ? null : () => confirmAllProposals(rows),
-                    icon: const Icon(Icons.fact_check_outlined),
-                    label: const Text('Confirm all proposals as drafts'),
-                  ),
-                ],
+          if (hasUnconfirmedProposal && s['status'] != 'open')
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                'Resolve every matched and not-recognized row before publishing. Use the filters above to find them quickly.',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             ),
           if (s['status'] != 'open')
