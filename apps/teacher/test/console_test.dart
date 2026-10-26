@@ -121,6 +121,7 @@ void main() {
     expect(find.textContaining('Enrol at least 2 volunteers'), findsOneWidget);
     final save = find.widgetWithText(FilledButton, 'Save this volunteer');
     expect(tester.widget<FilledButton>(save).onPressed, isNull);
+    expect(find.textContaining('To save: type a name'), findsOneWidget);
     final start = find.widgetWithText(OutlinedButton, 'Start this recording');
     final again = find.widgetWithText(OutlinedButton, 'Record again (extra try)');
     expect(start, findsOneWidget);

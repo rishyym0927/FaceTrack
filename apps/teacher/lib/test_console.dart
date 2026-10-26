@@ -96,6 +96,18 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
       notice = text;
       noticeIsError = error;
     });
+    // The banner sits at the top of a long page; a snack bar is visible wherever you have scrolled.
+    final messenger = ScaffoldMessenger.maybeOf(context);
+    messenger
+      ?..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(text),
+          duration: Duration(seconds: error ? 12 : 4),
+          showCloseIcon: true,
+          backgroundColor: error ? Colors.red.shade800 : null,
+        ),
+      );
   }
 
   Future<T?> guarded<T>(String message, Future<T> Function() action) async {
@@ -394,19 +406,34 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
         ),
         const SizedBox(height: 12),
         ListenableBuilder(
-          listenable: session,
-          builder: (context, _) => FilledButton.icon(
-            onPressed:
-                busy ||
-                    session.clip == null ||
-                    session.clipMode != 'enrollment' ||
-                    !session.consent ||
-                    !supervised
-                ? null
-                : enrol,
-            icon: const Icon(Icons.person_add_alt_1),
-            label: const Text('Save this volunteer'),
-          ),
+          listenable: Listenable.merge([session, name]),
+          builder: (context, _) {
+            final hasClip = session.clip != null && session.clipMode == 'enrollment';
+            final missing = <String>[
+              if (name.text.trim().isEmpty) 'type a name',
+              if (!session.consent) 'tick “agreed to be recorded”',
+              if (!supervised) 'tick “I will watch the recording”',
+              if (!hasClip) 'press Start recording and wait about 15 seconds until it stops',
+            ];
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                FilledButton.icon(
+                  onPressed: busy || missing.isNotEmpty ? null : enrol,
+                  icon: const Icon(Icons.person_add_alt_1),
+                  label: const Text('Save this volunteer'),
+                ),
+                if (missing.isNotEmpty && !busy)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(
+                      'To save: ${missing.join('; ')}.',
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ),
+              ],
+            );
+          },
         ),
       ],
     );
