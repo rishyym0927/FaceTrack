@@ -108,6 +108,62 @@ async def test_session_roster_manual_publication_correction_history(bio):
         assert len(snapshots) == 2 and snapshots[0][0]["records"][0]["status"] == "present"
 
 
+async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
+    b = bio
+    s = await open_session(b)
+    sid = s["id"]
+    close = await b.client.post(
+        f"/v1/sessions/{sid}/close", headers=b.headers("teacher", key="c", version=s["version"])
+    )
+    s = close.json()
+    pub = await b.client.post(
+        f"/v1/sessions/{sid}/finalize",
+        headers=b.headers("teacher", key="pub", version=s["version"]),
+        json={
+            "decisions": [
+                {"student_id": b.ids["student1_profile"], "status": "present", "reason": "seen"}
+            ]
+        },
+    )
+    assert pub.status_code == 200, pub.text
+    offering = b.ids["offering"]
+    data = (
+        await b.client.get(
+            f"/v1/offerings/{offering}/attendance-summary", headers=b.headers("teacher")
+        )
+    ).json()
+    assert data["sessions_conducted"] == 1 and len(data["students"]) == 1
+    row = data["students"][0]
+    assert row["present"] == 1 and row["attended"] == 1 and row["assessed"] == 1
+    assert row["percentage"] == 100.0 and row["conducted"] == 1
+    # Only the assigned teacher (or an admin) may see the cumulative view.
+    for label in ("student1", "unassigned", "other_teacher"):
+        denied = await b.client.get(
+            f"/v1/offerings/{offering}/attendance-summary", headers=b.headers(label)
+        )
+        assert denied.status_code in (403, 404), denied.text
+    # A correction updates the aggregate automatically (no recompute call needed).
+    current = (await b.client.get(f"/v1/sessions/{sid}", headers=b.headers("teacher"))).json()
+    corr = await b.client.post(
+        f"/v1/sessions/{sid}/corrections",
+        headers=b.headers("teacher", key="corr", version=current["version"]),
+        json={
+            "student_id": b.ids["student1_profile"],
+            "status": "excused",
+            "reason": "Approved leave",
+            "publication_revision": 1,
+        },
+    )
+    assert corr.status_code == 200, corr.text
+    after = (
+        await b.client.get(
+            f"/v1/offerings/{offering}/attendance-summary", headers=b.headers("teacher")
+        )
+    ).json()["students"][0]
+    assert after["excused"] == 1 and after["present"] == 0
+    assert after["assessed"] == 0 and after["percentage"] is None
+
+
 async def test_manual_capture_requires_two_active_templates(bio):
     b = bio
     s = await open_session(b)

@@ -724,6 +724,65 @@ def install(app, engine, settings, principal, storage):
                 },
             }
 
+    @app.get("/v1/offerings/{offering_id}/attendance-summary")
+    async def offering_attendance_summary(
+        offering_id: UUID,
+        user: User,
+        institute_id: Institute,
+    ):
+        """Cumulative, per-student attendance across the offering's finalized
+        sessions. Read-only aggregation over the authoritative published
+        snapshots, so it updates automatically after each finalize/correction."""
+        async with transaction(engine, user.user_id, institute_id) as c:
+            await teacher_access(c, user.user_id, institute_id, offering_id)
+            rows = await many(
+                c,
+                """SELECT p.snapshot_json FROM app.publications p
+                JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
+                WHERE p.institute_id=:i AND s.offering_id=:o AND s.status='finalized'
+                AND p.revision=s.attendance_revision
+                ORDER BY s.starts_at""",
+                {"i": institute_id, "o": str(offering_id)},
+            )
+            sessions_conducted = len(rows)
+            students: dict[str, dict] = {}
+            for r in rows:
+                for rec in r["snapshot_json"]["records"]:
+                    sid = rec["student_id"]
+                    acc = students.setdefault(
+                        sid,
+                        {
+                            "student_id": sid,
+                            "official_name": rec.get("official_name"),
+                            "enrollment_number": rec.get("enrollment_number"),
+                            "present": 0, "late": 0, "absent": 0,
+                            "unassessed": 0, "excused": 0, "conducted": 0,
+                        },
+                    )
+                    acc["conducted"] += 1
+                    status = rec["status"]
+                    if status in ("present", "late", "absent", "unassessed", "excused"):
+                        acc[status] += 1
+            result = []
+            for acc in students.values():
+                attended = acc["present"] + acc["late"]
+                assessed = attended + acc["absent"]
+                result.append(
+                    {
+                        **acc,
+                        "attended": attended,
+                        "assessed": assessed,
+                        "percentage": round(100 * attended / assessed, 1) if assessed else None,
+                    }
+                )
+            result.sort(key=lambda x: (x["enrollment_number"] or "", x["student_id"]))
+            return {
+                "offering_id": str(offering_id),
+                "sessions_conducted": sessions_conducted,
+                "students": result,
+                "policy_version": "session-v1",
+            }
+
     @app.post("/v1/me/attendance/{publication_id}/disputes", status_code=201)
     async def create_dispute(
         publication_id: UUID,

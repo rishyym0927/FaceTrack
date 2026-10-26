@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'attendance_overview.dart';
 import 'biometric_reviews.dart';
 import 'teacher_sessions.dart';
 import 'teacher_disputes.dart';
@@ -574,6 +575,11 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                       selected: tab == 4,
                       onSelected: (_) => setState(() => tab = 4),
                     ),
+                    ChoiceChip(
+                      label: const Text('Overview'),
+                      selected: tab == 5,
+                      onSelected: (_) => setState(() => tab = 5),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -584,6 +590,8 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                       ? 'Review each recording before activating face enrolment. Class membership is approved separately.'
                       : tab == 4
                       ? 'Review questions about published Absent results. Accepted queries create a corrected publication and report.'
+                      : tab == 5
+                      ? 'Cumulative attendance across every published session for this class.'
                       : tab == 0
                       ? 'Approve requests only after confirming the student belongs in this class.'
                       : 'These approved students can be included when a classroom session opens.',
@@ -606,6 +614,8 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             BiometricReviews(controller: faces, api: api, institute: institute)
           else if (tab == 4)
             TeacherDisputes(api: api, institute: institute, offering: widget.id)
+          else if (tab == 5)
+            AttendanceOverview(api: api, institute: institute, offering: widget.id)
           else
             PagedList(
               controller: tab == 0 ? requests : students,
