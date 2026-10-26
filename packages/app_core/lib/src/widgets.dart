@@ -532,8 +532,8 @@ class PagedList<T> extends StatelessWidget {
       if (controller.loading && controller.items.isEmpty) {
         content = const Padding(
           key: ValueKey('loading'),
-          padding: EdgeInsets.all(48),
-          child: Center(child: CircularProgressIndicator()),
+          padding: EdgeInsets.only(top: 4),
+          child: SkeletonList(),
         );
       } else if (controller.error != null && controller.items.isEmpty) {
         content = KeyedSubtree(
@@ -1027,6 +1027,184 @@ class _RevealState extends State<Reveal> with SingleTickerProviderStateMixin {
         ).animate(curve),
         child: widget.child,
       ),
+    );
+  }
+}
+
+// --- Loading skeletons -------------------------------------------------------
+
+/// Sweeps a soft highlight across its (grey-block) children; static when
+/// reduced-motion is on.
+class Shimmer extends StatefulWidget {
+  const Shimmer({super.key, required this.child});
+  final Widget child;
+  @override
+  State<Shimmer> createState() => _ShimmerState();
+}
+
+class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1400),
+  )..repeat();
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) return widget.child;
+    const base = Color(0xffe7eeea), highlight = Color(0xfff6faf8);
+    return AnimatedBuilder(
+      animation: _c,
+      child: widget.child,
+      builder: (context, child) {
+        final t = _c.value * 2 - 1; // -1 → 1
+        return ShaderMask(
+          blendMode: BlendMode.srcATop,
+          shaderCallback: (bounds) => LinearGradient(
+            begin: Alignment(-1 + t, 0),
+            end: Alignment(1 + t, 0),
+            colors: const [base, highlight, base],
+            stops: const [0.35, 0.5, 0.65],
+          ).createShader(bounds),
+          child: child,
+        );
+      },
+    );
+  }
+}
+
+/// A single grey placeholder block.
+class SkelBox extends StatelessWidget {
+  const SkelBox({super.key, this.width, this.height = 14, this.radius = 8});
+  final double? width, height, radius;
+  @override
+  Widget build(BuildContext context) => Container(
+    width: width,
+    height: height,
+    decoration: BoxDecoration(
+      color: const Color(0xffe7eeea),
+      borderRadius: BorderRadius.circular(radius ?? 8),
+    ),
+  );
+}
+
+/// A card-shaped placeholder matching the list cards' rhythm.
+class SkeletonCard extends StatelessWidget {
+  const SkeletonCard({super.key});
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(20),
+    decoration: BoxDecoration(
+      color: Colors.white,
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Theme.of(context).colorScheme.outline),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: const [
+        Row(
+          children: [
+            SkelBox(width: 44, height: 44, radius: 14),
+            SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SkelBox(width: 180, height: 16),
+                  SizedBox(height: 10),
+                  SkelBox(width: 120, height: 12),
+                ],
+              ),
+            ),
+          ],
+        ),
+        SizedBox(height: 18),
+        SkelBox(width: 90, height: 24, radius: 100),
+        SizedBox(height: 14),
+        SkelBox(height: 12),
+        SizedBox(height: 8),
+        SkelBox(width: 220, height: 12),
+      ],
+    ),
+  );
+}
+
+/// A shimmering stack of [count] skeleton cards for first-load states.
+class SkeletonList extends StatelessWidget {
+  const SkeletonList({super.key, this.count = 3});
+  final int count;
+  @override
+  Widget build(BuildContext context) => Shimmer(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (var i = 0; i < count; i++)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 12),
+            child: SkeletonCard(),
+          ),
+      ],
+    ),
+  );
+}
+
+// --- Simple horizontal bar distribution --------------------------------------
+
+class BarDatum {
+  const BarDatum(this.label, this.value, this.color);
+  final String label;
+  final num value;
+  final Color color;
+}
+
+/// Labelled horizontal bars sharing one scale; bars animate via [TrackBar].
+class BarDistribution extends StatelessWidget {
+  const BarDistribution({super.key, required this.bars, this.labelWidth = 104});
+  final List<BarDatum> bars;
+  final double labelWidth;
+  @override
+  Widget build(BuildContext context) {
+    final maxValue = bars.fold<num>(1, (m, b) => b.value > m ? b.value : m);
+    return Column(
+      children: [
+        for (final b in bars)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: labelWidth,
+                  child: Text(
+                    b.label,
+                    style: const TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: TrackBar(
+                    value: b.value <= 0 ? 0 : b.value / maxValue,
+                    color: b.color,
+                    height: 14,
+                  ),
+                ),
+                SizedBox(
+                  width: 34,
+                  child: Text(
+                    '${b.value}',
+                    textAlign: TextAlign.right,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+              ],
+            ),
+          ),
+      ],
     );
   }
 }

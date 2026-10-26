@@ -209,6 +209,32 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
                 ],
               ),
             ),
+            if (pcts.isNotEmpty) ...[
+              const SizedBox(height: 22),
+              Text(
+                'Attendance distribution',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 12),
+              Reveal(
+                child: BarDistribution(
+                  bars: [
+                    BarDatum('90–100%',
+                        pcts.where((p) => p >= 90).length,
+                        const Color(0xff176451)),
+                    BarDatum('75–89%',
+                        pcts.where((p) => p >= 75 && p < 90).length,
+                        const Color(0xff3f9e6b)),
+                    BarDatum('50–74%',
+                        pcts.where((p) => p >= 50 && p < 75).length,
+                        const Color(0xff9a6a00)),
+                    BarDatum('Below 50%',
+                        pcts.where((p) => p < 50).length,
+                        const Color(0xffa22f2f)),
+                  ],
+                ),
+              ),
+            ],
           ],
           const SizedBox(height: 16),
           Wrap(

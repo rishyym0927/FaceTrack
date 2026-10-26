@@ -68,4 +68,40 @@ void main() {
     expect(percentColor(40), const Color(0xffa22f2f));
     expect(percentColor(null), const Color(0xff587067));
   });
+
+  testWidgets('BarDistribution renders every band label and value', (t) async {
+    await _pump(
+      t,
+      const BarDistribution(
+        bars: [
+          BarDatum('90–100%', 4, Color(0xff176451)),
+          BarDatum('Below 50%', 1, Color(0xffa22f2f)),
+        ],
+      ),
+    );
+    expect(find.text('90–100%'), findsOneWidget);
+    expect(find.text('Below 50%'), findsOneWidget);
+    expect(find.text('4'), findsOneWidget);
+    expect(find.text('1'), findsOneWidget);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('SkeletonList shows the requested number of cards', (t) async {
+    // Shimmer repeats forever, so pump a single frame rather than settling.
+    t.view.physicalSize = const Size(360, 1200);
+    t.view.devicePixelRatio = 1;
+    addTearDown(t.view.resetPhysicalSize);
+    await t.pumpWidget(
+      MaterialApp(
+        theme: appTheme(),
+        home: const Scaffold(
+          body: SingleChildScrollView(child: SkeletonList(count: 3)),
+        ),
+      ),
+    );
+    await t.pump();
+    expect(find.byType(SkeletonCard), findsNWidgets(3));
+    expect(t.takeException(), isNull);
+    await t.pumpWidget(const SizedBox());
+  });
 }
