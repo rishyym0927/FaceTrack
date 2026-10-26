@@ -21,7 +21,7 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-from facetrack_ml.config import canonical_hash, load_manifest, load_profile
+from facetrack_ml.config import canonical_hash, load_profile
 from facetrack_ml.pipeline import corroborate, match
 from facetrack_ml.runtime import Runtime, normalize, quality
 
