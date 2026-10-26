@@ -27,7 +27,7 @@ Start the API from `services/api`:
 .venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000
 ```
 
-Interactive contract: `http://127.0.0.1:8000/docs`. Liveness is `/health/live`; readiness is `/health/ready`. Readiness checks the restricted database role, migration head 0006, 36 RLS tables and Auth configuration; it does not replace a real login check. The configured hosted development project returned ready on 23 October. There is no development login bypass.
+Interactive contract: `http://127.0.0.1:8000/docs`. Liveness is `/health/live`; readiness is `/health/ready`. Readiness checks the restricted database role, migration head 0007, 37 RLS tables and Auth configuration; it does not replace a real login check. The configured hosted development project reached 0007 on 26 October. There is no development login bypass.
 
 ## Connect the new free Supabase development project
 
@@ -95,7 +95,7 @@ Primary service references: [Supabase signing keys](https://supabase.com/docs/gu
 
 ## Milestone 3B private enrolment
 
-Current schema head is `0006_timetable_reports`: 36 business tables with forced tenant RLS. Additive migrations 0003/0004 implement consent, pinned models/profiles, private media, attempts, encrypted templates, jobs and scoped workers; 0005 adds attendance and 0006 timetable/reports. Never edit an applied migration. The API remains local; all business data stays in the private `app` schema.
+Current schema head is `0007_attendance_queries`: 37 business tables with forced tenant RLS. Additive migrations 0003/0004 implement consent, pinned models/profiles, private media, attempts, encrypted templates, jobs and scoped workers; 0005 adds attendance, 0006 timetable/reports, and 0007 evidence-coded attendance proposals plus student attendance queries. Never edit an applied migration. The API remains local; all business data stays in the private `app` schema.
 
 Run from `services/api` after the existing owner/runtime configuration:
 
@@ -115,9 +115,11 @@ Optional real-provider transport check (synthetic bytes only, no face inference)
 
 This verifies signed TUS create/append, metadata, private signed read and anonymous denial; its disposable object is deleted in `finally`. It does not establish real enrolment acceptance. Local tests use synthetic Storage/vectors, distinct from hosted checks. The latest backend suite has 41 passing PostgreSQL-backed tests, including attendance/report/timetable ownership and retry checks; real classroom acceptance remains separate.
 
-## Attendance, timetable and reports
+## Attendance, queries, timetable and reports
 
-The existing development project has migrations through 0006, a private `facetrack-documents-dev` bucket (CSV/PDF, 25 MiB limit), and the **same** scoped worker token expanded to enrolment, recognition, timetable, report and optional delivery jobs. `tools.provision_documents` configures that bucket and updates the existing worker's allowed job kinds without replacing its credential; it is already run for this project. Do not rerun account seeding or worker token provisioning. Restart the API, Celery and the agent after changing their source. The agent needs Mac, Redis and API running to process document jobs and reconcile storage cleanup.
+The hosted development project and repository are at migration 0007. The private `facetrack-documents-dev` bucket (CSV/PDF, 25 MiB limit) and the **same** scoped worker token cover enrolment, recognition, timetable, report and optional delivery jobs. `tools.provision_documents` configures that bucket without replacing its credential; do not rerun account seeding or worker token provisioning. Restart the API, Celery and the agent after deployment.
+
+Successful, sufficiently usable recognition may create `proposed_present` and `proposed_absent` draft rows. The latter is displayed as **Not recognized** and never becomes a final absence without teacher confirmation. Limited coverage, missing templates and processing failure remain `unassessed`. Students may query only their own latest published Absent result. Assigned teachers accept or reject the query with a reason; acceptance creates a new immutable publication and corrected report. Push/email query notifications and attachments are not implemented.
 
 Teacher web → Classes → Sessions has manual sessions and a CSV import. First create any new room code in **Import timetable → Add room**. The template has exact columns `entry_key,term_code,course_code,branch,semester,section,teacher_email,room_code,weekday,start_time,end_time,effective_from,effective_until,timezone`; weekday values are MON–SUN and timezone is Asia/Kolkata. Upload → wait for validation → inspect preview → confirm a day within the term. Repeated confirmations are idempotent; conflicting room/faculty/class periods and stale previews fail safely. Opening/closing remains manual.
 

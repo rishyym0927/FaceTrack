@@ -282,3 +282,147 @@ async def test_withdrawal_blocks_inflight_recognition_commit(bio):
     assert r.status_code == 409, r.text
     with connect(b.urls["owner"]) as c:
         assert c.execute("SELECT count(*) FROM app.recognition_evidence").fetchone()[0] == 0
+
+
+async def test_teacher_confirms_absence_and_student_disputes_latest_publication(bio):
+    b = bio
+    s = await recognition_ready(b)
+    _, jid, epoch, data = await captured(b, s)
+    known = data["roster"][0]
+    body = {
+        k: data[k]
+        for k in ("generation", "source_sha256", "model_hash", "profile_hash", "roster_hash")
+    }
+    body.update(
+        epoch=epoch,
+        processed_sha256="e" * 64,
+        proposals=[
+            {
+                "student_id": known["student_id"],
+                "template_set_id": known["template_set_id"],
+                "template_epoch": known["template_epoch"],
+                "hits": 3,
+                "span_ms": 700,
+                "similarity": 0.91,
+            }
+        ],
+        unknown_observations=2,
+        quality={"sampled_frames": 12, "detections": 5, "quality_rejects": 1},
+        timings={"processing_total_ms": 5},
+    )
+    assert (
+        await b.client.post(f"/internal/v1/jobs/{jid}/complete", headers=b.wh, json=body)
+    ).status_code == 200
+    attendance = (
+        await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
+    ).json()
+    rows = {x["student_id"]: x for x in attendance["items"]}
+    absent_id = next(x for x in rows if x != known["student_id"])
+    assert rows[known["student_id"]]["status"] == "proposed_present"
+    assert rows[absent_id]["status"] == "proposed_absent"
+    assert rows[absent_id]["assessment_code"] == "not_recognized"
+
+    closed = await b.client.post(
+        f"/v1/sessions/{s['id']}/close",
+        headers=b.headers("teacher", key="close-absence", version=attendance["session"]["version"]),
+    )
+    assert closed.status_code == 200, closed.text
+    rejected = await b.client.post(
+        f"/v1/sessions/{s['id']}/finalize",
+        headers=b.headers("teacher", key="unresolved", version=closed.json()["version"]),
+        json={"decisions": []},
+    )
+    assert rejected.status_code == 409 and rejected.json()["error"]["code"] == "REVIEW_REQUIRED"
+    publication = await b.client.post(
+        f"/v1/sessions/{s['id']}/finalize",
+        headers=b.headers("teacher", key="confirm-absence", version=closed.json()["version"]),
+        json={
+            "decisions": [
+                {"student_id": known["student_id"], "status": "present"},
+                {"student_id": absent_id, "status": "absent"},
+            ]
+        },
+    )
+    assert publication.status_code == 200, publication.text
+    absent_label = "student1" if absent_id == b.ids["student1_profile"] else "student2"
+    blank_reason = await b.client.post(
+        f"/v1/me/attendance/{publication.json()['id']}/disputes",
+        headers=b.headers(absent_label, key="blank-attendance-query"),
+        json={"reason": "     "},
+    )
+    assert blank_reason.status_code == 422
+    dispute = await b.client.post(
+        f"/v1/me/attendance/{publication.json()['id']}/disputes",
+        headers=b.headers(absent_label, key="attendance-query"),
+        json={"reason": "I attended this class and request a review."},
+    )
+    assert dispute.status_code == 201, dispute.text
+    did = dispute.json()["id"]
+    replayed_dispute = await b.client.post(
+        f"/v1/me/attendance/{publication.json()['id']}/disputes",
+        headers=b.headers(absent_label, key="attendance-query"),
+        json={"reason": "I attended this class and request a review."},
+    )
+    assert replayed_dispute.status_code == 201
+    assert replayed_dispute.json()["id"] == did
+    assert (
+        await b.client.get("/v1/me/attendance-disputes", headers=b.headers(absent_label))
+    ).json()["items"][0]["status"] == "open"
+    for label in ("student1", "unassigned", "other_teacher"):
+        denied = await b.client.get(
+            f"/v1/offerings/{b.ids['offering']}/attendance-disputes",
+            headers=b.headers(label),
+        )
+        assert denied.status_code in (403, 404)
+    blank_resolution = await b.client.post(
+        f"/v1/attendance-disputes/{did}/resolve",
+        headers=b.headers("teacher", key="blank-query-resolution", version=1),
+        json={"decision": "rejected", "reason": "   "},
+    )
+    assert blank_resolution.status_code == 422
+    resolved = await b.client.post(
+        f"/v1/attendance-disputes/{did}/resolve",
+        headers=b.headers("teacher", key="accept-query", version=1),
+        json={"decision": "accepted", "reason": "Attendance verified with the faculty."},
+    )
+    assert resolved.status_code == 200, resolved.text
+    assert resolved.json()["status"] == "accepted"
+    replayed_resolution = await b.client.post(
+        f"/v1/attendance-disputes/{did}/resolve",
+        headers=b.headers("teacher", key="accept-query", version=1),
+        json={"decision": "accepted", "reason": "Attendance verified with the faculty."},
+    )
+    assert replayed_resolution.status_code == 200
+    assert replayed_resolution.json()["resolved_publication_id"] == resolved.json()[
+        "resolved_publication_id"
+    ]
+    own = (await b.client.get("/v1/me/attendance", headers=b.headers(absent_label))).json()
+    assert own["items"][0]["status"] == "present"
+    assert own["items"][0]["revision"] == 2
+
+
+async def test_limited_capture_never_proposes_absence(bio):
+    b = bio
+    s = await recognition_ready(b)
+    _, jid, epoch, data = await captured(b, s)
+    body = {
+        k: data[k]
+        for k in ("generation", "source_sha256", "model_hash", "profile_hash", "roster_hash")
+    }
+    body.update(
+        epoch=epoch,
+        processed_sha256="f" * 64,
+        proposals=[],
+        unknown_observations=0,
+        quality={"sampled_frames": 12, "detections": 4, "quality_rejects": 4},
+        timings={"processing_total_ms": 4},
+    )
+    result = await b.client.post(
+        f"/internal/v1/jobs/{jid}/complete", headers=b.wh, json=body
+    )
+    assert result.status_code == 200, result.text
+    rows = (
+        await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
+    ).json()["items"]
+    assert all(x["status"] == "unassessed" for x in rows)
+    assert all(x["assessment_code"] == "limited_capture" for x in rows)

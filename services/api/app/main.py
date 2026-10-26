@@ -206,8 +206,8 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 or not row["restricted"]
                 or not owner
                 or owner["owns"]
-                or policies["count"] != 36
-                or revision["version_num"] != "0006_timetable_reports"
+                or policies["count"] != 37
+                or revision["version_num"] != "0007_attendance_queries"
                 or not configured
             ):
                 raise ValueError()

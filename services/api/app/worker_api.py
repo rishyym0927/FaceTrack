@@ -432,6 +432,20 @@ async def fail(conn, worker, identifier, body):
             ),
             {"i": worker["institute_id"], "id": job["capture_id"]},
         )
+        await conn.execute(
+            text(
+                """UPDATE app.attendance_records a SET status='unassessed',source='none',
+                assessment_code='processing_failed',evidence_summary=CAST(:summary AS jsonb),version=version+1
+                FROM app.captures c WHERE c.institute_id=a.institute_id AND c.session_id=a.session_id
+                AND c.institute_id=:i AND c.id=:capture AND NOT a.manual_lock
+                AND a.status NOT IN ('proposed_present','present','absent','late','excused')"""
+            ),
+            {
+                "i": worker["institute_id"],
+                "capture": job["capture_id"],
+                "summary": json.dumps({"error_code": body.code}),
+            },
+        )
     if not retry and job["kind"] in ("report", "timetable", "delivery"):
         if job["kind"] == "report":
             await conn.execute(

@@ -234,9 +234,40 @@ async def complete(conn, worker, job_id, body, settings):
         )
         await conn.execute(
             text(
-                "UPDATE app.attendance_records SET status='proposed_present',source='ml',evidence_id=:e,version=version+1 WHERE institute_id=:i AND session_id=:s AND student_id=:student AND NOT manual_lock"
+                "UPDATE app.attendance_records SET status='proposed_present',source='ml',evidence_id=:e,assessment_code='recognized',evidence_summary=CAST(:summary AS jsonb),version=version+1 WHERE institute_id=:i AND session_id=:s AND student_id=:student AND NOT manual_lock"
             ),
-            {"e": ev["id"], "i": i, "s": s["id"], "student": p.student_id},
+            {
+                "e": ev["id"],
+                "summary": json.dumps(
+                    {"hits": p.hits, "span_ms": p.span_ms, "median_similarity": p.similarity}
+                ),
+                "i": i,
+                "s": s["id"],
+                "student": p.student_id,
+            },
+        )
+    proposed = {str(p.student_id) for p in body.proposals}
+    usable = max(0, body.quality.get("detections", 0) - body.quality.get("quality_rejects", 0))
+    sufficient_capture = body.quality.get("sampled_frames", 0) >= 2 and usable >= 2
+    for r in roster:
+        if not r["recognition_eligible"] or str(r["student_id"]) in proposed:
+            continue
+        await conn.execute(
+            text(
+                """UPDATE app.attendance_records SET status=:status,source=:source,
+                assessment_code=:code,evidence_summary=CAST(:summary AS jsonb),version=version+1
+                WHERE institute_id=:i AND session_id=:s AND student_id=:student AND NOT manual_lock
+                AND status<>'proposed_present'"""
+            ),
+            {
+                "status": "proposed_absent" if sufficient_capture else "unassessed",
+                "source": "ml" if sufficient_capture else "none",
+                "code": "not_recognized" if sufficient_capture else "limited_capture",
+                "summary": json.dumps({"usable_observations": usable}),
+                "i": i,
+                "s": s["id"],
+                "student": r["student_id"],
+            },
         )
     quality = {
         "counts": body.quality,

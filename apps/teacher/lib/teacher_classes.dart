@@ -7,6 +7,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 
 import 'biometric_reviews.dart';
 import 'teacher_sessions.dart';
+import 'teacher_disputes.dart';
 
 class TeacherClasses extends ConsumerStatefulWidget {
   const TeacherClasses({super.key});
@@ -568,6 +569,11 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                       selected: tab == 1,
                       onSelected: (_) => setState(() => tab = 1),
                     ),
+                    ChoiceChip(
+                      label: const Text('Attendance queries'),
+                      selected: tab == 4,
+                      onSelected: (_) => setState(() => tab = 4),
+                    ),
                   ],
                 ),
                 const SizedBox(height: 12),
@@ -576,6 +582,8 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                       ? 'Create a session, capture the classroom and review attendance before publishing.'
                       : tab == 2
                       ? 'Review each recording before activating face enrolment. Class membership is approved separately.'
+                      : tab == 4
+                      ? 'Review questions about published Absent results. Accepted queries create a corrected publication and report.'
                       : tab == 0
                       ? 'Approve requests only after confirming the student belongs in this class.'
                       : 'These approved students can be included when a classroom session opens.',
@@ -596,6 +604,8 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             )
           else if (tab == 2)
             BiometricReviews(controller: faces, api: api, institute: institute)
+          else if (tab == 4)
+            TeacherDisputes(api: api, institute: institute, offering: widget.id)
           else
             PagedList(
               controller: tab == 0 ? requests : students,

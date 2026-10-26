@@ -592,6 +592,45 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     });
   }
 
+  Future<void> confirmAllProposals(List<Json> rows) async {
+    final count = rows.where((row) {
+      final value = decisions[row['student_id']] ?? row['status'];
+      return value == 'proposed_present' || value == 'proposed_absent';
+    }).length;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Confirm recognition proposals?'),
+        content: Text(
+          'This will convert $count recognition proposals into draft Present or Absent decisions. Review every row before publishing; “Not recognized” is not proof of absence.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(c, false),
+            child: const Text('Review individually'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(c, true),
+            child: const Text('Confirm drafts'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    setState(() {
+      for (final row in rows) {
+        final value = decisions[row['student_id']] ?? row['status'];
+        if (value == 'proposed_present') {
+          decisions[row['student_id']] = 'present';
+        }
+        if (value == 'proposed_absent') {
+          decisions[row['student_id']] = 'absent';
+        }
+      }
+      syncExitGuard();
+    });
+  }
+
   Future<void> correct(Json row) async {
     String status = row['status'];
     final reason = TextEditingController();
@@ -671,9 +710,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     final s = data!['session'] as Json;
     final rows = (data!['items'] as List).cast<Json>();
     final finalised = s['status'] == 'finalized';
-    final hasUnconfirmedSuggestion = rows.any(
-      (row) =>
-          (decisions[row['student_id']] ?? row['status']) == 'proposed_present',
+    final hasUnconfirmedProposal = rows.any(
+      (row) => [
+        'proposed_present',
+        'proposed_absent',
+      ].contains(decisions[row['student_id']] ?? row['status']),
     );
     final editable = ![
       'scheduled',
@@ -835,6 +876,14 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                      if (row['status'] == 'proposed_absent')
+                        const DropdownMenuItem(
+                          value: 'proposed_absent',
+                          child: Text(
+                            'Not recognized — confirm',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
                       for (final status in [
                         'unassessed',
                         'present',
@@ -862,6 +911,20 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 else
                   Text('Attendance: ${row['status']}'),
                 if (row['reason'] != null) Text('Note: ${row['reason']}'),
+                if (row['assessment_code'] != null) ...[
+                  const SizedBox(height: 8),
+                  Text(switch (row['assessment_code']) {
+                    'recognized' =>
+                      'Evidence: recognized in separate video frames.',
+                    'not_recognized' => 'Evidence: no corroborated match in a usable capture. Verify before marking Absent.',
+                    'template_ineligible' =>
+                      'Evidence: face template unavailable; assess manually.',
+                    'limited_capture' => 'Evidence: capture coverage was insufficient; assess manually.',
+                    'processing_failed' =>
+                      'Evidence: processing failed; assess manually.',
+                    _ => 'Evidence status unavailable.',
+                  }),
+                ],
                 if (finalised)
                   TextButton(
                     onPressed: busy ? null : () => correct(row),
@@ -871,10 +934,21 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             ),
           ),
         if (editable) ...[
-          if (hasUnconfirmedSuggestion)
-            const Panel(
-              child: Text(
-                'Recognition suggested a student. Select a verified decision for every “Suggested present — confirm” row before publishing.',
+          if (hasUnconfirmedProposal)
+            Panel(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Recognition proposals are drafts. Confirm every suggested Present and every Not recognized row before publishing.',
+                  ),
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: busy ? null : () => confirmAllProposals(rows),
+                    icon: const Icon(Icons.fact_check_outlined),
+                    label: const Text('Confirm all proposals as drafts'),
+                  ),
+                ],
               ),
             ),
           if (s['status'] != 'open')
@@ -894,7 +968,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               ),
               if (s['status'] != 'open')
                 FilledButton(
-                  onPressed: busy || hasUnconfirmedSuggestion
+                  onPressed: busy || hasUnconfirmedProposal
                       ? null
                       : () => save(true),
                   child: const Text('Publish attendance'),

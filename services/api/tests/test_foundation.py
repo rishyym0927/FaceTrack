@@ -486,7 +486,7 @@ def test_empty_migrations_revoke_inherited_client_grants(backend):
                 conn.execute(
                     "SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='app' AND c.relkind='r' AND c.relrowsecurity AND c.relforcerowsecurity"
                 ).fetchone()[0]
-                == 36
+                == 37
             )
             for role in ("anon", "authenticated", "service_role"):
                 assert not conn.execute(

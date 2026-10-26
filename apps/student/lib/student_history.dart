@@ -17,6 +17,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
   late final String institute;
   late final PagedController<Json> controller;
   Json? summary;
+  List<Json> disputes = [];
   int summaryGeneration = 0;
   @override
   void initState() {
@@ -33,7 +34,17 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
           query: {'offering_id': widget.offering, 'cursor': ?cursor},
         );
         if (mounted && current == summaryGeneration) {
+          final disputeResult = await api.send(
+            'GET',
+            '/v1/me/attendance-disputes',
+            institute: institute,
+            query: {'limit': 200},
+          );
+          if (!mounted || current != summaryGeneration) {
+            return PageData.fromJson(result, (j) => j);
+          }
           summary = result['summary'];
+          disputes = (disputeResult['items'] as List).cast<Json>();
         }
         return PageData.fromJson(result, (j) => j);
       } on AppFailure catch (e) {
@@ -41,6 +52,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
             current == summaryGeneration &&
             [401, 403, 404].contains(e.status)) {
           summary = null;
+          disputes = [];
         }
         rethrow;
       }
@@ -56,6 +68,56 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
     unwatchLifecycle();
     controller.dispose();
     super.dispose();
+  }
+
+  Future<void> raiseQuery(Json record) async {
+    final reason = TextEditingController();
+    final submitted = await showDialog<bool>(
+      context: context,
+      builder: (_) => ActionDialog(
+        title: 'Raise an attendance query',
+        button: 'Send query',
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Explain why this published Absent result should be reviewed. Your assigned teacher will decide and any accepted correction creates a new publication.',
+            ),
+            const SizedBox(height: 16),
+            TextFormField(
+              controller: reason,
+              minLines: 3,
+              maxLines: 5,
+              maxLength: 1000,
+              validator: (value) => (value?.trim().length ?? 0) < 5
+                  ? 'Enter at least 5 characters.'
+                  : null,
+              decoration: const InputDecoration(labelText: 'Reason for review'),
+            ),
+          ],
+        ),
+        submit: (mutation) async {
+          await api.send(
+            'POST',
+            '/v1/me/attendance/${record['id']}/disputes',
+            institute: institute,
+            mutation: mutation,
+            body: {'reason': reason.text.trim()},
+          );
+        },
+      ),
+    );
+    reason.dispose();
+    if (submitted == true) {
+      await controller.load();
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Attendance query sent to your teacher.'),
+          ),
+        );
+      }
+    }
   }
 
   @override
@@ -124,6 +186,10 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         item: (r) {
           final d = DateTime.parse(r['starts_at']).toLocal(),
               l = MaterialLocalizations.of(context);
+          final query = disputes.cast<Json?>().firstWhere(
+            (item) => item?['source_publication_id'] == r['id'],
+            orElse: () => null,
+          );
           return Panel(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -133,9 +199,42 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                 ),
                 const SizedBox(height: 12),
                 StatusBadge(r['status']),
+                if (r['assessment_code'] != null) ...[
+                  const SizedBox(height: 8),
+                  Text(switch (r['assessment_code']) {
+                    'recognized' => 'Recognition evidence was available before teacher review.',
+                    'not_recognized' => 'The system did not recognize you in the usable capture; your teacher confirmed the final result.',
+                    'template_ineligible' => 'Face recognition was unavailable; your teacher assessed this manually.',
+                    'limited_capture' => 'Capture coverage was limited; your teacher assessed this manually.',
+                    'processing_failed' =>
+                      'Processing failed; your teacher assessed this manually.',
+                    _ => 'Your teacher reviewed this result.',
+                  }),
+                ],
                 const SizedBox(height: 12),
                 Text('Publication revision ${r['revision']}'),
                 if (r['reason'] != null) Text('Teacher note: ${r['reason']}'),
+                if (query != null) ...[
+                  const SizedBox(height: 12),
+                  StatusBadge(query['status']),
+                  Text(switch (query['status']) {
+                    'open' =>
+                      'Your attendance query is waiting for teacher review.',
+                    'accepted' => 'Your query was accepted and a corrected publication was created.',
+                    'rejected' =>
+                      'Your teacher reviewed and declined this query.',
+                    _ => 'This query is closed.',
+                  }),
+                  if (query['resolution_reason'] != null)
+                    Text('Teacher response: ${query['resolution_reason']}'),
+                ] else if (r['status'] == 'absent') ...[
+                  const SizedBox(height: 12),
+                  OutlinedButton.icon(
+                    onPressed: () => raiseQuery(r),
+                    icon: const Icon(Icons.chat_bubble_outline),
+                    label: const Text('Raise query'),
+                  ),
+                ],
               ],
             ),
           );

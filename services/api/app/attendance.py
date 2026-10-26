@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 
 from fastapi import Depends, Header, Query, Request
 from fastapi.encoders import jsonable_encoder
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from sqlalchemy import text
 
 from . import biometrics as bio
@@ -63,6 +63,31 @@ class Correction(Decision):
 
 class Cancel(Strict):
     reason: str = Field(min_length=1, max_length=500)
+
+
+class DisputeCreate(Strict):
+    reason: str = Field(min_length=5, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 5:
+            raise ValueError("Enter at least 5 non-space characters.")
+        return value
+
+
+class DisputeResolution(Strict):
+    decision: Literal["accepted", "rejected"]
+    reason: str = Field(min_length=3, max_length=1000)
+
+    @field_validator("reason")
+    @classmethod
+    def meaningful_reason(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("Enter at least 3 non-space characters.")
+        return value
 
 
 class CaptureCreate(Strict):
@@ -231,9 +256,14 @@ async def open_session(conn, actor, institute, identifier, version, key, req):
         )
         await conn.execute(
             text(
-                "INSERT INTO app.attendance_records(institute_id,session_id,student_id) VALUES(:i,:id,:s)"
+                "INSERT INTO app.attendance_records(institute_id,session_id,student_id,assessment_code) VALUES(:i,:id,:s,:code)"
             ),
-            {"i": institute, "id": identifier, "s": person["id"]},
+            {
+                "i": institute,
+                "id": identifier,
+                "s": person["id"],
+                "code": None if valid else "template_ineligible",
+            },
         )
         frozen.append(
             {
@@ -291,11 +321,11 @@ async def publish(conn, actor, institute, s, reason=None):
             403, "PUBLICATION_FORBIDDEN", "This teaching assignment cannot publish attendance."
         )
     rows = await attendance(conn, institute, s["id"])
-    if any(x["status"] == "proposed_present" for x in rows):
+    if any(x["status"] in ("proposed_present", "proposed_absent") for x in rows):
         raise APIError(
             409,
             "REVIEW_REQUIRED",
-            "Confirm or change every recognition suggestion before publishing.",
+            "Confirm or change every recognition proposal before publishing.",
         )
     snapshot = {
         **(await report_labels(conn, institute, s)),
@@ -439,7 +469,10 @@ def install(app, engine, settings, principal, storage):
                 "starts_at": s["starts_at"].isoformat(),
                 "policy_version": "session-v1",
                 "records": rows,
-                "incomplete": any(x["status"] in ("unassessed", "proposed_present") for x in rows),
+                "incomplete": any(
+                    x["status"] in ("unassessed", "proposed_present", "proposed_absent")
+                    for x in rows
+                ),
             }
             await enqueue_report(
                 c, user.user_id, institute_id, snapshot, identifier, result["version"]
@@ -670,6 +703,8 @@ def install(app, engine, settings, principal, storage):
                         "starts_at": snapshot["starts_at"],
                         "status": mine["status"],
                         "reason": mine["reason"],
+                        "assessment_code": mine.get("assessment_code"),
+                        "evidence_summary": mine.get("evidence_summary", {}),
                         "revision": r["revision"],
                         "published_at": r["published_at"],
                     }
@@ -688,6 +723,227 @@ def install(app, engine, settings, principal, storage):
                     "policy_version": "session-v1",
                 },
             }
+
+    @app.post("/v1/me/attendance/{publication_id}/disputes", status_code=201)
+    async def create_dispute(
+        publication_id: UUID,
+        body: DisputeCreate,
+        request: Request,
+        user: User,
+        institute_id: Institute,
+        key: Key,
+    ):
+        async with transaction(engine, user.user_id, institute_id) as c:
+            st = await bio.student(c, user.user_id, institute_id)
+            route = request.url.path
+            cached, fp = await idempotent(
+                c, user.user_id, institute_id, route, key, body.model_dump()
+            )
+            if cached:
+                return cached
+            publication = await one(
+                c,
+                """SELECT p.*,s.attendance_revision,s.offering_id FROM app.publications p
+                JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
+                WHERE p.institute_id=:i AND p.id=:p AND p.revision=s.attendance_revision
+                AND EXISTS(SELECT 1 FROM app.session_roster r WHERE r.institute_id=p.institute_id
+                AND r.session_id=p.session_id AND r.student_id=:student) FOR UPDATE OF s""",
+                {"i": institute_id, "p": publication_id, "student": st["id"]},
+            )
+            if not publication:
+                raise APIError(404, "NOT_FOUND", "Published attendance result not found.")
+            mine = next(
+                (
+                    x
+                    for x in publication["snapshot_json"]["records"]
+                    if x["student_id"] == str(st["id"])
+                ),
+                None,
+            )
+            if not mine or mine["status"] != "absent":
+                raise APIError(
+                    409,
+                    "DISPUTE_NOT_AVAILABLE",
+                    "Only your latest published Absent result can be queried.",
+                )
+            row = dict(
+                await one(
+                    c,
+                    """INSERT INTO app.attendance_disputes(
+                    institute_id,session_id,student_id,source_publication_id,source_revision,student_reason)
+                    VALUES(:i,:s,:student,:p,:revision,:reason) RETURNING *""",
+                    {
+                        "i": institute_id,
+                        "s": publication["session_id"],
+                        "student": st["id"],
+                        "p": publication_id,
+                        "revision": publication["revision"],
+                        "reason": body.reason.strip(),
+                    },
+                )
+            )
+            await audit(
+                c,
+                user.user_id,
+                institute_id,
+                "attendance.dispute_created",
+                "attendance_dispute",
+                row["id"],
+                request.state.request_id,
+            )
+            await remember(c, user.user_id, institute_id, route, key, fp, row, 201)
+            return row
+
+    @app.get("/v1/me/attendance-disputes")
+    async def own_disputes(
+        user: User,
+        institute_id: Institute,
+        cursor: UUID | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ):
+        async with transaction(engine, user.user_id, institute_id) as c:
+            st = await bio.student(c, user.user_id, institute_id)
+            rows = await many(
+                c,
+                """SELECT d.*,s.offering_id,s.starts_at FROM app.attendance_disputes d
+                JOIN app.sessions s ON s.institute_id=d.institute_id AND s.id=d.session_id
+                WHERE d.institute_id=:i AND d.student_id=:student
+                AND (CAST(:cur AS uuid) IS NULL OR d.id>CAST(:cur AS uuid))
+                ORDER BY d.id LIMIT :n""",
+                {
+                    "i": institute_id,
+                    "student": st["id"],
+                    "cur": str(cursor) if cursor else None,
+                    "n": limit + 1,
+                },
+            )
+            return page(rows, limit)
+
+    @app.get("/v1/offerings/{offering_id}/attendance-disputes")
+    async def offering_disputes(
+        offering_id: UUID,
+        user: User,
+        institute_id: Institute,
+        status: Literal["open", "accepted", "rejected", "withdrawn"] = "open",
+        cursor: UUID | None = None,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    ):
+        async with transaction(engine, user.user_id, institute_id) as c:
+            await teacher_access(c, user.user_id, institute_id, offering_id)
+            rows = await many(
+                c,
+                """SELECT d.*,r.name_snapshot AS official_name,
+                r.enrollment_number_snapshot AS enrollment_number,s.starts_at
+                FROM app.attendance_disputes d
+                JOIN app.sessions s ON s.institute_id=d.institute_id AND s.id=d.session_id
+                JOIN app.session_roster r ON r.institute_id=d.institute_id
+                  AND r.session_id=d.session_id AND r.student_id=d.student_id
+                WHERE d.institute_id=:i AND s.offering_id=:o AND d.status=:status
+                AND (CAST(:cur AS uuid) IS NULL OR d.id>CAST(:cur AS uuid))
+                ORDER BY d.id LIMIT :n""",
+                {
+                    "i": institute_id,
+                    "o": offering_id,
+                    "status": status,
+                    "cur": str(cursor) if cursor else None,
+                    "n": limit + 1,
+                },
+            )
+            return page(rows, limit)
+
+    @app.post("/v1/attendance-disputes/{identifier}/resolve")
+    async def resolve_dispute(
+        identifier: UUID,
+        body: DisputeResolution,
+        request: Request,
+        user: User,
+        institute_id: Institute,
+        key: Key,
+        version: Version,
+    ):
+        async with transaction(engine, user.user_id, institute_id) as c:
+            row = await one(
+                c,
+                """SELECT d.*,s.offering_id,s.status AS session_status,s.attendance_revision,s.version AS session_version
+                FROM app.attendance_disputes d JOIN app.sessions s
+                ON s.institute_id=d.institute_id AND s.id=d.session_id
+                WHERE d.institute_id=:i AND d.id=:id FOR UPDATE OF d,s""",
+                {"i": institute_id, "id": identifier},
+            )
+            if not row:
+                raise APIError(404, "NOT_FOUND", "Attendance query not found.")
+            await teacher_access(c, user.user_id, institute_id, row["offering_id"])
+            route = request.url.path
+            cached, fp = await idempotent(
+                c,
+                user.user_id,
+                institute_id,
+                route,
+                key,
+                {"body": body.model_dump(), "version": version},
+            )
+            if cached:
+                return cached
+            if row["version"] != expected_version(version) or row["status"] != "open":
+                raise APIError(409, "VERSION_CONFLICT", "Refresh this attendance query.")
+            publication_id = None
+            if body.decision == "accepted":
+                if (
+                    row["session_status"] != "finalized"
+                    or row["attendance_revision"] != row["source_revision"]
+                ):
+                    raise APIError(
+                        409,
+                        "PUBLICATION_CHANGED",
+                        "Attendance changed after this query. Refresh before resolving it.",
+                    )
+                await apply_decisions(
+                    c,
+                    user.user_id,
+                    institute_id,
+                    row["session_id"],
+                    [
+                        Decision(
+                            student_id=row["student_id"],
+                            status="present",
+                            reason=body.reason.strip(),
+                        )
+                    ],
+                )
+                s = await one(
+                    c,
+                    "SELECT * FROM app.sessions WHERE institute_id=:i AND id=:id",
+                    {"i": institute_id, "id": row["session_id"]},
+                )
+                publication_id = (await publish(c, user.user_id, institute_id, s, body.reason))["id"]
+            result = dict(
+                await one(
+                    c,
+                    """UPDATE app.attendance_disputes SET status=:status,resolution_reason=:reason,
+                    resolved_by=:actor,resolved_at=now(),resolved_publication_id=:publication,
+                    updated_at=now(),version=version+1
+                    WHERE institute_id=:i AND id=:id RETURNING *""",
+                    {
+                        "status": body.decision,
+                        "reason": body.reason.strip(),
+                        "actor": user.user_id,
+                        "publication": publication_id,
+                        "i": institute_id,
+                        "id": identifier,
+                    },
+                )
+            )
+            await audit(
+                c,
+                user.user_id,
+                institute_id,
+                "attendance.dispute_" + body.decision,
+                "attendance_dispute",
+                identifier,
+                request.state.request_id,
+            )
+            await remember(c, user.user_id, institute_id, route, key, fp, result, 200)
+            return result
 
     @app.post("/v1/sessions/{identifier}/captures", status_code=201)
     async def create_capture(
