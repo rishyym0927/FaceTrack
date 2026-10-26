@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "production_wiring": false,
+  "result_status": "Synthetic DigiFace results recorded for four variants; all other cells Not measured yet",
+  "variants": [
+    {
+      "id": "baseline",
+      "changes": [],
+      "synthetic_result": {
+        "present_students_suggested": 22,
+        "present_students_total": 60,
+        "easy_medium_hard": [
+          20,
+          2,
+          0
+        ],
+        "wrong_present_marks": 0,
+        "stable_across_3_runs": true,
+        "median_seconds_per_12_frame_scene": 0.1,
+        "p95_seconds_per_12_frame_scene": 0.18,
+        "basis": "SYNTHETIC BENCHMARK, not classroom accuracy"
+      }
+    },
+    {
+      "id": "baseline_clahe_detector_only",
+      "changes": [
+        "clahe_lab_luminance"
+      ],
+      "synthetic_result": {
+        "present_students_suggested": 22,
+        "present_students_total": 60,
+        "easy_medium_hard": [
+          20,
+          2,
+          0
+        ],
+        "wrong_present_marks": 0,
+        "stable_across_3_runs": true,
+        "median_seconds_per_12_frame_scene": 0.13,
+        "p95_seconds_per_12_frame_scene": 0.22,
+        "basis": "SYNTHETIC BENCHMARK, not classroom accuracy"
+      }
+    },
+    {
+      "id": "baseline_contrast",
+      "changes": [
+        "grayscale_std_filter"
+      ],
+      "synthetic_result": {
+        "present_students_suggested": 18,
+        "present_students_total": 60,
+        "easy_medium_hard": [
+          18,
+          0,
+          0
+        ],
+        "wrong_present_marks": 0,
+        "stable_across_3_runs": true,
+        "median_seconds_per_12_frame_scene": 0.1,
+        "p95_seconds_per_12_frame_scene": 0.18,
+        "basis": "SYNTHETIC BENCHMARK, not classroom accuracy"
+      }
+    },
+    {
+      "id": "scrfd_500m_two_scale",
+      "changes": [
+        "inputs_640_960",
+        "global_nms"
+      ],
+      "synthetic_result": {
+        "present_students_suggested": 24,
+        "present_students_total": 60,
+        "easy_medium_hard": [
+          21,
+          3,
+          0
+        ],
+        "wrong_present_marks": 0,
+        "stable_across_3_runs": true,
+        "median_seconds_per_12_frame_scene": 0.42,
+        "p95_seconds_per_12_frame_scene": 0.56,
+        "basis": "SYNTHETIC BENCHMARK, not classroom accuracy"
+      }
+    },
+    {
+      "id": "baseline_validated_pose",
+      "changes": [
+        "biwi_validated_pose_gate"
+      ],
+      "blocked": "BIWI calibration not run"
+    },
+    {
+      "id": "accepted_combination",
+      "changes": [
+        "accepted_ablation_winners"
+      ],
+      "blocked": "component results not measured"
+    },
+    {
+      "id": "retinaface_r50",
+      "changes": [
+        "detector_adapter"
+      ],
+      "blocked": "artifact contract and permission not provisioned"
+    },
+    {
+      "id": "scrfd_2_5g_kps",
+      "changes": [
+        "detector_adapter"
+      ],
+      "blocked": "artifact contract and permission not provisioned"
+    }
+  ],
+  "adoption_gates": {
+    "false_presence": "must not worsen",
+    "coverage": "must improve recall or coverage on held-out inputs",
+    "stability": "three fresh processes must agree",
+    "local_p95_processing_ms_for_10s_clip": 2000
+  }
+}

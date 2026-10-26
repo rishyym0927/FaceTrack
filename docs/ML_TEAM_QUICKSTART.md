@@ -28,7 +28,7 @@ uv sync --locked --python 3.11
 .venv\Scripts\python -m pytest tests -q
 ```
 
-Expected locally on 25 October: root **34 passing, one expected failure** documenting a frozen alignment limitation; worker **7 passing**. A fresh clone may report a different count after new tests land. If a command fails, copy the **error code and command**, not private `.env` contents, into your team issue. `uv sync` installs into each directory's own `.venv`; do not use the system Python or change the root `uv.lock` for worker dependencies.
+Expected locally on 26 October: root **42 passing, one expected failure** documenting a frozen alignment limitation; worker **35 passing** (including the Model Test Console). Synthetic DigiFace benchmark results are described in `docs/ML_ACCURACY_AND_ATTENDANCE_PLAN.md` section 9; real-volunteer testing uses `docs/MODEL_TEST_CONSOLE.md`. A fresh clone may report a different count after new tests land. If a command fails, copy the **error code and command**, not private `.env` contents, into your team issue. `uv sync` installs into each directory's own `.venv`; do not use the system Python or change the root `uv.lock` for worker dependencies.
 
 ## 2. Understand the ML flow
 

@@ -127,6 +127,10 @@ flutter build web --dart-define-from-file=..\..\.local\flutter\development.json
 flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=..\..\.local\flutter\development.json
 ```
 
+## 5b. Model test only (optional)
+
+To test only the ML model with volunteers, use `.\scripts\windows\start-console.ps1` and follow [MODEL_TEST_CONSOLE.md](MODEL_TEST_CONSOLE.md). It needs no login or `.env` files.
+
 ## 6. Safe verification
 
 From the repository root, run frontend checks natively:

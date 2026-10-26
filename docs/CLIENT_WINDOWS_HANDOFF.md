@@ -103,3 +103,7 @@ Open C:\FaceTrack, read docs/WINDOWS_SETUP.md, start Docker Desktop if needed, t
 ```
 
 Stop services with `C:\FaceTrack\scripts\windows\stop-demo.ps1` and close the two Flutter PowerShell windows.
+
+## Model test only (no application login)
+
+To run only the Model Test Console, follow `docs/MODEL_TEST_CONSOLE.md`. The client needs Docker Desktop, the repository, the private model and frozen profile files (`.local/spike/models/buffalo_sc/` and `.local/spike/profiles/frozen-phase1b-v1.json`) and the built page (`.local/console-web/`). She does not need `services/api/.env`, `services/worker/.env` or `development.json`. Model files must not be placed in the public repository. After testing she sends back the two downloaded files (`facetrack-model-test-report.txt` and `facetrack-model-test.json`), which contain counts only.

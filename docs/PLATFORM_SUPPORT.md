@@ -6,6 +6,7 @@ FaceTrack does not currently support every operating system. This matrix describ
 |---|---|---|---|
 | macOS on Apple Silicon | Verified demo host | Flutter web in Chrome; FastAPI, Redis and Celery run locally | Keep the computer awake; Android uses USB forwarding. |
 | Windows 10/11 x64 | Implemented; physical-host acceptance pending | Flutter web in Chrome/Edge; backend and worker run in Docker Desktop Linux containers | Requires WSL 2, virtualization and Docker Desktop. Windows ARM is unverified. |
+| Model Test Console (macOS/Windows) | Implemented; real-camera and Windows acceptance pending | Local page on 127.0.0.1:8010, Docker profile `console` on Windows | ML model only; needs the private model files and built page. See `MODEL_TEST_CONSOLE.md`. |
 | Android arm64 | Verified development target | Separate Student and Teacher Flutter APKs | Local API requires USB forwarding; release signing/cloud API are later. |
 | Browser web | Implemented | Student on port 5301 and Teacher on 5300 | Chrome is verified on macOS. Chrome/Edge are configured on Windows. Safari and Firefox camera flows are unverified. |
 | Linux desktop host | Not supported as a packaged setup | The Linux containers are likely portable, but there are no Linux setup/start scripts or acceptance results | Do not promise a complete Linux installation until it is implemented and tested. |

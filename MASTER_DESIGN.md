@@ -65,7 +65,7 @@ These are planning assumptions, not measured institute facts. Verified developme
 | Redis + Celery | Background execution isolated from HTTP requests |
 | PostgreSQL is authoritative | Redis loss or worker retries cannot erase attendance or job state |
 | Exact, roster-scoped cosine matching | Tens of identities per class do not require an approximate vector index |
-| Human-reviewed publication | Unrecognized or hidden students must not automatically become absent |
+| Human-reviewed publication | Recognition may draft Not recognized, but only a teacher can make and publish an Absent decision |
 | Local worker for demo; always-on CPU worker later | Supports minimal cost while retaining the same processing interface; Runpod/GPU stays optional after measurement |
 | CSV timetable first | Deterministic import; PDF/OCR and ERP integration can feed the same normalized model later |
 
@@ -589,7 +589,7 @@ Build vertical slices, validating the riskiest dependency first. Do not build ev
 | 3A. Account/class apps | Login, identity, join requests and faculty decisions | User flow plus explicit restart/logout/error/accessibility checks |
 | 3B. Student enrolment | Guided video → job → templates → supervised activation | Persistent compatible templates and consent/revocation |
 | 4. Teacher attendance | Session/capture → worker → proposals | Frozen roster, actual recognition, idempotent evidence |
-| 5. Review/history | Teacher review/publication → own student history | Immutable revisions; no duplicate records or automatic absence |
+| 5. Review/history | Teacher review/publication → own student history/query | Immutable revisions; no duplicate records or automatically published absence |
 | 6. Automation/reporting | CSV timetable → sessions; CSV/PDF → faculty | Import repeat-safe; correct report and actual permitted email |
 | 7. Hardening/rehearsal | Device builds, errors/recovery, deployment polish | Full scripted demo repeated including worker restart |
 
@@ -624,7 +624,7 @@ Primary references supporting the retained choices and constraints:
 
 ### Deferred, not required before the demo
 
-Do not implement now: arbitrary PDF/OCR timetable parsing, ERP connectors, automated camera fleet/MQTT, continuous streaming, attendance-duration inference, push inbox/bulk alerts, live chat/dispute portal, full administration UI, institute-wide face search, FAISS/vector database, Kubernetes, microservice splitting, multi-region infrastructure, complex autoscaling, and remote certified liveness.
+Do not implement now: arbitrary PDF/OCR timetable parsing, ERP connectors, automated camera fleet/MQTT, continuous streaming, attendance-duration inference, push inbox/bulk alerts, live chat, dispute evidence uploads, full administration UI, institute-wide face search, FAISS/vector database, Kubernetes, microservice splitting, multi-region infrastructure, complex autoscaling, and remote certified liveness.
 
 Keep future timetable identity, session boundaries, job durability, model/version metadata, tenant relationships, audit and privacy controls now. Those are the foundations that avoid an architectural rewrite. Expand only when an actual requirement or benchmark justifies it.
 
@@ -664,7 +664,9 @@ Build sequence: docs → small UI polish/targeted acceptance → sessions/captur
 
 ### Implemented attendance, timetable and reporting contract — 23 October 2026
 
-Development schema head is 0006 with 36 forced-RLS business tables. Opening a manually scheduled session freezes approved class members and the current active, consented template set/model/profile references. Ineligible learners stay on the roster for manual review. The classroom capture uses the same private 25 MiB MP4/WebM bucket and signed resumable upload pattern as enrolment. The local worker decrypts only the job's eligible frozen roster vectors in memory, runs the unchanged pinned recognition pipeline, and sends corroborated suggestions. Its result is checked against consent, template epochs, session state and lease before evidence is committed. Unknowns, missing faces and processing failures never imply absence. Teacher decisions override suggestions, with explicit publication and reasoned immutable corrections. Student history reads only the latest published revision of their own rows. A percentage excludes unassessed, excused and unpublished sessions; show no percentage for a zero assessed denominator.
+Development schema head is 0007 with 37 forced-RLS business tables after local and hosted migration verification. Opening a manually scheduled session freezes approved class members and the current active, consented template set/model/profile references. Ineligible learners stay on the roster for manual review. The classroom capture uses the same private 25 MiB MP4/WebM bucket and signed resumable upload pattern as enrolment. The local worker decrypts only the job's eligible frozen roster vectors in memory and runs the unchanged pinned recognition pipeline. Corroborated matches become `proposed_present`. After successful processing with at least two usable observations, eligible unmatched students may become `proposed_absent`, displayed as **Not recognized**; limited coverage, unavailable templates and processing failures remain `unassessed`. Every proposal is unresolved until a teacher explicitly converts it to a final decision. The result is checked against consent, template epochs, session state and lease before evidence is committed. Teacher decisions override proposals, with explicit publication and reasoned immutable corrections. Student history reads only the latest published revision of their own rows. A percentage excludes unassessed, excused and unpublished sessions; show no percentage for a zero assessed denominator.
+
+Students may open one attendance query against their own latest published Absent row and publication revision. The query contains text only. Assigned teachers see offering-scoped open queries and resolve each with a reason. Acceptance atomically changes that student to Present and creates a new immutable publication plus corrected report; rejection preserves attendance. Optimistic versions, idempotency, tenant authorization and audit events apply. Push/email notification, attachments and geolocation are deferred.
 
 Teacher Classes → Sessions supports manual create/open/close/cancel, capture/review/publication and a compact timetable import. The exact UTF-8 CSV header is `entry_key,term_code,course_code,branch,semester,section,teacher_email,room_code,weekday,start_time,end_time,effective_from,effective_until,timezone`. Use 1–500 rows, ≤1 MiB, MON–SUN uppercase weekday, 24-hour local times, ISO dates and Asia/Kolkata timezone. Entry keys remain stable across replacement imports. An assigned teacher creates a room code first, uploads to the private document bucket, reviews a validated preview and confirms a materialization date in the term. Confirmation creates or updates sessions **for that selected date only**; the app defaults to the next date matching a CSV weekday/effective range, and the API rejects a date with no matching entry. Weekly series persist for later materialization, but automatic generation/opening/closing remain later work. The term revision and preview hash protect stale confirmation; overlapping teacher, room and offering times are rejected even across terms. Repeated confirmation has one effect. Opened/published sessions retain their historical assignment. Future timetable exceptions remain later work.
 

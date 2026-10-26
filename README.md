@@ -29,8 +29,10 @@ Check [API readiness](http://127.0.0.1:8000/health/ready) for `{"status":"ready"
 
 ## Current state
 
-Account/class flows, real biometric enrolment, one teacher-reviewed classroom session, student history, private CSV/PDF reports and one CSV timetable import have been verified. Broader recognition, recovery and rehearsal tests remain. Faculty email is disabled until a permitted Resend sender is configured. No production accuracy, latency or concurrency target has been established.
+Account/class flows, real biometric enrolment, one teacher-reviewed classroom session, student history, private CSV/PDF reports and one CSV timetable import have been verified. Evidence-coded attendance drafts and an in-app student attendance-query flow are implemented, and the development database is at migration 0007; safe authenticated device acceptance remains. Broader recognition, recovery and rehearsal tests remain. Faculty email is disabled until a permitted Resend sender is configured. No production accuracy, latency or concurrency target has been established.
 
 [Master design](MASTER_DESIGN.md) · [Progress and next actions](PROGRESS.md) · [Roadmap](ROADMAP.md) · [Detailed ML spike guide](docs/ML_SPIKE.md)
 
-New ML contributors: [quickstart and safe test commands](docs/ML_TEAM_QUICKSTART.md).
+Client-run model test: [Model Test Console guide](docs/MODEL_TEST_CONSOLE.md) (no login or Supabase needed; real-camera and Windows acceptance pending).
+
+New ML contributors: [quickstart and safe test commands](docs/ML_TEAM_QUICKSTART.md). The isolated [accuracy and attendance plan](docs/ML_ACCURACY_AND_ATTENDANCE_PLAN.md) explains the dataset harness and candidate gates; experimental code under `experiments/ml_accuracy` is never imported by the product worker.

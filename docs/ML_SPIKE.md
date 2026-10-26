@@ -185,6 +185,6 @@ Run shared product tests separately from `packages/app_core` with `../../scripts
 
 Python tests use mathematical vectors, synthetic ONNX graphs and generated non-biometric MP4/WebM videos. Capture tests use a fake camera; shared product tests use explicitly synthetic Auth/API fixtures. These verify implementation behavior, not recognition quality or real camera permission/recording.
 
-For real acceptance, recruit at least three consenting adults: two enrolled and one unknown. Record independent query clips with both enrolled people, an absent enrolled person, the unknown, varied pose/glasses/positions, and poor/no-face footage. Keep a manual ground-truth record outside Git, compare every proposal, and preserve failures. Run on the actual camera/browser; synthetic tests cannot complete this gate.
+For real acceptance, recruit at least three consenting adults: two enrolled and one unknown. Record independent query clips with both enrolled people, an absent enrolled person, the unknown, varied pose/glasses/positions, and poor/no-face footage. Keep a manual ground-truth record outside Git, compare every proposal, and preserve failures. Run on the actual camera/browser; synthetic tests cannot complete this gate. The [Model Test Console](MODEL_TEST_CONSOLE.md) packages exactly this protocol (enrolment, six scenarios, three repeats, readable report) for a nontechnical tester.
 
 Read `MASTER_DESIGN.md` for architecture, `ROADMAP.md` for milestones and `PROGRESS.md` for current verification and remaining blockers.
