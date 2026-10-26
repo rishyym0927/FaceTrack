@@ -92,6 +92,7 @@ def paste_face(frame, face, cx, cy, px, light, rng):
 
 def run(args):
     rng = random.Random(args.run * 1000 + 7)
+    n_frames = args.frames
     models = Path(args.models)
     runtime = Runtime(models / "manifest.json")
     model_hash = canonical_hash(runtime.manifest.model_dump())
@@ -161,7 +162,7 @@ def run(args):
             seat_light = {s: float(grad[max(0, min(W - 1, s[2]))]) for s in rm["seats"]}
 
             frames, gt_rects = [], []
-            for t in range(FRAMES):
+            for t in range(n_frames):
                 frame = background.copy()
                 rects = []
                 for seat in rm["seats"]:
@@ -213,7 +214,7 @@ def run(args):
                                      "similarity": score, "margin": margin})
                         if owner is not None and who != owner[0] and who in roster:
                             agg["identity_confusions"] += 1
-            timings.append((time.perf_counter() - started) * 1000 / max(1, FRAMES))
+            timings.append((time.perf_counter() - started) * 1000 / max(1, n_frames))
             proposals = {p["participant_id"] for p in corroborate(hits, profile)}
             digest_src[str(rm["room"])] = sorted(proposals)
 
@@ -239,6 +240,7 @@ def run(args):
         agg["frame_ms_median"] = round(float(np.median(timings)), 1)
         agg["frame_ms_p95"] = round(float(np.percentile(timings, 95)), 1)
         agg["rooms"] = args.rooms
+        agg["frames"] = n_frames
         agg["run"] = args.run
         agg["model_hash"] = model_hash
         agg["profile_hash"] = canonical_hash(profile.model_dump())
@@ -268,6 +270,8 @@ def main():
     ap.add_argument("--out", type=Path, required=True)
     ap.add_argument("--rooms", type=int, default=8)
     ap.add_argument("--run", type=int, default=1)
+    ap.add_argument("--frames", type=int, default=FRAMES,
+                    help="frames sampled per room; more = longer video of the same framing")
     ap.add_argument("--models", default=".local/spike/models/buffalo_sc")
     ap.add_argument("--profile", type=Path, default=Path(".local/spike/profiles/frozen-phase1b-v1.json"))
     run(ap.parse_args())
