@@ -9,6 +9,8 @@ class Settings(BaseSettings):
     database_url: SecretStr
     supabase_url: str
     supabase_publishable_key: SecretStr = SecretStr("")
+    # Service-role (admin) key. Optional: only the admin "create login account" path needs it.
+    supabase_service_role_key: SecretStr = SecretStr("")
     join_code_keys: dict[str, SecretStr]
     join_code_key_id: str = "v1"
     cors_origins: list[str] = ["http://localhost:5300", "http://localhost:5301"]

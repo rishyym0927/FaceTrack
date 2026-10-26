@@ -207,7 +207,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 or not owner
                 or owner["owns"]
                 or policies["count"] != 37
-                or revision["version_num"] != "0007_attendance_queries"
+                or revision["version_num"] != "0008_admin"
                 or not configured
             ):
                 raise ValueError()
@@ -366,4 +366,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     from .documents import install as install_documents
 
     install_documents(app, engine, settings, principal, storage, auth)
+    from .admin_routes import install as install_admin
+
+    install_admin(app, engine, settings, principal, storage, auth)
     return app
