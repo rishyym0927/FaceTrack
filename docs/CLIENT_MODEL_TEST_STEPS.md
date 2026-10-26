@@ -7,16 +7,11 @@ Stop and message Rishi if anything below does not match what you see. Do not try
 ## A. One-time setup (about 30 minutes)
 
 1. **Install Docker Desktop** from docker.com and start it. Wait until it says **Running** (bottom-left). Restart the computer if it asks.
-2. **Get the project.** Open https://github.com/rishyym0927/FaceTrack, press the green **Code** button, then **Download ZIP**. Unzip it so you have a folder `C:\FaceTrack` that contains `README.md`, `scripts` and `docs`.
-3. **Get the test page.** Open https://github.com/rishyym0927/FaceTrack/releases/tag/console-v1 and download `facetrack-console-web.zip`. Make a folder `C:\FaceTrack\.local\console-web` and unzip the file **into it**, so that `C:\FaceTrack\.local\console-web\index.html` exists. (If you cannot see `.local`, create it: it is a normal folder whose name starts with a dot.)
-4. **Add the model files Rishi sent you privately.** Put them here exactly:
+2. **Get the project and the private files.** Rishi will invite you to the private GitHub project (accept the email invitation and sign in to GitHub). Then:
+   - Open https://github.com/rishyym0927/FaceTrack, press the green **Code** button, then **Download ZIP**. Unzip it so you have a folder `C:\FaceTrack` that contains `README.md`, `scripts` and `docs`.
+   - Open https://github.com/rishyym0927/FaceTrack/releases/tag/private-files-v1 and download `facetrack-private-files.zip`. Unzip it **into `C:\FaceTrack`** so a folder `C:\FaceTrack\.local` appears next to `scripts`. (It contains the test page, the model and the settings file.) Check that `C:\FaceTrack\.local\console-web\index.html` and `C:\FaceTrack\.local\spike\profiles\frozen-phase1b-v1.json` exist.
 
-   ```text
-   C:\FaceTrack\.local\spike\models\buffalo_sc\        (the whole folder Rishi sent)
-   C:\FaceTrack\.local\spike\profiles\frozen-phase1b-v1.json
-   ```
-
-   Never upload these files anywhere. Never put them on GitHub.
+   Never share these files or upload them anywhere else.
 
 ## B. Start the test page (about 5 to 10 minutes the first time)
 
