@@ -684,3 +684,349 @@ String? requiredText(String? value) =>
 void showMessage(BuildContext context, String message) =>
     ScaffoldMessenger.of(context)
         .showSnackBar(SnackBar(content: Text(message)));
+
+// --- Analytics primitives ----------------------------------------------------
+
+/// Threshold colouring shared by every attendance percentage in both apps.
+Color percentColor(num? p) => p == null
+    ? const Color(0xff587067)
+    : p >= 75
+    ? const Color(0xff176451)
+    : p >= 50
+    ? const Color(0xff9a6a00)
+    : const Color(0xffa22f2f);
+
+/// Tweens a number up to [value] on build; honours reduced-motion.
+class AnimatedCount extends StatelessWidget {
+  const AnimatedCount(
+    this.value, {
+    super.key,
+    this.decimals = 0,
+    this.suffix = '',
+    this.style,
+  });
+  final num value;
+  final int decimals;
+  final String suffix;
+  final TextStyle? style;
+  @override
+  Widget build(BuildContext context) {
+    final target = value.toDouble();
+    final instant = MediaQuery.disableAnimationsOf(context);
+    return TweenAnimationBuilder<double>(
+      tween: Tween(begin: instant ? target : 0, end: target),
+      duration: instant
+          ? Duration.zero
+          : const Duration(milliseconds: 650),
+      curve: Curves.easeOutCubic,
+      builder: (context, v, _) => Text(
+        v.toStringAsFixed(decimals) + suffix,
+        style: style,
+      ),
+    );
+  }
+}
+
+/// Circular attendance ring with the percentage in the centre.
+class PercentRing extends StatelessWidget {
+  const PercentRing({
+    super.key,
+    required this.value,
+    this.size = 116,
+    this.stroke = 12,
+    this.caption,
+  });
+
+  /// 0–100, or null when there is nothing assessed yet.
+  final double? value;
+  final double size, stroke;
+  final String? caption;
+  @override
+  Widget build(BuildContext context) {
+    final color = percentColor(value);
+    final target = (value ?? 0).clamp(0, 100).toDouble();
+    final instant = MediaQuery.disableAnimationsOf(context);
+    final track = Theme.of(context).colorScheme.surfaceContainerLowest;
+    return Semantics(
+      label: value == null
+          ? 'No percentage yet'
+          : 'Attendance ${value!.toStringAsFixed(1)} percent',
+      child: SizedBox(
+        width: size,
+        height: size,
+        child: TweenAnimationBuilder<double>(
+          tween: Tween(begin: instant ? target : 0, end: target),
+          duration: instant ? Duration.zero : const Duration(milliseconds: 750),
+          curve: Curves.easeOutCubic,
+          builder: (context, v, _) => CustomPaint(
+            painter: _RingPainter(
+              v / 100,
+              stroke,
+              value == null ? track : color,
+              track,
+            ),
+            child: Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    value == null ? '—' : '${v.round()}%',
+                    style: TextStyle(
+                      fontSize: size * .26,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -.5,
+                      color: value == null
+                          ? Theme.of(context).colorScheme.onSurfaceVariant
+                          : color,
+                    ),
+                  ),
+                  if (caption != null)
+                    Text(
+                      caption!,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _RingPainter extends CustomPainter {
+  _RingPainter(this.fraction, this.stroke, this.color, this.track);
+  final double fraction, stroke;
+  final Color color, track;
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = (size.shortestSide - stroke) / 2;
+    final bg = Paint()
+      ..color = track
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke;
+    canvas.drawCircle(center, radius, bg);
+    if (fraction <= 0) return;
+    final fg = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeCap = StrokeCap.round
+      ..strokeWidth = stroke;
+    canvas.drawArc(
+      Rect.fromCircle(center: center, radius: radius),
+      -1.5708,
+      6.28319 * fraction.clamp(0, 1),
+      false,
+      fg,
+    );
+  }
+
+  @override
+  bool shouldRepaint(_RingPainter old) =>
+      old.fraction != fraction || old.color != color;
+}
+
+/// Thin rounded proportion bar (0–1), animated.
+class TrackBar extends StatelessWidget {
+  const TrackBar({super.key, required this.value, this.color, this.height = 8});
+  final double value;
+  final Color? color;
+  final double height;
+  @override
+  Widget build(BuildContext context) {
+    final instant = MediaQuery.disableAnimationsOf(context);
+    final c = color ?? Theme.of(context).colorScheme.primary;
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(100),
+      child: SizedBox(
+        height: height,
+        child: Stack(
+          children: [
+            Container(color: Theme.of(context).colorScheme.surfaceContainerLowest),
+            TweenAnimationBuilder<double>(
+              tween: Tween(begin: instant ? value : 0, end: value.clamp(0, 1)),
+              duration:
+                  instant ? Duration.zero : const Duration(milliseconds: 650),
+              curve: Curves.easeOutCubic,
+              builder: (context, v, _) => FractionallySizedBox(
+                widthFactor: v.clamp(0, 1),
+                alignment: Alignment.centerLeft,
+                child: Container(color: c),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A single metric: big (animated) value, label, optional icon and caption.
+class StatTile extends StatelessWidget {
+  const StatTile({
+    super.key,
+    required this.label,
+    required this.value,
+    this.icon,
+    this.accent,
+    this.caption,
+    this.decimals = 0,
+    this.suffix = '',
+  });
+  final String label;
+  final num value;
+  final IconData? icon;
+  final Color? accent;
+  final String? caption;
+  final int decimals;
+  final String suffix;
+  @override
+  Widget build(BuildContext context) {
+    final color = accent ?? Theme.of(context).colorScheme.primary;
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: Theme.of(context).colorScheme.outline),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Row(
+            children: [
+              if (icon != null) ...[
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: .10),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, size: 16, color: color),
+                ),
+                const SizedBox(width: 10),
+              ],
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          AnimatedCount(
+            value,
+            decimals: decimals,
+            suffix: suffix,
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -.8,
+              color: color,
+            ),
+          ),
+          if (caption != null) ...[
+            const SizedBox(height: 2),
+            Text(
+              caption!,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// Lays stat tiles into equal columns that reflow by width (2-up on phones).
+class StatGrid extends StatelessWidget {
+  const StatGrid({
+    super.key,
+    required this.children,
+    this.minTileWidth = 158,
+    this.spacing = 12,
+  });
+  final List<Widget> children;
+  final double minTileWidth, spacing;
+  @override
+  Widget build(BuildContext context) => LayoutBuilder(
+    builder: (context, c) {
+      final maxCols = ((c.maxWidth + spacing) / (minTileWidth + spacing))
+          .floor()
+          .clamp(1, children.length == 0 ? 1 : children.length);
+      final width = (c.maxWidth - spacing * (maxCols - 1)) / maxCols;
+      return Wrap(
+        spacing: spacing,
+        runSpacing: spacing,
+        children: [
+          for (final child in children)
+            SizedBox(width: width.floorToDouble(), child: child),
+        ],
+      );
+    },
+  );
+}
+
+/// One-shot fade-and-rise entrance; instant when reduced-motion is on.
+class Reveal extends StatefulWidget {
+  const Reveal({super.key, required this.child, this.delayMs = 0});
+  final Widget child;
+  final int delayMs;
+  @override
+  State<Reveal> createState() => _RevealState();
+}
+
+class _RevealState extends State<Reveal> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 420),
+  );
+  @override
+  void initState() {
+    super.initState();
+    Future.delayed(Duration(milliseconds: widget.delayMs), () {
+      if (mounted) _c.forward();
+    });
+  }
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) return widget.child;
+    final curve = CurvedAnimation(parent: _c, curve: Curves.easeOutCubic);
+    return FadeTransition(
+      opacity: curve,
+      child: SlideTransition(
+        position: Tween(
+          begin: const Offset(0, 0.06),
+          end: Offset.zero,
+        ).animate(curve),
+        child: widget.child,
+      ),
+    );
+  }
+}

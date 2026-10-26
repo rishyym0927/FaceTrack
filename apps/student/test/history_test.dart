@@ -68,12 +68,12 @@ void main() {
       // reflect the accepted newer response.
       unawaited(first);
       await tester.pumpAndSettle();
-      expect(find.text('75.0%'), findsOneWidget);
-      expect(find.text('25.0%'), findsNothing);
+      expect(find.text('75%'), findsOneWidget);
+      expect(find.text('25%'), findsNothing);
       final denied = controller.load();
       await tester.pumpAndSettle();
       unawaited(denied);
-      expect(find.text('75.0%'), findsNothing);
+      expect(find.text('75%'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );

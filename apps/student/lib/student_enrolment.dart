@@ -644,11 +644,17 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   ),
                 if (camera.recording) ...[
                   const SizedBox(height: 16),
-                  Text(
-                    camera.guidance?.current == null
-                        ? 'All directions captured'
-                        : 'Look ${camera.guidance!.current}',
-                    style: Theme.of(context).textTheme.headlineMedium,
+                  AnimatedSwitcher(
+                    duration: MediaQuery.disableAnimationsOf(context)
+                        ? Duration.zero
+                        : const Duration(milliseconds: 240),
+                    child: Text(
+                      camera.guidance?.current == null
+                          ? 'All directions captured'
+                          : 'Look ${camera.guidance!.current}',
+                      key: ValueKey(camera.guidance?.current ?? 'done'),
+                      style: Theme.of(context).textTheme.headlineMedium,
+                    ),
                   ),
                   if (camera.guidance != null) ...[
                     const SizedBox(height: 8),
@@ -656,25 +662,45 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                       liveRegion: true,
                       child: Text(camera.guidance!.hint),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
+                    Row(
+                      children: [
+                        Text(
+                          '${camera.guidance!.completed.length} of ${camera.poses.length} directions',
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        const Spacer(),
+                        Text(
+                          '${camera.elapsed}s · audio off',
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    TrackBar(
+                      value: camera.poses.isEmpty
+                          ? 0
+                          : camera.guidance!.completed.length /
+                              camera.poses.length,
+                      color: const Color(0xff176451),
+                      height: 9,
+                    ),
+                    const SizedBox(height: 14),
                     Wrap(
                       spacing: 8,
                       runSpacing: 8,
                       children: [
                         for (final pose in camera.poses)
-                          Chip(
-                            avatar: Icon(
-                              camera.guidance!.completed.contains(pose)
-                                  ? Icons.check_circle
-                                  : Icons.circle_outlined,
-                              size: 20,
-                            ),
-                            label: Text(pose),
+                          _PoseChip(
+                            pose: pose,
+                            done: camera.guidance!.completed.contains(pose),
                           ),
                       ],
                     ),
-                  ],
-                  Text('${camera.elapsed} / 25 seconds · audio off'),
+                  ] else
+                    Text('${camera.elapsed} / 25 seconds · audio off'),
                 ],
                 if (camera.error != null)
                   Padding(
@@ -771,6 +797,50 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
             ),
           ),
       ],
+    );
+  }
+}
+
+class _PoseChip extends StatelessWidget {
+  const _PoseChip({required this.pose, required this.done});
+  final String pose;
+  final bool done;
+  @override
+  Widget build(BuildContext context) {
+    const green = Color(0xff176451);
+    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
+    return AnimatedContainer(
+      duration: MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 220),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: done ? const Color(0xffdcefe5) : Colors.white,
+        borderRadius: BorderRadius.circular(100),
+        border: Border.all(
+          color: done
+              ? green.withValues(alpha: .35)
+              : Theme.of(context).colorScheme.outline,
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            done ? Icons.check_circle : Icons.circle_outlined,
+            size: 18,
+            color: done ? green : muted,
+          ),
+          const SizedBox(width: 8),
+          Text(
+            pose,
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: done ? green : Theme.of(context).colorScheme.onSurface,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

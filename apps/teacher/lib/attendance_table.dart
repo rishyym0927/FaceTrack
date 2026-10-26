@@ -138,7 +138,6 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
 
   @override
   Widget build(BuildContext context) {
-    final onVar = Theme.of(context).colorScheme.onSurfaceVariant;
     final matched = widget.rows.where((r) => r['status'] == 'proposed_present').length;
     final notRec = widget.rows.where((r) => r['status'] == 'proposed_absent').length;
     final unassessed = widget.rows.where((r) => r['status'] == 'unassessed').length;
@@ -148,12 +147,40 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Attendance review', style: Theme.of(context).textTheme.titleLarge),
-          const SizedBox(height: 4),
-          Text(
-            '${widget.rows.length} students · $matched matched · $notRec not recognized · $unassessed unassessed',
-            style: TextStyle(color: onVar),
-          ),
-          const SizedBox(height: 12),
+          if (widget.rows.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Reveal(
+              child: StatGrid(
+                minTileWidth: 150,
+                children: [
+                  StatTile(
+                    label: 'Students',
+                    value: widget.rows.length,
+                    icon: Icons.groups_outlined,
+                  ),
+                  StatTile(
+                    label: 'Matched',
+                    value: matched,
+                    accent: const Color(0xff176451),
+                    icon: Icons.verified_outlined,
+                  ),
+                  StatTile(
+                    label: 'Not recognized',
+                    value: notRec,
+                    accent: const Color(0xff805500),
+                    icon: Icons.help_outline,
+                  ),
+                  StatTile(
+                    label: 'Unassessed',
+                    value: unassessed,
+                    accent: const Color(0xff465650),
+                    icon: Icons.remove_circle_outline,
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 8,

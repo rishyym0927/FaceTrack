@@ -120,6 +120,51 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
     }
   }
 
+  Widget _summaryBody(BuildContext context, Json summary) {
+    final pct = summary['percentage'];
+    final present = summary['present_or_late'] as num? ?? 0;
+    final assessed = summary['assessed'] as num? ?? 0;
+    final unassessed = summary['unassessed'] as num? ?? 0;
+    final ring = PercentRing(
+      value: pct is num ? pct.toDouble() : null,
+      size: 128,
+      caption: 'attendance',
+    );
+    final tiles = StatGrid(
+      minTileWidth: 124,
+      children: [
+        StatTile(
+          label: 'Present or late',
+          value: present,
+          accent: const Color(0xff176451),
+          icon: Icons.check_circle_outline,
+        ),
+        StatTile(
+          label: 'Assessed',
+          value: assessed,
+          icon: Icons.fact_check_outlined,
+        ),
+        StatTile(
+          label: 'Unassessed',
+          value: unassessed,
+          accent: const Color(0xff9a6a00),
+          icon: Icons.help_outline,
+        ),
+      ],
+    );
+    return LayoutBuilder(
+      builder: (context, box) => box.maxWidth >= 460
+          ? Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [ring, const SizedBox(width: 20), Expanded(child: tiles)],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [Center(child: ring), const SizedBox(height: 16), tiles],
+            ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) => ContentPage(
     children: [
@@ -154,25 +199,15 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                         'Published attendance overview',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
+                      const SizedBox(height: 16),
+                      _summaryBody(context, summary!),
                       const SizedBox(height: 12),
-                      if (summary!['percentage'] != null) ...[
-                        Text(
-                          '${(summary!['percentage'] as num).toStringAsFixed(1)}%',
-                          style: Theme.of(context).textTheme.displaySmall
-                              ?.copyWith(
-                                fontWeight: FontWeight.w800,
-                                color: Theme.of(context).colorScheme.primary,
-                              ),
-                        ),
-                        const SizedBox(height: 8),
-                        Text(
-                          '${summary!['present_or_late']} present or late · ${summary!['assessed']} assessed · ${summary!['unassessed']} unassessed',
-                        ),
-                      ] else
-                        const Text('No assessed sessions yet.'),
-                      const SizedBox(height: 8),
-                      const Text(
+                      Text(
                         'Unassessed and excused results are excluded from the percentage.',
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: Theme.of(context).colorScheme.onSurfaceVariant,
+                        ),
                       ),
                     ],
                   ),

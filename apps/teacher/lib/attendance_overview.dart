@@ -144,6 +144,14 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     }
     final conducted = _data?['sessions_conducted'] ?? 0;
     final students = _students;
+    final all = (_data?['students'] as List?)?.cast<Json>() ?? const [];
+    final pcts = <num>[
+      for (final s in all)
+        if (s['percentage'] is num) s['percentage'] as num,
+    ];
+    final avg = pcts.isEmpty ? null : pcts.reduce((a, b) => a + b) / pcts.length;
+    final below = pcts.where((p) => p < 75).length;
+    final above = pcts.where((p) => p >= 75).length;
     return Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -163,10 +171,46 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           ),
           const SizedBox(height: 4),
           Text(
-            '$conducted classes conducted · ${(_data?['students'] as List?)?.length ?? 0} students',
+            '$conducted classes conducted · ${all.length} students',
             style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
-          const SizedBox(height: 12),
+          if (all.isNotEmpty) ...[
+            const SizedBox(height: 16),
+            Reveal(
+              child: StatGrid(
+                children: [
+                  StatTile(
+                    label: 'Class average',
+                    value: avg ?? 0,
+                    decimals: 1,
+                    suffix: '%',
+                    accent: percentColor(avg),
+                    icon: Icons.insights_outlined,
+                    caption: avg == null ? 'No data yet' : 'across assessed',
+                  ),
+                  StatTile(
+                    label: 'At or above 75%',
+                    value: above,
+                    accent: const Color(0xff176451),
+                    icon: Icons.trending_up,
+                  ),
+                  StatTile(
+                    label: 'Below 75%',
+                    value: below,
+                    accent: const Color(0xffa22f2f),
+                    icon: Icons.trending_down,
+                    caption: below == 0 ? 'All on track' : 'Need attention',
+                  ),
+                  StatTile(
+                    label: 'Classes held',
+                    value: conducted is num ? conducted : 0,
+                    icon: Icons.event_available_outlined,
+                  ),
+                ],
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 8,
@@ -275,7 +319,6 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
       ),
     );
     final pct = s['percentage'];
-    final low = pct != null && (pct as num) < 75;
     return Row(
       children: [
         cell(_nameW, '${s['official_name']}'),
@@ -287,19 +330,28 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           width: _pctW,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-            child: Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                pct == null ? '—' : '${(pct as num).toStringAsFixed(1)}%',
-                style: TextStyle(
-                  fontWeight: FontWeight.w700,
-                  color: pct == null
-                      ? Theme.of(context).colorScheme.onSurfaceVariant
-                      : low
-                      ? const Color(0xffa22f2f)
-                      : const Color(0xff176451),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Text(
+                  pct == null ? '—' : '${(pct as num).toStringAsFixed(1)}%',
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: pct == null
+                        ? Theme.of(context).colorScheme.onSurfaceVariant
+                        : percentColor(pct),
+                  ),
                 ),
-              ),
+                if (pct is num) ...[
+                  const SizedBox(height: 6),
+                  TrackBar(
+                    value: pct / 100,
+                    color: percentColor(pct),
+                    height: 6,
+                  ),
+                ],
+              ],
             ),
           ),
         ),
