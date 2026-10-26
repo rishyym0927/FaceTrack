@@ -110,10 +110,6 @@ class ProductApp extends ConsumerStatefulWidget {
 class _ProductAppState extends ConsumerState<ProductApp> {
   late final GoRouter router;
 
-  /// A real destination the user was heading to when auth gating bounced them
-  /// to an auth screen (login/loading/claim/…). Resumed once auth is ready, so
-  /// refreshing a deep link restores that page instead of defaulting home.
-  String? _pendingDestination;
   static const _authScreens = {
     '/login',
     '/loading',
@@ -130,27 +126,42 @@ class _ProductAppState extends ConsumerState<ProductApp> {
     router = GoRouter(
       initialLocation: '/classes',
       refreshListenable: auth,
+      // The destination is preserved in a ?from= query on the auth screens, so
+      // it survives every gating bounce and a browser refresh — with no mutable
+      // state that a redirect re-run could race on and clear.
       redirect: (context, state) {
-        final path = state.uri.path;
-        final atAuthScreen = _authScreens.contains(path);
-        String? bounce(String dest) {
-          if (!atAuthScreen) _pendingDestination = state.uri.toString();
-          return path == dest ? null : dest;
+        final loc = state.uri;
+        final atAuthScreen = _authScreens.contains(loc.path);
+        final carried = loc.queryParameters['from'];
+        // Where to return once auth is ready: the carried target, or the
+        // current location when it is a real (non-auth) route.
+        final target = (carried != null && carried.isNotEmpty)
+            ? carried
+            : (atAuthScreen ? null : loc.toString());
+
+        String? gateTo(String screen) {
+          final keep = (target == null || target == '/classes') ? null : target;
+          // Already parked on this screen with the right target → no redirect
+          // (compare logical values to avoid encoding-mismatch loops).
+          if (loc.path == screen &&
+              (loc.queryParameters['from'] ?? '') == (keep ?? '')) {
+            return null;
+          }
+          return Uri(
+            path: screen,
+            queryParameters: keep == null ? null : {'from': keep},
+          ).toString();
         }
 
-        if (!auth.signedIn) return bounce('/login');
-        if (auth.loading) return bounce('/loading');
-        if (auth.error != null) return bounce('/connection');
+        if (!auth.signedIn) return gateTo('/login');
+        if (auth.loading) return gateTo('/loading');
+        if (auth.error != null) return gateTo('/connection');
         if (auth.memberships.isEmpty) {
-          return bounce(auth.canClaim ? '/claim' : '/access');
+          return gateTo(auth.canClaim ? '/claim' : '/access');
         }
-        if (auth.institute == null) return bounce('/institutes');
-        // Ready: if parked on an auth screen, resume the remembered route.
-        if (atAuthScreen) {
-          final dest = _pendingDestination ?? '/classes';
-          _pendingDestination = null;
-          return dest == path ? null : dest;
-        }
+        if (auth.institute == null) return gateTo('/institutes');
+        // Ready: resume the carried destination when parked on an auth screen.
+        if (atAuthScreen) return target ?? '/classes';
         return null;
       },
       routes: [
