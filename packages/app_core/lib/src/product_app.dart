@@ -46,6 +46,7 @@ Future<void> launchProduct(
   DetailBuilder? detailBuilder,
   DetailBuilder? sessionBuilder,
   WidgetBuilder? enrollmentBuilder,
+  WidgetBuilder? adminBuilder,
   Future<void> Function(AppServices)? configure,
 }) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -61,6 +62,7 @@ Future<void> launchProduct(
           detailBuilder: detailBuilder,
           sessionBuilder: sessionBuilder,
           enrollmentBuilder: enrollmentBuilder,
+          adminBuilder: adminBuilder,
         ),
       ),
     );
@@ -95,10 +97,12 @@ class ProductApp extends ConsumerStatefulWidget {
     this.detailBuilder,
     this.sessionBuilder,
     this.enrollmentBuilder,
+    this.adminBuilder,
   });
   final WidgetBuilder classesBuilder;
   final DetailBuilder? detailBuilder, sessionBuilder;
   final WidgetBuilder? enrollmentBuilder;
+  final WidgetBuilder? adminBuilder;
   @override
   ConsumerState<ProductApp> createState() => _ProductAppState();
 }
@@ -155,6 +159,7 @@ class _ProductAppState extends ConsumerState<ProductApp> {
               (auth.account?.userId ?? '') + (auth.institute ?? ''),
             ),
             path: state.uri.path,
+            hasAdmin: widget.adminBuilder != null,
             child: child,
           ),
           routes: [
@@ -163,6 +168,11 @@ class _ProductAppState extends ConsumerState<ProductApp> {
               builder: (c, s) => widget.classesBuilder(c),
             ),
             GoRoute(path: '/account', builder: (_, _) => const AccountPage()),
+            if (widget.adminBuilder != null)
+              GoRoute(
+                path: '/admin',
+                builder: (c, s) => widget.adminBuilder!(c),
+              ),
             if (widget.enrollmentBuilder != null)
               GoRoute(
                 path: '/enrolment',
@@ -250,28 +260,69 @@ class _ProductAppState extends ConsumerState<ProductApp> {
   );
 }
 
+class NavTab {
+  const NavTab(this.path, this.label, this.icon, this.selectedIcon);
+  final String path, label;
+  final IconData icon, selectedIcon;
+}
+
 class ProductShell extends StatelessWidget {
-  const ProductShell({super.key, required this.path, required this.child});
+  const ProductShell({
+    super.key,
+    required this.path,
+    required this.child,
+    this.hasAdmin = false,
+  });
   final String path;
   final Widget child;
+  final bool hasAdmin;
   @override
   Widget build(BuildContext context) => Consumer(
     builder: (context, ref, _) {
       final auth = ref.watch(authProvider),
           config = ref.read(servicesProvider).config;
       final student = config.role == AppRole.student;
-      final index = path == '/account'
-          ? (student ? 2 : 1)
-          : path == '/enrolment'
-          ? 1
-          : 0;
-      void navigate(int i) => context.go(
-        i == 0
-            ? '/classes'
-            : student && i == 1
-            ? '/enrolment'
-            : '/account',
-      );
+      final isAdmin =
+          hasAdmin &&
+          config.role == AppRole.teacher &&
+          (auth.account?.members.any(
+                (m) =>
+                    m.role == 'admin' &&
+                    m.status == 'active' &&
+                    m.instituteId == auth.institute,
+              ) ??
+              false);
+      final tabs = <NavTab>[
+        const NavTab(
+          '/classes',
+          'Classes',
+          Icons.groups_outlined,
+          Icons.groups,
+        ),
+        if (student)
+          const NavTab(
+            '/enrolment',
+            'Enrolment',
+            Icons.face_outlined,
+            Icons.face,
+          ),
+        if (isAdmin)
+          const NavTab(
+            '/admin',
+            'Admin',
+            Icons.admin_panel_settings_outlined,
+            Icons.admin_panel_settings,
+          ),
+        const NavTab(
+          '/account',
+          'Account',
+          Icons.person_outline,
+          Icons.person,
+        ),
+      ];
+      var index = tabs.indexWhere((t) => path == t.path);
+      if (index < 0) index = 0; // class/session detail routes fall under Classes
+      void navigate(int i) => context.go(tabs[i].path);
       return LayoutBuilder(
         builder: (context, c) {
           final wide = c.maxWidth >= 800;
@@ -377,28 +428,12 @@ class ProductShell extends StatelessWidget {
                     selectedIndex: index,
                     onDestinationSelected: navigate,
                     destinations: [
-                      if (student) ...[
-                        const NavigationDestination(
-                          icon: Icon(Icons.groups_outlined),
-                          selectedIcon: Icon(Icons.groups),
-                          label: 'Classes',
+                      for (final t in tabs)
+                        NavigationDestination(
+                          icon: Icon(t.icon),
+                          selectedIcon: Icon(t.selectedIcon),
+                          label: t.label,
                         ),
-                        const NavigationDestination(
-                          icon: Icon(Icons.face_outlined),
-                          selectedIcon: Icon(Icons.face),
-                          label: 'Enrolment',
-                        ),
-                      ] else
-                        const NavigationDestination(
-                          icon: Icon(Icons.groups_outlined),
-                          selectedIcon: Icon(Icons.groups),
-                          label: 'Classes',
-                        ),
-                      const NavigationDestination(
-                        icon: Icon(Icons.person_outline),
-                        selectedIcon: Icon(Icons.person),
-                        label: 'Account',
-                      ),
                     ],
                   ),
             body: Row(
@@ -410,28 +445,12 @@ class ProductShell extends StatelessWidget {
                     labelType: NavigationRailLabelType.all,
                     onDestinationSelected: navigate,
                     destinations: [
-                      if (student) ...[
-                        const NavigationRailDestination(
-                          icon: Icon(Icons.groups_outlined),
-                          selectedIcon: Icon(Icons.groups),
-                          label: Text('Classes'),
+                      for (final t in tabs)
+                        NavigationRailDestination(
+                          icon: Icon(t.icon),
+                          selectedIcon: Icon(t.selectedIcon),
+                          label: Text(t.label),
                         ),
-                        const NavigationRailDestination(
-                          icon: Icon(Icons.face_outlined),
-                          selectedIcon: Icon(Icons.face),
-                          label: Text('Enrolment'),
-                        ),
-                      ] else
-                        const NavigationRailDestination(
-                          icon: Icon(Icons.groups_outlined),
-                          selectedIcon: Icon(Icons.groups),
-                          label: Text('Classes'),
-                        ),
-                      const NavigationRailDestination(
-                        icon: Icon(Icons.person_outline),
-                        selectedIcon: Icon(Icons.person),
-                        label: Text('Account'),
-                      ),
                     ],
                   ),
                 Expanded(child: child),
