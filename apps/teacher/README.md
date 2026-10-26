@@ -2,7 +2,9 @@
 
 Separate Flutter Android/web app. Manage assigned attendance classes, join codes, student requests and approved rosters. Both apps share authentication, API transport, theme and controls through `packages/app_core`; permissions come from the backend. Controlled confirmed demo accounts only in this slice.
 
-**Status — 23 October 2026:** account/class acceptance is complete, including native restart/logout and web keyboard/screen-reader checks. Real biometric review happy path is user-confirmed. One real low-light classroom capture was processed, teacher-reviewed and published; final reports and own student history were user-confirmed. Updated Android APK was installed and the user confirmed the published session, final report and Monday scheduled session load. Broader recognition and recovery checks remain open.
+**Status — 26 October 2026:** account/class acceptance is complete, including native restart/logout and web keyboard/screen-reader checks. Real biometric review and one human-reviewed low-light classroom publication are verified; final reports, own student history and one Monday timetable occurrence are user-confirmed. Attendance-query review is implemented and locally tested; authenticated device acceptance and broader recognition/recovery checks remain open.
+
+Complete host setup and configuration: [installation guide](../../docs/INSTALLATION.md).
 
 From this app directory, using the already configured ignored public-only file:
 
@@ -13,7 +15,7 @@ From this app directory, using the already configured ignored public-only file:
 ../../scripts/flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=../../.local/flutter/development.json
 ```
 
-On Windows, use the global `flutter` command and backslash paths, or start the full application with `..\..\scripts\windows\start-demo.ps1` from PowerShell. See the [Windows guide](../../docs/WINDOWS_SETUP.md). Do not use the macOS-only `scripts/flutter` wrapper on Windows.
+On Windows, use the global `flutter` command and backslash paths, or start the full application with `..\..\scripts\windows\start-demo.ps1` from PowerShell. See the [Windows guide](../../docs/WINDOWS_SETUP.md). The `scripts/flutter` shell wrapper is for macOS/Linux, not PowerShell.
 
 The API must be running on local port 8000. Login reaches hosted Supabase, but classes require this local API; internet access alone is insufficient in the current development setup. On macOS, authorize USB debugging and run `../../scripts/android-connect` after reconnecting the cable. On Windows, run `..\..\scripts\windows\android-connect.ps1`. App ID: `dev.facetrack.teacher`. Use `flutter devices` and the same public configuration for interactive development.
 
@@ -31,7 +33,7 @@ Product login is the default entrypoint. The original capture implementation is 
 
 The spike saves local recordings/sidecars; the product Sessions tab has its own signed private classroom upload. Keep all existing consent, calibration/test separation and 24-hour raw-media rules.
 
-See root `MASTER_DESIGN.md` for scope, `README.md` for public configuration fields and `PROGRESS.md` for actual verification and remaining checks.
+See root `MASTER_DESIGN.md` for scope, the [installation guide](../../docs/INSTALLATION.md) for configuration, and `PROGRESS.md` for actual verification and remaining checks.
 
 ## Face enrolment review (Milestone 3B, acceptance in progress)
 
@@ -41,4 +43,6 @@ In an assigned class, open Face enrolments. Only actively enrolled students awai
 
 In an assigned class, **Sessions** creates a manual session or expands **Import timetable**. Add any missing room code first. Download the exact 14-column template, fill assigned academic values, select a CSV under 1 MiB and inspect validated rows. The app suggests the next date matching a CSV weekday; confirm that date or pick another matching day inside the term. Confirmation materializes sessions **for that day only** while retaining the weekly rule for future dates; a nonmatching date is rejected. Opening/closing scheduled sessions remains manual. Re-imports preserve opened history and reject stale previews/overlaps.
 
-Open a session to freeze the approved roster. Record a short classroom clip with only consenting participants, audio off, and upload it while the Mac API/worker run. Suggestions need human review; missed/unknown students remain unassessed. Close, save explicit decisions, acknowledge unassessed rows, then publish. A later correction requires a reason and creates a new immutable revision. Reports appear after closing/publication: download CSV or PDF using short-lived private grants. Email stays disabled until a permitted Resend sender is configured. Never mark a student absent merely because a capture failed.
+Open a session to freeze the approved roster. Record a short classroom clip with only consenting participants, audio off, and upload it while the local API/worker run. Suggestions need human review; missed/unknown students remain unassessed. Close, save explicit decisions, acknowledge unassessed rows, then publish. A later correction requires a reason and creates a new immutable revision. Reports appear after closing/publication: download CSV or PDF using short-lived private grants. Email stays disabled until a permitted Resend sender is configured. Never mark a student absent merely because a capture failed.
+
+The **Attendance queries** tab lists open queries for assigned offerings. Rejecting requires a reason. Accepting creates a new immutable corrected publication/report; it does not rewrite the earlier publication. Only the latest published Absent result can be queried by its own student.

@@ -32,7 +32,7 @@ Repository: https://github.com/rishyym0927/FaceTrack.git
 
 Rules:
 1. Use Windows PowerShell. Do not use macOS commands from the README.
-2. Read AGENTS.md, README.md, docs/WINDOWS_SETUP.md and PROGRESS.md before acting.
+2. Read AGENTS.md, README.md, docs/INSTALLATION.md, docs/WINDOWS_SETUP.md and PROGRESS.md before acting.
 3. Preserve the existing architecture. Do not modify application code, database schema, model settings, attendance records or Supabase data merely to make setup pass.
 4. Never display, print, upload or commit .env files, tokens, passwords, model files, recordings, embeddings or templates.
 5. Do not run seed, migration, provisioning, key-rotation or model-download commands for the existing demo.
@@ -99,7 +99,7 @@ Give me a short table showing Git, Flutter/browser, Docker/WSL, private-file pre
 The client can give Claude this shorter prompt on later days:
 
 ```text
-Open C:\FaceTrack, read docs/WINDOWS_SETUP.md, start Docker Desktop if needed, then run `.\scripts\windows\start-demo.ps1`. Verify all four containers, API readiness, Teacher on port 5300 and Student on port 5301. Do not change code, configuration, database data, biometrics or attendance. If a private credential is missing/expired, stop and tell me to contact Rishi without printing the credential.
+Open C:\FaceTrack, read docs/INSTALLATION.md and docs/WINDOWS_SETUP.md, start Docker Desktop if needed, then run `.\scripts\windows\start-demo.ps1`. Verify all four containers, API readiness, Teacher on port 5300 and Student on port 5301. Do not change code, configuration, database data, biometrics or attendance. If a private credential is missing/expired, stop and tell me to contact Rishi without printing the credential.
 ```
 
 Stop services with `C:\FaceTrack\scripts\windows\stop-demo.ps1` and close the two Flutter PowerShell windows.

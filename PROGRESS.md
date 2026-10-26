@@ -1,77 +1,123 @@
 # FaceTrack development checkpoint
 
 **Reviewed:** 26 October 2026 (Asia/Kolkata)
-**Deployment:** Verified macOS FastAPI, loopback Redis, Celery solo CPU worker and outbound agent; hosted free Supabase Auth/PostgreSQL/private Storage. Windows now has a native-Flutter + Docker Desktop Linux-service profile, but a real Windows host acceptance run is pending. Teacher web 5300, Student web 5301, API 8000; Android uses USB forwarding. HTTPS API/cloud inference remain later.
-**Current:** Phase 3A account/class acceptance is complete. Code through classroom recognition, attendance publication, timetable CSV and private CSV/PDF report downloads is implemented. Local and hosted development schema head 0007 has **37 forced-RLS business tables**. Evidence-coded Present/Not-recognized proposals and student attendance queries are implemented and locally tested. The existing real publication, reports, history and timetable evidence remains unchanged. Better-lit recognition, hosted/device query acceptance and recovery checks remain; keep milestones 3B–7 open.
-**ML:** Independent prototype recognition acceptance remains **1/6 held-out cases**. No >95% accuracy, ≤2-second response, liveness or 20-class capacity claim. Frozen model/profile/source/lock/template receipt remains unchanged.
-**Cost and reliability review (25 October):** `docs/COST_AND_RELIABILITY.md` replaces the earlier cost table with provider prices read on 25 October at ₹94.95/$. CPU-only scenarios estimate ≈ $44/month (1,000 students) to ≈ $220–290 (large university) against the earlier $355–$780. Open: model licence is unpriced (published weights are non-commercial research only), real clip size and cloud seconds per clip are unmeasured, availability figures are targets and no classroom accuracy is claimed. Documentation only; no source or frozen file changed.
 
-**ML audit checkpoint (25 October):** The frozen receipt was rechecked at **16/16**. Root synthetic/contract tests pass **34**, with **1 expected failure** that reproduces a degenerate-landmark alignment abort; worker synthetic tests pass **5**. No frozen source, model, profile, evaluator, template or lock changed. `scripts/check_ml_freeze.py` provides a safe receipt check; `scripts/summarize_ml_evaluation.py` summarizes private held-out results without identities or repeat inflation. The one available held-out case has 2 correct proposals, 0 false proposals and 0 misses, but is still **1/6** and establishes no general accuracy. `scripts/benchmark_match.py` measured synthetic 12-query matching at 30/60/120 students: median **0.584/1.168/2.354 ms** on this Mac; this excludes video, worker queue and network. The alignment defect needs a separately versioned candidate fix after the frozen held-out evaluation. A beginner handover is in `docs/ML_TEAM_QUICKSTART.md`.
-**Non-ML closure checkpoint (25 October):** The isolated PostgreSQL service was restored and the complete API suite now passes **41** with Ruff clean; the worker passes **5**. Shared/capture/Student/Teacher analysis is clean and the complete suites pass **23/8/9/16**. Both configured release web bundles and Android debug APKs build. Fresh Student mobile-width and Teacher desktop-width release login pages were visually inspected with correct product titles, clear fields/actions and no visible clipping. Teacher session refreshes reject stale responses and stop terminal polling; private pending recordings serialize lifecycle changes and cannot be resurrected by late upload checkpoints; narrow app bars and failures provide clearer, accessible state-specific guidance. All API responses, including early 413 rejections, now receive the standard request/security/cache headers. Browser metadata now identifies the two product apps consistently. No database schema, public API contract, worker, inference logic, active template or attendance record changed.
-**Windows portability checkpoint (25 October):** The repository now includes `compose.windows.yaml`, development Dockerfiles, PowerShell setup/start/stop/Android helpers, safe public/private configuration templates and `docs/WINDOWS_SETUP.md`. Flutter runs natively on Windows; API, Redis, Celery and the agent run in Linux containers, avoiding unsupported native Celery/Redis behavior. Worker service hostnames are accepted only with the explicit container-network guard; arbitrary plaintext hosts remain rejected. The API's guarded local PostgreSQL test helper also supports Windows TCP when contributors install PostgreSQL 16. API tests pass **41**, worker tests now pass **7**, both full Ruff checks pass, locks are current, the frozen ML receipt remains **16/16**, the Compose YAML/static scripts were inspected, and all 21 project Markdown files have balanced code fences and valid local links. Docker and PowerShell are unavailable on the verified Mac host, so image build, script execution, Windows camera/USB and end-to-end acceptance remain explicitly pending.
+**Architecture:** [`MASTER_DESIGN.md`](MASTER_DESIGN.md)
 
-**Cross-platform packaging checkpoint (26 October):** Unified the stack behind one canonical `compose.yaml`; `compose.windows.yaml` is now a thin `include` alias so existing Windows scripts keep working. Added same-verb launchers (`Makefile` for macOS/Linux, `run.ps1` for Windows: up/down/logs/console), `scripts/setup.sh` (Linux/macOS mirror of `setup.ps1`), `.gitattributes` (LF for scripts/YAML/Dockerfiles, CRLF for `.ps1`), `docs/LINUX_SETUP.md`, and made `scripts/flutter` fall back to a system Flutter/JDK off PATH when the bundled `.tools` toolchain is absent (the Mac path is unchanged). **Fixed a real build bug:** `docker/api.Dockerfile` copied a non-existent `services/api/alembic` directory (the dir is `migrations`, per `alembic.ini`), which had made the API image unbuildable — confirming the Windows/Docker path had never actually run. Verified on a real Linux Docker CLI: `docker compose config` valid for both `compose.yaml` and the `compose.windows.yaml` alias; the `console` profile resolves through the alias; every Dockerfile `COPY` source now exists in the build context. Mac regression clean: `scripts/flutter` works, freeze **16/16**, root **42 (+1 xfail)**, worker **35**, both app analyzers clean. Still pending (needs the respective hosts): a live `docker compose build`+`up` image build (blocked here only by sandbox registry egress), a full Linux host run, and a real Windows 11 acceptance run.
-**Client handoff:** `docs/CLIENT_WINDOWS_HANDOFF.md` provides a copy-paste Claude Code setup prompt, a daily-start prompt, safe private-file layout and explicit read-only acceptance checks for nontechnical Windows users. `docs/PLATFORM_SUPPORT.md` records the honest support matrix: Android/web are product targets, macOS is the verified host, Windows x64 is implemented but awaiting physical acceptance, and iOS/native desktop/Linux-host packages are not supported. The public repository remains intentionally insufficient for real recognition without the separately transferred private configuration and approved model package.
-**Client response and ML experiments (26 October):** The original query sheet was preserved and a rendered seven-page response was created at `output/docx/FaceTrack_Developer_Response.docx`. It distinguishes current behavior from unmeasured research and corrects the prior report's liveness/automatic-attendance implications. `docs/ML_ACCURACY_AND_ATTENDANCE_PLAN.md` is the repository plan. The isolated `experiments/ml_accuracy` package implements detector-only LAB CLAHE, dynamic 640/960 SCRFD decoding with global NMS, optional contrast/yaw candidates, per-crop alignment rejection, pseudonymous hashed DigiFace manifests, aggregate-only result exports and eight synthetic tests. It is not imported by the production worker. The DigiFace synthetic benchmark was run afterwards (next checkpoint); WIDER, BIWI, RetinaFace-R50 and SCRFD-2.5G measurements remain externally gated and **Not measured yet**.
+**Setup:** [`docs/INSTALLATION.md`](docs/INSTALLATION.md)
 
-**Synthetic benchmark (26 October):** 60 DigiFace scenes (6 scenarios × 10, 12 frames each, 30-student roster; 60 present students in total) run through the unchanged frozen baseline, 3 fresh-process runs per variant, identical decision digests. Baseline: **0 wrong-present marks** (also 0 false presences in unknown-only scenes), 22 of 60 present students suggested (easy 20/24, medium 2/18, hard 0/18), median ≈0.1 s and p95 ≈0.18 s per 12-frame scene. Most misses come from the quality gate: faces found easy 342/384, medium 196/288, hard 76/288, but usable (passed the gate) only 218, 35 and 0. Two-scale SCRFD suggested 24/60 (+2) with 0 false presence at median ≈0.42 s/p95 ≈0.56 s; detector-only CLAHE changed nothing (22/60); the contrast filter was worse (18/60). Two-scale meets the numeric synthetic gates but is **not adopted**: the gain is two students on synthetic data and needs real-data validation and a new model release. Manifest sha256 `9700b57b77db691a3697182ae2028aba6635dd22a86eda3135e2a4fc0c721d26`; results are in the ignored `.local/experiments/digiface/results/`. This is a SYNTHETIC BENCHMARK, not classroom accuracy; it does not measure real cameras, lighting or people, and real held-out recognition remains 1/6. Reproduce with `experiments/ml_accuracy/run_synthetic.py` (`prepare`, then `run --variant ... --run N`).
+**Milestones:** [`ROADMAP.md`](ROADMAP.md)
 
-**Model Test Console (26 October):** `services/worker/src/facetrack_worker/console.py` (loopback-only server that calls the unchanged frozen CLI in fresh processes, 3 repeats per recording, first scored attempt official, uploads deleted after processing, hash-pinned model/profile) plus the Teacher `main_console.dart` page let a nontechnical client enrol her own consenting volunteers and run six scenarios without logins, Supabase or the API. It downloads a readable `.txt` report and a counts-only `.json`. Guide: `docs/MODEL_TEST_CONSOLE.md`; scripts `scripts/build-console`, `scripts/test-console`, `scripts/windows/start-console.ps1`/`stop-console.ps1`; Docker profile `console`. Verified: 28 console tests, UI tests, analyzer, Ruff, an end-to-end smoke with the real frozen CLI on synthetic composite videos (receipt 16/16, media deleted, export without names) and the page rendering in a browser. **Not verified:** a real camera with real volunteers, and Windows/Docker operation.
-**Attendance queries (26 October):** Migration 0007 is applied locally and to the hosted development database and adds evidence codes, `proposed_absent` drafts and tenant-RLS attendance disputes. Successful usable recognition may label an eligible unmatched student **Not recognized**; limited capture, missing templates and failures remain Unassessed. Publication rejects unresolved proposals. A student can query only their own latest published Absent result; the assigned teacher accepts or rejects with a reason, and acceptance atomically creates a corrected immutable publication/report. Student and Teacher interfaces are wired. Local API authorization, cross-role denial, replay idempotency, limited-capture safety and corrected revision tests pass. Hosted readiness returns 200 at schema 0007; safe authenticated web/Android acceptance remains open.
-**Repository:** Initial source and documentation are published on the public GitHub `origin/main` branch. The root README is a concise local startup guide; detailed spike instructions are in `docs/ML_SPIKE.md`. Private configuration, model weights, recordings and templates remain Git-ignored.
-**Active enhancement:** Student live pose guidance is implemented for Android and Chrome. The user confirmed Chrome guidance, and on the physical Samsung phone confirmed upright preview, matching left/right prompts and upright saved-video playback. These are capture observations, not identity/liveness/ML accuracy claims. Code review fixed sensor/device-aware preview rotation, browser outline alignment, an interrupted-start race and unsafe retake after upload begins. Capture 7/7, Student 3/3 and Teacher 6/6 tests plus Flutter analysis, Student web/Android builds and JS syntax check pass. Frozen ML receipt remains 16/16 unchanged. Full five-pose completion, no/two-face/low-light/denied-permission and resumable-upload acceptance with this feature remain open; active templates are untouched.
-**Application audit and presentation polish:** `docs/APPLICATION_REVIEW.md` is the issue register. The new deep-teal design now has responsive sign-in/header behavior, clearer class/enrolment/history/session/report hierarchy, semantic statuses and reduced-motion-aware transitions. Student history discards stale summaries and clears them on denied access. Teacher reports coalesce refreshes, discard switched-session results, skip draft detail fetches and pause background polling. No backend, worker, ML, schema or route change was made. Shared/capture/Student/Teacher analysis reports no issues; tests pass **20/7/4/8** respectively. Both configured release web builds and Android debug APKs pass. The existing Student web session's class/history pages were read-only inspected at phone width; the running preview predates the new release bundles, and full authenticated release visual/device acceptance remains open. No live participant data was changed during this review.
-**Follow-up frontend review:** Resource-keyed routes prevent stale class/session state; stale enrolment refreshes no longer reconcile current pending media; Teacher session exit/Refresh warns before discarding changed attendance choices. Capture status requests are cached across rebuilds, timetable polling stops after disposal, and the 200% text Teacher dropdown overflow at 360/390 px is fixed. Student upload guidance, session action labels and timetable steps are clearer. The final non-ML pass adds session/pending-media race protection, compact semantic institute labeling, state-specific errors and consistent product web metadata. All four Flutter analyzers are clean; complete shared/capture/Student/Teacher suites pass **23/8/9/16**. Both configured release web builds and Android debug APKs pass. Responsive authenticated widget checks cover 360/390/768/1440 px at 200% text. Live inspection of the newly built authenticated screens and physical-phone verification remain pending; the available Student browser tab serves an older preview.
+## Current state
 
-Read `AGENTS.md`, `MASTER_DESIGN.md` (architecture authority), `ROADMAP.md` (milestone gates) and service/app READMEs. Preserve private settings and active enrolment; never stage ignored local data or model artifacts.
+The current demo is **cloud-hosted data with local processing**:
 
-## Verified foundation and enrolment
+- Supabase hosts Auth, PostgreSQL and private Storage.
+- FastAPI, Redis, one Celery CPU worker and the outbound agent run on the development computer.
+- Teacher and Student are separate Flutter Android/web apps on ports 5300/5301.
+- Android reaches the local API through USB port forwarding.
 
-- Approved Supabase student/teacher identities, memberships, tenant RLS, academic offerings, join codes, pending requests/approval, audit, idempotency and rate limits work against hosted development. Student/Teacher Android and web class flows were user-confirmed.
-- One real enrolment completed consent → Android capture → signed private upload → local CPU processing → encrypted candidate vectors → human review/approval → active templates. Post-decision review media was deleted. User confirmed a second consenting student's active approval; a read-only hosted aggregate check found **two** approved class members with active consent/templates. The first active set was preserved.
-- A real Android upload exposed Supabase object info with top-level `content_type` and `metadata: null`; normalized MIME handling and regression tests fixed it without bypassing media checks.
-- Phase 3A acceptance closed: the user verified Teacher and Student session restoration after full close/reopen, logout returning to Login with protected data hidden, Student invalid-code rejection without creating a request, and Teacher web keyboard focus/screen-reader navigation. Controlled 3B interrupted upload, worker restart, rejection/replacement/withdrawal, orientation, web capture and retention recovery remain. Do not approve identity/poses on the user's behalf.
+macOS Apple Silicon is the verified demo host. The canonical Docker stack supports the same local services on Windows/Linux; both Compose configurations validate and the API/worker images build, but physical Windows/Linux acceptance remains pending. HTTPS/cloud API and institute deployment are later gates.
 
-## Implemented demo slices
+Schema head is **`0007_attendance_queries`**, with **37 forced-RLS business tables** locally and on the hosted development project.
 
-- Migration **0005_attendance** (hosted/local) plus additive hosted/local **0007_attendance_queries**: sessions, frozen roster, captures, recognition evidence, evidence-coded draft decisions, immutable publication revisions and student attendance queries. Opening freezes approved members and current eligible consented templates. The worker receives only job-scoped vectors in memory and returns corroborated presence suggestions. Successful usable coverage may also propose Not recognized; failures and limited evidence remain Unassessed. Teacher decisions/publications are authoritative. Student history is limited to own latest published revision. Authenticated web/Android acceptance for the new query flow remains pending.
-- Migration **0006_timetable_reports** (hosted/local): rooms, timetable imports/series/future exceptions, reports and deliveries. A private 25 MiB CSV/PDF bucket was provisioned. Existing worker credential was preserved while permitted jobs expanded to enrolment, recognition, timetable, report and optional delivery. Structured 14-column CSV upload/preview/term-revision confirmation creates scheduled sessions; automatic opening is future work. Report jobs use immutable snapshots, private CSV/PDF assets, 60-second authorized download grants and a retry path.
-- Student adds guided enrolment progress/active confirmation, clearer class statuses and own published history. Teacher adds Sessions, classroom capture/upload, review/publication/correction, CSV import/room creation and report downloads. Teacher web class/import UI was visually inspected. A real publish attempt exposed confusing suggestion confirmation and a stale-record Retry loop; Teacher guidance now explicitly distinguishes drafts, requires every recognition suggestion to receive a human decision, and makes Retry refresh the latest version. Updated builds/device tests remain open.
-- Resend is **not configured**: no account/permitted sender yet. Email remains disabled with downloads available. Provider acceptance/inbox delivery is unverified. A synthetic 80-student multi-page PDF was rendered and visually inspected; institute-script font coverage remains a release check.
-- Teacher web must be built with `--dart-define-from-file=../../.local/flutter/development.json` as in its README. An omitted flag briefly produced a local “Setup required” build; it was rebuilt with the configuration. Android builds use `scripts/flutter` so JDK 17 and the project-local SDK/cache are set.
-- Updated Teacher Android debug APK built and installed on the USB-connected phone; the user confirmed the assigned class, published revision and Final report load there. USB `tcp:8000` reverse remains active. The operator database password was rotated and the new private connection passed `SELECT 1`; API readiness remained 200. Only public Supabase configuration is present in Flutter builds; the actual Storage secret is absent from the Teacher web bundle.
-- A one-row demo timetable file is at ignored `.local/demo/timetable.csv` for CS401/CSE-5A. The teacher added room `DEMO-101`, uploaded the CSV and confirmed it. Two first confirmations on Friday created the weekly series but zero dated sessions because the CSV specifies Monday. After selecting Monday 26 October, the user confirmed a scheduled session appeared. Hosted read-only verification found one active series, one scheduled session at 09:00 Asia/Kolkata, and zero duplicate occurrence keys. The app now defaults to the next matching weekday, explains single-day materialization and displays the created count. The API rejects a nonmatching date with `NO_SESSION_ON_DATE` instead of committing zero sessions.
-- A real report exposed unused reservation metadata after completion. The API now closes those rows atomically when finalizing the report; a focused PostgreSQL regression passes. Four previously unlinked reservations from the two completed demo reports were closed without changing uploaded assets, reports or publications.
+## Implemented and verified
 
-## Latest checks
+### Accounts and classes
 
-| Check | Verified result |
+- Approved student/teacher identities, memberships and teacher assignments
+- Student identity claim, join-code request and teacher approval
+- Tenant/object authorization, encrypted join codes, idempotency and rate limits
+- Student/Teacher web and Android class flows
+- Session restoration/logout, invalid-code recovery and Teacher web keyboard/screen-reader navigation
+
+### Biometric enrolment
+
+- Versioned consent and guided Android/Chrome capture
+- Private signed Supabase upload and durable local processing
+- Encrypted 512D templates pinned to model/profile versions
+- Teacher identity/pose review before activation
+- Two consenting approved class members currently have active templates
+- One complete real happy path is verified; a second active student was user-confirmed
+- Android upright preview/playback and correct left/right pose guidance are user-confirmed
+
+Recovery/lifecycle acceptance remains open for interrupted upload, worker restart, rejection, replacement, withdrawal, expiry and all capture edge cases.
+
+### Sessions and attendance
+
+- Manual/scheduled sessions, frozen roster and private classroom capture
+- Roster-scoped recognition suggestions and evidence-coded drafts
+- `proposed_absent` is shown as **Not recognized**; it never becomes final absence automatically
+- Failed/limited processing and missing templates remain Unassessed
+- Explicit teacher decisions, immutable publication revisions and corrections
+- Student own published history
+- Student Absent-attendance query and assigned-teacher accept/reject flow, locally tested
+
+One real low-light two-person capture sampled 12 frames, produced 23 detections and 14 quality rejects, and suggested one of two enrolled students. The teacher explicitly confirmed both students Present and published revision 1. Raw capture media was deleted. Worker pipeline time was **356.505 ms**, excluding upload, queue, network, UI and cold start; it is not an end-to-end response measurement.
+
+### Timetable and reports
+
+- Bounded 14-column CSV upload, validation preview and selected-day materialization
+- Room, faculty, class and overlap checks; repeated import is idempotent
+- One real Monday scheduled session was user-confirmed
+- Draft/final CSV and PDF report jobs from immutable snapshots
+- Private 60-second authorized downloads; final CSV/PDF contents user-confirmed
+- Email delivery code exists but is disabled because no permitted Resend sender is configured
+
+### ML and evaluation
+
+- Frozen SCRFD-500M + ArcFace-trained MobileFaceNet baseline, CPU ONNX Runtime
+- Bounded video decoding, face quality checks, alignment, normalized embeddings, exact NumPy roster matching and temporal corroboration
+- Freeze receipt verifies 16 source/model/profile/template/lock files
+- Six calibration scenarios passed; independent real held-out acceptance remains **1 of 6**
+- Isolated research package covers detector-only CLAHE, contrast/yaw candidates, two-scale SCRFD and per-crop alignment rejection without modifying production files
+- DigiFace 60-scene synthetic benchmark: baseline 22/60 present suggestions and zero wrong-present marks; two-scale 24/60 and zero wrong-present marks; CLAHE unchanged; contrast filter worse
+- Synthetic results are not classroom accuracy. No >95% accuracy, liveness, ≤2-second end-to-end response or 20-class capacity claim is established.
+
+The loopback Model Test Console lets a nontechnical tester enrol consenting volunteers and run six scenarios. Its automated tests and synthetic smoke pass; real-camera volunteer and Windows acceptance are pending.
+
+## Verification on 26 October 2026
+
+| Check | Result |
 |---|---|
-| Backend isolated PostgreSQL, mocked Auth/Storage | **43 passed** at schema 0007: tenant boundaries, consent, leases, safe Present/Not-recognized proposals, limited-capture protection, immutable corrections, dispute authorization/idempotency, timetable/report behavior and standard headers. |
-| Worker | **35 passed** (7 original plus 28 Test Console): synthetic FFmpeg rotation/audio/corrupt cases, report/CSV rendering and Windows/container configuration checks. |
-| Backend Ruff | Passed. |
-| Final Flutter pass, 25 October | All four analyzers clean; shared **23**, capture **8**, Student **9**, Teacher **16** tests passed. Configured Student/Teacher release web bundles and Android debug APKs built. |
-| Teacher Flutter | Analysis, 19 widget/unit tests (16 plus 3 Test Console) (including next valid timetable date), configured web build and debug APK build passed. Latest APK installed on the USB-connected phone; the user confirmed the Monday scheduled session appears. Earlier published session/report view passed on phone. Suggestion/Retry guidance still needs acceptance. |
-| Student Flutter | Analysis and enrolment widget test passed; user-confirmed published own history on web. Native history and targeted account/accessibility checks remain. |
-| Hosted | 0005/0006/0007 applied; private documents bucket and preserved worker capability configured; readiness **200**; aggregate two eligible consented members. A two-person low-light capture processed: 12 sampled frames, 23 detections, 14 quality rejects, one corroborated suggestion (7 hits), one unassessed roster member before review. Worker pipeline total **356.505 ms**, excluding upload/network/UI and start-to-finish latency. Raw capture media was deleted. The teacher explicitly confirmed both present and published revision **1**; hosted read-only verification found one immutable publication, two present rows, and ready draft/final CSV/PDF report jobs. User confirmed Final CSV/PDF downloads open **and their class/session details and both Present rows are correct**; Student own published Present history appears. |
-| Private media retention | Hosted aggregate read found all 1 classroom and 3 enrolment raw assets marked deleted; zero overdue raw assets. Four generated report artifacts remain uploaded as intended; unused report reservations and timetable source assets are tombstoned. This checks database state, not independent provider-object reconciliation. |
-| Frozen ML | Sixteen receipt-pinned files checked unchanged after timetable work. Recheck before participant processing. |
-| ML audit, 25 October | 16/16 frozen files unchanged; root 42 passed/1 expected frozen-baseline alignment failure; worker 7 passed (35 after the Test Console on 26 October). Eight isolated candidate-package tests cover CLAHE, NMS, quality/yaw guards, alignment isolation, pseudonymous manifests and aggregate-only exports. Synthetic matcher median 0.584/1.168/2.354 ms for 30/60/120 students (12 observations), not end-to-end latency. Private aggregate held-out summary confirms one complete case and five missing scenarios. |
-| Live Student capture | Capture 7, Student 3 and Teacher 6 tests pass; analysis and Student web/Android builds pass. User confirmed web guidance and Android upright preview, corrected left/right directions and upright playback. A synthetic Chrome stream exercised MediaPipe and WebM. Remaining edge cases and live upload are open; frozen receipt 16/16 unchanged. |
+| API PostgreSQL suite | **43 passed** |
+| API Ruff | Passed |
+| Worker suite | **35 passed** |
+| Worker Ruff | Passed |
+| Root ML/contract suite | **42 passed, 1 expected frozen-baseline limitation** |
+| ML freeze receipt | **16/16 unchanged** |
+| Shared Flutter | Analyze clean; **23 passed** |
+| Capture Flutter | Analyze clean; **8 passed** |
+| Student Flutter | Analyze clean; **10 passed** |
+| Teacher Flutter | Analyze clean; **19 passed** |
+| Product builds | Student and Teacher configured web bundles and Android arm64 debug APKs build |
+| Docker Compose | `compose.yaml` and compatibility alias validate |
+| Docker images | API and worker build successfully |
+| Running API | `/health/live` and `/health/ready` return 200 |
+| Documentation | Local Markdown links resolve; shell scripts pass syntax checks |
 
-Synthetic PDF and rendered first page are ignored under `.local/reports/`; no student biometrics or participant-level findings appear in tracked docs.
+The configuration audit also removed whole-file API environment injection from Compose. The mounted API `.env` still supplies declared runtime settings through Pydantic, and explicit operator tools can read `MIGRATION_DATABASE_URL`; the running API process no longer receives that owner URL as an exported environment variable.
 
-## Exact next action
+The root suite's expected failure records the frozen baseline's degenerate-landmark alignment behavior. The isolated candidate fixes this per crop, but the production freeze is unchanged.
 
-Run the Model Test Console once with 2-3 consenting people on the demo camera and lighting (front light, faces close, 10-15 s clips), and have the client run it on Windows and send back the `.txt` report and `.json` file. Quote only measured results; the synthetic benchmark must stay labelled synthetic. Then restart the Mac API/worker with schema 0007 and verify one Student attendance query and the Teacher accept/reject path on web and Android with controlled demo records. Candidate work (quality-gate tuning on the 80 DigiFace calibration identities, multi-clip session aggregation) is optional and must be validated on the held-out identities and real people before any new model release. Provision licensed WIDER/BIWI data outside Git if those benchmarks are wanted. Five real consenting Test scenarios, Windows physical acceptance, Resend and cloud deployment remain external gates.
+## Current blockers and next actions
 
-## Run and privacy notes
+1. Run the Model Test Console with 2–3 consenting adults on the demo camera; preserve its aggregate `.txt` and `.json` reports.
+2. Complete the five missing independent real scenarios: one enrolled person absent, unknown alone, known plus unknown, varied distance/position, and no face.
+3. Exercise attendance-query accept/reject on authenticated web and Android using safe controlled records.
+4. Complete biometric lifecycle/recovery checks and a full restart rehearsal.
+5. Perform a physical Windows x64 run; record Docker, camera, web and worker results. Repeat on Linux only if it will be demonstrated.
+6. Configure/test Resend only after a permitted sender exists.
+7. Keep the existing detector/profile for the presentation. Adopt no research candidate until real held-out accuracy, latency, rights and reliability gates pass.
 
-- API from `services/api`: `.venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log`; `/health/ready` must return 200.
-- Root: `redis-server .local/enrollment/redis.conf`. Worker: documented Celery solo command and `.venv/bin/python -m facetrack_worker.agent` from `services/worker`. Credentials are already provisioned; do not regenerate routinely.
-- Backend tests: `services/api/.venv/bin/python -m pytest services/api/tests -q` from root or `.venv/bin/python -m pytest tests -q` from service. Start managed local PostgreSQL via `tools.local_db start`. Tests truncate only the guarded local test database.
-- Never commit credentials, tokens, recordings, embeddings, templates or participant results. Integrated cleanup runs while Mac is awake; inspect backlog after restart. Root spike media/Downloads retention is separate.
+## Setup and privacy notes
+
+- The public repository cannot run real inference by itself. Private `.env`, model, profile and demo credentials must be provisioned or securely transferred.
+- Do not regenerate the existing worker token on routine startup; it is scoped and time-limited.
+- Never commit credentials, tokens, recordings, embeddings, templates, ONNX files or participant-level results.
+- Raw-media cleanup and job reconciliation run only while the local agent is awake. Inspect backlog after restart.
+- Public signup/recovery, admin UI, iOS/native desktop, cloud inference, backups/restore acceptance, model deployment rights and institute-scale load testing remain later work.
 
 ## Frozen prototype evidence
 
-Private profile `.local/spike/profiles/frozen-phase1b-v1.json`, templates `.local/spike/experiments/calibration-v3`, manifest `.local/spike/models/buffalo_sc/manifest.json`, and receipt `.local/spike/held-out-freeze-v2.json` remain. The receipt pins 16 source/model/profile/template/lock files and exclusion hashes. Six calibration scenarios passed three fresh-process repeats, which do not establish independent accuracy. One fresh both-known Test clip passed three repeats without changing frozen inputs; `.local/spike/held-out-progress-v1.json` records **1/6**. A re-exported calibration clip was excluded from Test. Five independent scenarios remain; never tune on held-out clips.
+Private manifest `.local/spike/models/buffalo_sc/manifest.json`, profile `.local/spike/profiles/frozen-phase1b-v1.json`, templates `.local/spike/experiments/calibration-v3` and receipt `.local/spike/held-out-freeze-v2.json` remain outside Git. One fresh both-known Test clip passed three fresh-process repeats without changing the receipt. Five independent scenarios remain. Never tune on those held-out clips.

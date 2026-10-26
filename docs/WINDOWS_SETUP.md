@@ -1,101 +1,92 @@
 # Run FaceTrack on Windows
 
-This is the supported Windows development path. Flutter runs natively so Chrome/Edge and an Android phone work normally. FastAPI, Redis, Celery and the ML worker run in Linux containers through Docker Desktop. This matters because Celery and Redis do not support a dependable native Windows development setup.
+This page is the Windows checklist. The full configuration and first-time Supabase instructions are in [INSTALLATION.md](INSTALLATION.md).
+
+**Status:** Windows 10/11 x64 support is implemented, Docker images build, and both Compose files validate. A complete run on a physical Windows host is still pending. Windows on ARM is unverified.
 
 ## 1. Install once
 
-Install these tools, then restart PowerShell:
+Install:
 
-- [Git for Windows](https://git-scm.com/download/win)
-- [Flutter stable](https://docs.flutter.dev/get-started/install/windows), with `flutter\bin` on `PATH`
-- [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/) using the WSL 2/Linux container engine
-- Chrome or Edge
-- Optional Android testing: Android SDK Platform-Tools and a data-capable USB cable
+1. Git for Windows.
+2. Docker Desktop using the **WSL 2 Linux engine**. Keep Linux containers enabled.
+3. Flutter stable compatible with Dart 3.13.5.
+4. Chrome or Edge.
+5. JDK 17 and Android platform tools only if building/running Android.
 
-Check the installation in PowerShell:
+Open PowerShell and verify:
 
 ```powershell
 git --version
+docker compose version
+docker info
+flutter --version
 flutter doctor
 flutter devices
-docker info
 ```
 
-Flutter must list `chrome` or `edge`. Docker must report a running Linux engine.
+Docker Compose must be v2.20 or newer. Start Docker Desktop and wait until the Linux engine is ready.
 
 ## 2. Clone and prepare
 
 ```powershell
-git clone https://github.com/rishyym0927/FaceTrack.git
-cd FaceTrack
+git clone https://github.com/rishyym0927/FaceTrack.git C:\FaceTrack
+Set-Location C:\FaceTrack
 Set-ExecutionPolicy -Scope Process Bypass
-.\scripts\windows\setup.ps1
+.\scripts\windows\setup.ps1 -SkipContainerBuild
 ```
 
-The first build needs internet access and can take several minutes. The setup script downloads locked Flutter packages, creates safe configuration templates, and builds the Linux service images. It does not download private model weights or invent credentials.
+The script verifies Git, Flutter and Docker; creates ignored config templates when missing; and installs locked Flutter packages. Remove `-SkipContainerBuild` to build the Docker images immediately.
 
-## 3. Add private configuration
+## 3. Add the private package
 
-The application needs these ignored files:
+Copy the authorized package contents into `C:\FaceTrack` so these files exist:
 
-| File | Purpose |
-|---|---|
-| `services/api/.env` | Database, Auth, Storage and encryption configuration |
-| `services/worker/.env` | Scoped worker token and media origin |
-| `.local/flutter/development.json` | Public Supabase URL/key, API URL and demo institute ID |
-| `.local/spike/models/buffalo_sc/` | Approved academic model artifacts and manifest |
-| `.local/spike/profiles/frozen-phase1b-v1.json` | Frozen matching profile |
-
-For the existing authorized demo, securely copy these files from the configured development machine to the same paths. Do not use Git, chat, email or a public drive for credentials, model files, recordings, templates or participant results. The Flutter file contains public client configuration, but it remains ignored so environments cannot be mixed accidentally.
-
-For a new Supabase development project, fill the templates created by `setup.ps1`, then follow the one-time provisioning sequence in [the backend guide](../services/api/README.md). Run its Python tools inside the API container by replacing `.venv/bin/python` with:
-
-```powershell
-docker compose -f compose.windows.yaml run --rm api /opt/venv/bin/python -m tools.MODULE_NAME
+```text
+services\api\.env
+services\worker\.env
+.local\flutter\development.json
+.local\spike\models\buffalo_sc\manifest.json
+.local\spike\models\buffalo_sc\det_500m.onnx
+.local\spike\models\buffalo_sc\w600k_mbf.onnx
+.local\spike\profiles\frozen-phase1b-v1.json
 ```
 
-For example, the hidden Auth-key prompt is:
-
-```powershell
-docker compose -f compose.windows.yaml run --rm api /opt/venv/bin/python -m tools.configure_auth
-```
-
-For the migration command, replace `.venv/bin/alembic` with:
-
-```powershell
-docker compose -f compose.windows.yaml run --rm api /opt/venv/bin/alembic upgrade head
-```
-
-Run one provisioning command at a time. Each new container reloads changes written to the ignored host `.env` and `.local` files. Commands in the backend guide that reference `../../.local` continue to work because the container starts in `services/api` and mounts the repository at `/workspace`.
-
-Provisioning is an operator task. Do not rerun seeding or worker provisioning for the existing demo project.
+Do not open or paste these files into chat. If no private package exists, follow the owner provisioning path in [INSTALLATION.md](INSTALLATION.md#5-first-time-owner-setup-with-a-new-supabase-project).
 
 ## 4. Start the complete application
 
 ```powershell
+Set-Location C:\FaceTrack
 .\scripts\windows\start-demo.ps1
 ```
 
-The script starts Redis, API, Celery and the agent in Docker, waits for API readiness, then opens two PowerShell windows:
+Use `-Browser edge` if Chrome is unavailable. The script:
 
-- Teacher web: <http://localhost:5300>
-- Student web: <http://localhost:5301>
-- API readiness: <http://127.0.0.1:8000/health/ready>
+- starts Redis, API, worker and agent in Linux containers;
+- waits for API readiness;
+- verifies all four services remain running;
+- starts Teacher web on port 5300 and Student web on port 5301 in separate PowerShell windows.
 
-If only Edge is installed:
-
-```powershell
-.\scripts\windows\start-demo.ps1 -Browser edge
-```
-
-To inspect a failure:
+Expected readiness:
 
 ```powershell
-docker compose -f compose.windows.yaml ps
-docker compose -f compose.windows.yaml logs --tail 100 api worker agent redis
+(Invoke-RestMethod http://127.0.0.1:8000/health/ready).status
 ```
 
-Stop the backend with:
+Expected output: `ready`.
+
+Daily backend-only commands use the root launcher:
+
+```powershell
+.\run.ps1 up
+.\run.ps1 health
+.\run.ps1 ps
+.\run.ps1 logs
+.\run.ps1 down
+```
+
+Stop the complete demo with:
 
 ```powershell
 .\scripts\windows\stop-demo.ps1
@@ -103,72 +94,38 @@ Stop the backend with:
 
 Close the two Flutter PowerShell windows separately.
 
-## 5. Run on an Android phone
+## 5. Android phone
 
-Enable Developer options and USB debugging, connect and unlock the phone, then run:
+Enable USB debugging, connect and unlock the phone, then accept the authorization prompt:
 
 ```powershell
 .\scripts\windows\android-connect.ps1
 flutter devices
-cd apps\student
-flutter run -d PHONE_DEVICE_ID --dart-define-from-file=..\..\.local\flutter\development.json
 ```
 
-Use `apps\teacher` for the Teacher app. Repeat `android-connect.ps1` after reconnecting the cable. The phone depends on USB forwarding while the API remains local.
+The helper restores port 8000 forwarding. Keep USB connected while the API is local. Do not reinstall an app while a recording is active.
 
-From the repository root in a new PowerShell window, presentation builds use the same public configuration:
+## 6. Model-test console only
+
+This mode does not need Supabase, API credentials or Flutter product configuration. It needs the private model/profile and a prebuilt `.local\console-web\index.html`.
 
 ```powershell
-cd apps\student
-flutter build web --dart-define-from-file=..\..\.local\flutter\development.json
-flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=..\..\.local\flutter\development.json
-cd ..\teacher
-flutter build web --dart-define-from-file=..\..\.local\flutter\development.json
-flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=..\..\.local\flutter\development.json
+.\scripts\windows\start-console.ps1
+.\scripts\windows\stop-console.ps1
 ```
 
-## 5b. Model test only (optional)
+See [MODEL_TEST_CONSOLE.md](MODEL_TEST_CONSOLE.md).
 
-To test only the ML model with volunteers, use `.\scripts\windows\start-console.ps1` and follow [MODEL_TEST_CONSOLE.md](MODEL_TEST_CONSOLE.md). It needs no login or `.env` files.
+## 7. Troubleshooting
 
-## 6. Safe verification
+- **Scripts disabled:** run `Set-ExecutionPolicy -Scope Process Bypass` in the current PowerShell.
+- **Docker pipe/daemon error:** start Docker Desktop and enable the WSL 2 Linux engine.
+- **`include` unsupported:** update Docker Desktop/Compose, or run `docker compose -f compose.yaml up -d`.
+- **API not ready:** run `docker compose -f compose.windows.yaml logs --tail 100 api` and check private configuration for missing files/placeholders without printing values.
+- **Worker unauthorized:** the scoped token may be expired; contact the operator rather than regenerating it.
+- **Flutter cannot find Chrome:** install Chrome or run `start-demo.ps1 -Browser edge`.
+- **Android says connection unavailable:** reconnect USB and rerun `android-connect.ps1`.
+- **Camera denied:** allow camera access for `http://localhost:5300` or `http://localhost:5301` in the browser settings.
+- **Port conflict:** check ports 8000, 5300 and 5301 before stopping any unrelated process.
 
-From the repository root, run frontend checks natively:
-
-```powershell
-cd apps\student
-flutter analyze
-flutter test
-cd ..\teacher
-flutter analyze
-flutter test
-```
-
-Run the worker tests in its Linux container:
-
-```powershell
-docker compose -f compose.windows.yaml run --rm --no-deps worker /opt/venv/bin/python -m pytest tests -q
-```
-
-Backend tests use a guarded, disposable PostgreSQL cluster rather than the hosted project. Contributors who need them should also install Python 3.11, [uv](https://docs.astral.sh/uv/getting-started/installation/) and PostgreSQL 16 with `initdb`/`pg_ctl` on `PATH`, then run:
-
-```powershell
-uv sync --project services/api --locked --python 3.11
-cd services\api
-.venv\Scripts\python -m tools.local_db start
-.venv\Scripts\python -m pytest tests -q
-.venv\Scripts\python -m tools.local_db stop
-```
-
-These automated checks do not establish recognition accuracy. Real recognition still requires approved weights, private configuration and consenting test participants.
-
-## Common fixes
-
-- **Docker daemon unavailable:** start Docker Desktop and wait until its engine is ready.
-- **API never becomes ready:** verify `services/api/.env` has no placeholders and use `docker compose -f compose.windows.yaml logs api`.
-- **Worker keeps restarting:** verify the model manifest/profile exist and `services/worker/.env` contains the current scoped token.
-- **Browser missing:** run `flutter devices`, then choose `-Browser chrome` or `-Browser edge`.
-- **Phone cannot reach API:** keep USB connected and rerun `android-connect.ps1`.
-- **Ports already in use:** stop the earlier FaceTrack processes before retrying; the fixed demo ports are 8000, 5300 and 5301.
-
-Windows execution is implemented and documented, but it remains an acceptance item until the complete flow is exercised on a physical Windows host. The current verified demo host is macOS.
+Use [CLIENT_WINDOWS_HANDOFF.md](CLIENT_WINDOWS_HANDOFF.md) when a nontechnical user wants an LLM with terminal access to perform these steps.

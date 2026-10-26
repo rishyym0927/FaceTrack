@@ -1,6 +1,6 @@
 # FaceTrack application review
 
-Reviewed 24 October 2026. Baseline commit: `268b507`; the working tree also contained the approved, uncommitted presentation redesign. This is the single issue register, not an architecture replacement.
+Reviewed 24–25 October 2026. Baseline commit: `268b507`; the working tree also contained the approved, uncommitted presentation redesign. This is a dated issue-register snapshot, not the current setup guide or architecture authority. Current verification counts and blockers are maintained in [`PROGRESS.md`](../PROGRESS.md).
 
 ## Scope and evidence
 

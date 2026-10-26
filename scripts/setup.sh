@@ -55,5 +55,5 @@ if [ "$SKIP_BUILD" -eq 0 ]; then
 fi
 
 echo "Setup complete."
-echo "Next: complete the ignored private configuration (see docs/LINUX_SETUP.md),"
+echo "Next: complete the ignored private configuration (see docs/INSTALLATION.md),"
 echo "then run 'make up' (backend) or 'make console' (client model-test page)."

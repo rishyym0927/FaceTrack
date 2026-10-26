@@ -41,8 +41,11 @@ The bundle and model files are private and Git-ignored.
 ```sh
 # macOS/Linux, from the repository root
 scripts/build-console            # builds the page into .local/console-web
-scripts/test-console             # starts http://127.0.0.1:8010
+make console                     # Docker serves http://127.0.0.1:8010
+make console-down                # stop; test data remains until deleted in the page
 ```
+
+For the native verified-Mac path, first install `services/worker/.venv` with its locked Python 3.11 environment, then use `scripts/test-console` instead of Docker.
 
 For a Windows client, add these to the encrypted private archive described in
 `CLIENT_WINDOWS_HANDOFF.md`, in addition to the existing model and profile files:

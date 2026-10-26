@@ -56,7 +56,7 @@ Applies to this directory and its descendants.
 
 ## Milestone 3B resume details
 
-- Current development DB head is `0006_timetable_reports`, 36 forced-RLS tables. Both private Storage buckets and local Redis/Celery/agent are provisioned; the existing worker token was preserved while scoped capabilities expanded. Do not regenerate worker credentials on routine startup. Read service READMEs for commands.
+- Current development DB head is `0007_attendance_queries`, with 37 forced-RLS business tables. Both private Storage buckets and local Redis/Celery/agent are provisioned; the existing worker token was preserved while scoped capabilities expanded. Do not regenerate worker credentials on routine startup. Read `docs/INSTALLATION.md` and service READMEs for commands.
 - Integrated enrolment remains in real-device acceptance. Supabase object info can return top-level `content_type` with `metadata: null`; preserve regression coverage and do not bypass MIME validation. An expired 15-minute reservation requires a fresh recording.
 - Do not reinstall/restart the phone app while the user is recording. Preserve pending private files on recoverable failures; never accept consent or approve identity/poses on their behalf.
 

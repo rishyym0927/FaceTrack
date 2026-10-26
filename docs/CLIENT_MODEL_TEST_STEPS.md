@@ -7,9 +7,9 @@ Stop and message Rishi if anything below does not match what you see. Do not try
 ## A. One-time setup (about 30 minutes)
 
 1. **Install Docker Desktop** from docker.com and start it. Wait until it says **Running** (bottom-left). Restart the computer if it asks.
-2. **Get the project and the private files.** Rishi will invite you to the private GitHub project (accept the email invitation and sign in to GitHub). Then:
+2. **Get the project and the private files.** These arrive separately:
    - Open https://github.com/rishyym0927/FaceTrack, press the green **Code** button, then **Download ZIP**. Right-click the downloaded file and choose **Extract All**. You will get a folder called `FaceTrack-main`. Rename it to `FaceTrack` and move it to `C:\` so that `C:\FaceTrack\README.md` and `C:\FaceTrack\scripts` exist (if you see `C:\FaceTrack\FaceTrack-main\...`, move the inner folder up one level).
-   - Open https://github.com/rishyym0927/FaceTrack/releases/tag/private-files-v1 and download `facetrack-private-files.zip`. Extract it **into `C:\FaceTrack`** (right-click, Extract All, and type `C:\FaceTrack` as the destination) so a folder `C:\FaceTrack\.local` appears next to `scripts`. (It contains the test page, the model and the settings file.) Check that `C:\FaceTrack\.local\console-web\index.html` and `C:\FaceTrack\.local\spike\profiles\frozen-phase1b-v1.json` exist.
+   - Ask Rishi for the encrypted private console package through the agreed private channel; it is deliberately **not** in GitHub. Extract its contents **into `C:\FaceTrack`** so `.local` appears next to `scripts`. Check that `C:\FaceTrack\.local\console-web\index.html`, `C:\FaceTrack\.local\spike\models\buffalo_sc\manifest.json` and `C:\FaceTrack\.local\spike\profiles\frozen-phase1b-v1.json` exist. Enter the archive password only in the extraction program.
 
    Never share these files or upload them anywhere else.
 

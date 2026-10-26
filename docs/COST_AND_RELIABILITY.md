@@ -2,6 +2,8 @@
 
 Prepared 25 October 2026. This replaces the earlier cost table in `CLIENT_PROJECT_DOCUMENT.md` §4. Architecture authority remains `MASTER_DESIGN.md`.
 
+This document is a dated planning estimate. Current executable setup and verified status live in [`INSTALLATION.md`](INSTALLATION.md) and [`PROGRESS.md`](../PROGRESS.md).
+
 **Read this first.** Prices below were read from provider pages on 25 October 2026 unless marked *derived* (calculated from a verified price) or *estimate* (my assumption, not a quote). Availability and recognition figures are **planning targets, not measurements and not SLAs**. FaceTrack has no institute-scale benchmark yet.
 
 Exchange rates used: **₹94.95 per US$** (banklive.net, 25 Oct 2026) and **US$1.1202 per €** (EUR/USD close, 23 Oct 2026). The previous document used ₹84/$, which understated every rupee figure by about 13%.

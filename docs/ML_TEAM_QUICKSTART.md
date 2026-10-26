@@ -9,10 +9,10 @@ Install Python **3.11**, [`uv`](https://docs.astral.sh/uv/getting-started/instal
 ```sh
 git clone https://github.com/rishyym0927/FaceTrack.git
 cd FaceTrack
-uv sync --locked
+uv sync --locked --python 3.11
 .venv/bin/python -m pytest tests -q
 cd services/worker
-uv sync --locked
+uv sync --locked --python 3.11
 .venv/bin/python -m pytest tests -q
 ```
 
@@ -48,7 +48,7 @@ From the existing provisioned Mac, first run:
 python3 scripts/check_ml_freeze.py
 ```
 
-It should say **16/16 verified**. If not, stop real held-out testing; do not regenerate the receipt or overwrite frozen files. To start the demo on macOS, follow the six-terminal table in the root `README.md`; on Windows use `docs/WINDOWS_SETUP.md`. Then open `http://127.0.0.1:8000/health/ready`. Restore the platform's USB forwarding after a reconnect. Follow `docs/ML_SPIKE.md` for consented capture, 24-hour raw-media cleanup and held-out evaluation.
+It should say **16/16 verified**. If not, stop real held-out testing; do not regenerate the receipt or overwrite frozen files. Start the product with `docs/INSTALLATION.md`; Windows-specific checks are in `docs/WINDOWS_SETUP.md`. Then open `http://127.0.0.1:8000/health/ready`. Restore the platform's USB forwarding after a reconnect. Follow `docs/ML_SPIKE.md` for consented capture, 24-hour raw-media cleanup and held-out evaluation.
 
 After a private held-out evaluation, this prints **aggregate counts only**; it treats repeated runs of one clip as a stability check, not extra accuracy samples:
 

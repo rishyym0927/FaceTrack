@@ -1,6 +1,6 @@
 # FaceTrack — Development Master Design
 
-**Version 2.1 · 23 October 2026 · Asia/Kolkata**
+**Version 2.2 · 26 October 2026 · Asia/Kolkata**
 
 **Goal:** a stable, functional demonstration by **28 October 2026**, followed by a supervised institute pilot. This document is the active implementation specification. Production readiness and measured performance remain release gates, not claims about existing software.
 
@@ -69,7 +69,7 @@ These are planning assumptions, not measured institute facts. Verified developme
 | Local worker for demo; always-on CPU worker later | Supports minimal cost while retaining the same processing interface; Runpod/GPU stays optional after measurement |
 | CSV timetable first | Deterministic import; PDF/OCR and ERP integration can feed the same normalized model later |
 
-Retain pandas/openpyxl, ReportLab, Resend, Docker, Sentry and GitHub Actions. No React rewrite, MongoDB/Firebase Auth migration, Kubernetes or new message platform.
+Retain pandas/openpyxl, ReportLab, Resend and Docker. Sentry and GitHub Actions remain planned operational work and are not present in the repository. No React rewrite, MongoDB/Firebase Auth migration, Kubernetes or new message platform.
 
 ## 2. High-level design
 
@@ -109,8 +109,8 @@ The worker agent is a small module, not another hosted service. It lets the Mac 
 | Component | Demo placement | Institute pilot |
 |---|---|---|
 | Auth/database/files | Supabase free project | Funded plan with tested backups |
-| API | Render free web service | Always-on application host |
-| Teacher web | Static Flutter web hosting | Same build, institute domain |
+| API | Local Mac process or canonical Docker container | Always-on application host selected after pilot measurements |
+| Teacher/Student web | Flutter development servers on localhost | Static HTTPS hosting on institute domain |
 | Redis/Celery/ML | Existing Mac; CPU baseline | Persistent CPU worker group on one always-on server (AWS Mumbai estimated); GPU is not required at the measured 356 ms pipeline time and is reconsidered only if benchmarks or continuous camera streaming demand it |
 | Reports/email | Worker group on Mac | Always-on CPU worker group |
 
@@ -118,41 +118,35 @@ The target demo is **cloud-hosted data with local application processing**. Supa
 
 ## 3. Code structure
 
-The tree below is the target structure, not a claim that every directory exists. Currently the API uses small modules (`main.py`, `services.py`, `auth.py`, `db.py`, `models.py` and supporting files); ML lives in `services/worker/src/facetrack_ml`. The shared capture package, domain-specific API directories, worker agent/tasks and infrastructure remain to be added with their features.
+The tree below is the implemented repository structure. The API is a modular monolith whose domains are split across modules rather than directory-per-domain routers. The worker and agent are separate processes but share one locked worker package.
 
 ```text
 apps/student/                  Flutter student entrypoint
-apps/teacher/                  Flutter teacher entrypoint + web target
+apps/teacher/                  Flutter teacher, spike and test-console entrypoints
 packages/app_core/             auth, API client, errors, theme
 packages/domain_models/        typed DTOs shared by apps
-packages/capture/              mobile/web camera adapters
-services/api/app/
-  auth/                        verified principal and permission checks
-  identity/                    roster linkage and roles
-  academics/                   offerings, rosters, terms
-  sessions/                    lifecycle and capture windows
-  timetable/                   parsing, preview, materialization
-  biometrics/                  consent and template lifecycle
-  media/                       upload grants and retention
-  jobs/                        durable jobs and worker endpoints
-  attendance/                  evidence, review and publication
-  reports/                     report specifications and delivery
-  db/                          models and migrations
-services/worker/
-  agent.py                     claim/heartbeat/dispatch loop
-  celery_app.py
-  ml/                          detection, alignment, embedding, matching
-  tasks/                       enrolment, recognition, reports, email, cleanup
-infra/                         Dockerfiles and deployment configuration
-scripts/                       seed-demo, benchmark, backup/restore
+packages/capture/              Android/web camera, guidance, playback and TUS upload
+services/api/app/              FastAPI auth, academics, biometrics, attendance and documents
+services/api/migrations/       Alembic 0001–0007 and immutable SQL snapshots
+services/api/tools/            local DB, Supabase, seed, Storage and smoke utilities
+services/worker/src/facetrack_worker/
+  agent.py                     claim/heartbeat/dispatch and reconciliation loop
+  executor.py                  Celery task, media integrity and child-process isolation
+  inference.py                 enrolment, recognition, timetable and report adapters
+  console.py                   loopback-only volunteer model-test service
+services/worker/src/facetrack_ml/  frozen decoding/detection/alignment/matching pipeline
+experiments/ml_accuracy/       isolated, non-production candidate evaluation
+docker/                        API and worker Linux container definitions
+compose.yaml                   canonical local API/Redis/worker/agent stack
+scripts/                       setup, camera spike, console, freeze and evaluation tools
 contracts/                     generated OpenAPI and fixtures
-tests/                        unit, integration, end-to-end and failure tests
+tests/                         root ML contract and synthetic media tests
 MASTER_DESIGN.md                active specification
 ```
 
 Flutter: Riverpod controllers/view models, repositories, `go_router`, `dio`, `supabase_flutter`, `camera`, `file_picker`, secure native token storage. Keep platform camera code behind an adapter; do not duplicate business rules between apps.
 
-Backend: Python 3.11 baseline, Pydantic 2, SQLAlchemy 2, psycopg 3, Alembic, pytest and Ruff. Lock exact package versions after the hardware/model compatibility spike. Routers validate requests and call application services; services own authorization and transactions; repositories do not independently commit. No inference or durable work in FastAPI `BackgroundTasks`.
+Backend: Python 3.11, Pydantic 2, SQLAlchemy 2, psycopg 3, Alembic, pytest and Ruff. Exact resolutions are committed in the three `uv.lock` files. Routes validate requests and call transactional services; no inference or durable work runs in FastAPI `BackgroundTasks`. Product ML stays in the frozen root package; API and worker dependencies stay in their own environments.
 
 Generated OpenAPI describes implemented routes only; future routes below are contracts for later feature slices. Package documentation helps implementation, but may not silently change product behavior.
 
@@ -209,7 +203,7 @@ Demo bootstrap uses controlled, already-confirmed Supabase accounts. An owner-on
 
 ### Feature tables and staged implementation
 
-The nine biometric/media/model/job/worker tables below are implemented in migrations 0003/0004. Migration 0005 implements six session, roster, capture, evidence, attendance and publication tables. Migration 0006 implements seven room, timetable and report/delivery tables. Both additive migrations are applied to the development database. This schema state does not itself verify real classroom acceptance.
+The nine biometric/media/model/job/worker tables below are implemented in migrations 0003/0004. Migration 0005 implements six session, roster, capture, evidence, attendance and publication tables. Migration 0006 implements seven room, timetable and report/delivery tables. Migration 0007 adds evidence-coded absence proposals and the tenant-scoped attendance-dispute table. All migrations through `0007_attendance_queries` are applied to the development database: **37 business tables with forced RLS**. Schema state does not itself verify real classroom acceptance.
 
 | Table | Required business fields | Integrity |
 |---|---|---|
@@ -498,34 +492,34 @@ Before institute rollout: approve privacy notice, processing purpose, cloud regi
 
 ### Initial configuration
 
-Foundation API config: `DATABASE_URL` for restricted `facetrack_api`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `JOIN_CODE_KEYS` JSON keyring, `JOIN_CODE_KEY_ID`, `CORS_ORIGINS` exact JSON list and `ENVIRONMENT`. Issuer/JWKS URL/audience are derived from the fixed project origin; no arbitrary JWKS URL is configurable. `MIGRATION_DATABASE_URL` is an owner/BYPASSRLS operator credential used only by migrations/seed/provision tools, never the running API. Server-only Storage credentials, template encryption keys and Sentry configuration are added with those features.
+Runtime API config is `DATABASE_URL` for restricted `facetrack_api`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, join-code keyring/active key, exact `CORS_ORIGINS` and `ENVIRONMENT`. Biometric/report features add the server-only Storage secret, private bucket names and a separate template keyring. Resend key/sender/report URL are optional; downloads work without them. Issuer/JWKS URL/audience derive from the fixed project origin; no arbitrary JWKS URL is configurable. `MIGRATION_DATABASE_URL` is an owner/BYPASSRLS operator credential used only by migration/seed/provision tools. The complete field reference is `docs/INSTALLATION.md`; checked-in examples contain no secrets.
 
-The API has its own `services/api/.venv`, `pyproject.toml` and `uv.lock`. Do not modify the frozen root ML lock/environment to install backend packages. Current small-module implementation is `config.py`, `auth.py`, `db.py`, `models.py`, `schemas.py`, `security.py`, `services.py`, `main.py`; split by domain when actual size requires it. SQLAlchemy Core uses parameterized statements and async psycopg; Alembic uses a separate owner connection. Migration 0001 imports an immutable schema snapshot, never future live model definitions. Migration 0002 removes explicit inherited/default Supabase client-role grants. Do not expose `app` through the Data API.
+The API has its own `services/api/.venv`, `pyproject.toml` and `uv.lock`. Do not modify the frozen root ML lock/environment to install backend packages. Implemented domain modules include `biometrics`, `attendance`, `recognition_jobs`, `documents` and `worker_api` alongside auth/config/database/foundation services. SQLAlchemy Core uses parameterized statements and async psycopg; Alembic uses the separate owner connection. Migration 0001 imports an immutable schema snapshot; later applied migrations are never edited. Migration 0002 removes inherited/default Supabase client-role grants. Keep the `app` schema out of the Supabase Data API.
 
-Transactions set actor/tenant/claim-email with SET LOCAL and clear them on commit/rollback; tenant isolation is database-enforced, object/role permissions are service-enforced. Runtime credentials are trusted server credentials and must never reach a client. All 14 foundation tables have ENABLE/FORCE RLS. Runtime rejects superuser/BYPASSRLS/CREATEDB/CREATEROLE/table-owner credentials. A narrow fixed-search-path SECURITY DEFINER trigger owned by the migration role validates active faculty assignments; it is not a public RPC.
+Transactions set actor/tenant/claim-email with SET LOCAL and clear them on commit/rollback; tenant isolation is database-enforced, object/role permissions are service-enforced. Runtime credentials are trusted server credentials and must never reach a client. All 37 business tables have ENABLE/FORCE RLS. Runtime readiness rejects superuser/BYPASSRLS/table-owner credentials and the provisioning tool creates a NOSUPERUSER/NOBYPASSRLS/NOCREATEDB/NOCREATEROLE role. A narrow fixed-search-path SECURITY DEFINER trigger owned by the migration role validates active faculty assignments; it is not a public RPC.
 
 Foundation JSON bodies are bounded to 1 MiB; lists use default 50/max 200 and UUID cursors. Error responses omit submitted values and SQL details. Server-generated request IDs correlate structured route/status/duration logs. Join code limits persist in PostgreSQL. Periodic expiry-row compaction is still an operational follow-up before long-running deployment; expiry is enforced on read even without deletion.
 
-Worker config: `API_BASE_URL`, `WORKER_TOKEN`, `REDIS_URL`, verified model directory/manifest, runtime provider, worker kinds/concurrency, provider email credential only where needed, local temp root and job timeouts.
+Worker config is exactly `API_BASE_URL`, `WORKER_TOKEN`, `REDIS_URL`, `MANIFEST_PATH`, `PROFILE_PATH`, `MEDIA_ORIGIN` and `TEMP_ROOT`. Compose additionally sets `FACETRACK_CONTAINER_NETWORK=1` and overrides internal service/path values. Email secrets stay in the API, not the worker.
 
-Flutter config: public Supabase URL/publishable key, API URL, environment label. Never service-role key, database password, encryption key or worker token. All secrets are separate by environment.
+Flutter config is exactly `API_BASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `DEFAULT_INSTITUTE_ID`. Never place a secret key, database password, encryption key or worker token in Flutter. Student and Teacher use separate session-storage keys.
 
 ### Deployment order
 
 1. Validate local camera/model/runtime and lock dependencies.
 2. Provision Supabase; apply migrations, tenant RLS and private bucket policies; seed approved demo identities/academics.
-3. Deploy CPU-only FastAPI to cloud; configure Auth redirects/CORS and teacher/student Flutter web URLs.
-4. Start private Redis and native Mac worker/agent; verify worker can claim a test job over HTTPS.
+3. Start CPU-only FastAPI locally for the demo; configure exact localhost CORS and client settings. HTTPS/cloud deployment is a later gate.
+4. Start private Redis and the Mac or Linux-container worker/agent; verify worker claim/heartbeat/completion.
 5. Build student/teacher Android APKs and teacher web; test real camera/codec path and intended email recipient.
 6. Run the full demonstration script and restart/retry tests before presentation.
 
-Docker defines reproducible API/worker deployment. The Windows development profile runs API, private Redis, one Celery solo worker and the outbound agent on a private Compose network; only API port 8000 is bound to host loopback. Flutter remains native so browser and Android tooling retain camera access. Container service hostnames are accepted only behind the explicit `FACETRACK_CONTAINER_NETWORK=1` guard; arbitrary plaintext worker endpoints remain rejected. Private `.env`, model and profile files are mounted at runtime and excluded from image build context. Use native Python for Mac acceleration experiments; GPU production image is a separate target sharing application code. GitHub Actions runs lint/tests/contracts, builds artifacts and checks secrets/dependencies; deployment runs ordered migrations before compatible app release. Use additive migrations and roll back application image/config before attempting destructive schema rollback.
+`compose.yaml` is the canonical macOS/Linux/Windows local service stack. It runs API, Redis, one Celery solo worker and the outbound agent on a private network; only API port 8000 is bound to host loopback. `compose.windows.yaml` is a v2.20+ compatibility include. Flutter remains native so browser/Android camera tooling works. Container service names are allowed only behind `FACETRACK_CONTAINER_NETWORK=1`; arbitrary plaintext worker endpoints remain rejected. Private `.env`, `.local`, model and profile files are runtime mounts excluded from image layers and Git. Both Docker images and both Compose configurations were validated on 26 October 2026. CI, automated deployment and Sentry are still planned and must not be described as operational.
 
 ### Minimum operations
 
-Health: `/health/live` process only; `/health/ready` checks DB/config; operator status separately shows worker heartbeat, model readiness and last scheduler/cleanup success. Public responses reveal no secrets. Lack of ML capacity must not block manual attendance browsing.
+Health: `/health/live` checks only the process. `/health/ready` verifies restricted DB ownership, 37 forced-RLS tables, migration 0007 and publishable-key configuration. It does not test a real login, Storage, Redis or worker. Public responses reveal no secrets. Lack of ML capacity must not block manual attendance browsing.
 
-Log request_id, opaque job/session IDs, stage, duration and error code, never media, vectors, signed grants or full request bodies. Sentry disables default PII and scrubs sensitive fields. Track API errors, oldest queued job, worker last-seen, job failures, processing latency, correction rate, deletion backlog and provider quotas.
+Log request IDs, opaque job/session IDs, stage, duration and error code, never media, vectors, signed grants or full request bodies. Current structured API logs are local; Sentry is not integrated. A future monitoring deployment must scrub PII and track API errors, oldest queued job, worker last-seen, failures, processing latency, correction rate, deletion backlog and provider quotas.
 
 Before demo, wake/check API and Supabase, start worker, test camera permissions/model, confirm quota/email, then rehearse. This is an attended preflight, not an uptime guarantee.
 
@@ -593,7 +587,7 @@ Build vertical slices, validating the riskiest dependency first. Do not build ev
 | 6. Automation/reporting | CSV timetable → sessions; CSV/PDF → faculty | Import repeat-safe; correct report and actual permitted email |
 | 7. Hardening/rehearsal | Device builds, errors/recovery, deployment polish | Full scripted demo repeated including worker restart |
 
-**Foundation implementation checkpoint (23 October 2026):** local FastAPI + hosted Supabase Auth/database is verified with 21 isolated PostgreSQL tests and the real hosted smoke flow (login, confirmed-email identity claim, join request, protected access and teacher approval). Flutter account/class screens are implemented and user-confirmed working on web/Android, including join requests and teacher approval. Cloud API deployment remains unfinished. Independent ML acceptance remains on hold at 1/6 passed; backend verification does not change that gate. See `PROGRESS.md` for current evidence and next work.
+**Foundation outcome:** local FastAPI + hosted Supabase Auth/database is verified through isolated PostgreSQL tests and a real hosted smoke flow covering login, confirmed-email identity claim, join request, protected access and teacher approval. Flutter account/class screens are user-confirmed on web/Android. Cloud API deployment remains unfinished. Independent ML acceptance remains 1/6; backend verification does not change that gate. See `PROGRESS.md` for current counts and evidence.
 
 Proposed calendar, not guaranteed completion: **22 Oct** decisions/spike; **23 Oct** foundation and identity; **24 Oct** enrolment; **25 Oct** teacher capture/recognition; **26 Oct** publication/reports/basic timetable; **27 Oct** integration, recovery, UI and rehearsal; **28 Oct** presentation and fixes. If the ML/codec spike fails, resolve it before adding optional screens. Do not trade authorization or honest results for a polished screenshot.
 
@@ -627,12 +621,6 @@ Primary references supporting the retained choices and constraints:
 Do not implement now: arbitrary PDF/OCR timetable parsing, ERP connectors, automated camera fleet/MQTT, continuous streaming, attendance-duration inference, push inbox/bulk alerts, live chat, dispute evidence uploads, full administration UI, institute-wide face search, FAISS/vector database, Kubernetes, microservice splitting, multi-region infrastructure, complex autoscaling, and remote certified liveness.
 
 Keep future timetable identity, session boundaries, job durability, model/version metadata, tenant relationships, audit and privacy controls now. Those are the foundations that avoid an architectural rewrite. Expand only when an actual requirement or benchmark justifies it.
-
-### Current implementation checkpoint — 23 October 2026
-
-Phase 3A account/class screens are user-confirmed working on Android/web. Explicit native restart/logout, invalid-code and keyboard/screen-reader checks remain open. Phase 3B enrolment APIs, private Storage, local worker, Student capture/upload and Teacher review are implemented and in real-device acceptance. Schema head is 0004, 23 forced-RLS tables; 33 isolated backend tests pass. Real synthetic transport checks passed; first actual phone upload exposed the now-fixed provider MIME field mismatch but did not produce a job before its reservation expired. A subsequent real upload and CPU job produced an encrypted review candidate; human approval, active encrypted persistence and post-decision media deletion are now verified. Remaining device/recovery acceptance still gates completion. Current verification details and counts live in PROGRESS.
-
-Runtime is Mac API/Redis/Celery/CPU with hosted Supabase Auth/PostgreSQL/private Storage. Phone API access requires USB forwarding. Cloud API deployment, attendance and institute operations remain unfinished. Independent ML acceptance remains on hold at 1/6 and all frozen files remain unchanged. Documentation revision 2.0 records the approved integrated enrolment slice; it does not establish production accuracy or capacity.
 
 ### Milestone 3B approved implementation — 23 October 2026
 

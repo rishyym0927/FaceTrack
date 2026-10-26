@@ -1,6 +1,7 @@
 # Cross-platform convenience verbs over `docker compose` for Windows.
 # Mirrors the Makefile so every OS uses the same words. Docker Desktop is the
-# only requirement. `docker compose ...` directly always works too.
+# only requirement for these backend/console verbs; product web apps also need
+# Flutter. `docker compose ...` directly always works too.
 #
 #   ./run.ps1 up            start redis + api + worker + agent (detached)
 #   ./run.ps1 down          stop and remove the stack

@@ -1,6 +1,7 @@
 # Cross-platform convenience verbs over `docker compose` (macOS / Linux).
 # Windows users: use `./run.ps1 <verb>` (same verbs). Docker is the only
-# requirement. These are thin wrappers — `docker compose ...` always works too.
+# requirement for these backend/console verbs; product web apps also need
+# Flutter. These are thin wrappers — `docker compose ...` always works too.
 #
 #   make up         start redis + api + worker + agent (detached)
 #   make down       stop and remove the stack

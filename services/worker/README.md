@@ -4,7 +4,7 @@ The verified demo uses one CPU slot on the Mac for enrolment, classroom recognit
 
 ## Environment and startup
 
-Windows users should use [the root Windows guide](../../docs/WINDOWS_SETUP.md). Celery is not supported as a dependable native Windows worker, so `compose.windows.yaml` runs Celery and Redis on Linux while Flutter remains native.
+Use the canonical [installation guide](../../docs/INSTALLATION.md). Windows users should also read [the Windows checklist](../../docs/WINDOWS_SETUP.md). Celery is not a supported native Windows runtime here, so the canonical Compose stack runs Celery and Redis in Linux containers while Flutter remains native.
 
 For the verified macOS path, use this service's Python 3.11 `.venv` and `uv.lock`, leaving the root ML environment/lock untouched. Provisioning is described in `../api/README.md`; existing private `.env` and root `.local/enrollment/redis.conf` are already configured. Never print either file. The worker receives a scoped token, local broker URL and verified model/profile paths, never database credentials or the Storage secret. Its token expires 30 days after provisioning; revocation/reprovisioning is an operator action.
 
@@ -24,7 +24,7 @@ Start the API using its README. From `services/worker`, use two terminals:
 .venv/bin/python -m facetrack_worker.agent
 ```
 
-For a clean environment, use the installed `uv` executable: `uv sync --locked` from this service only. It resolves the root ML library as an editable dependency but does not install or alter the root environment. FFmpeg/FFprobe must be available on PATH. A single spawned process bounds inference; a separate heartbeat thread renews the 120-second lease every 15 seconds. Three total transient attempts are permitted. Expired lease holders cannot commit. Redis may be restarted without treating its queue as the source of truth.
+For a clean native environment, run `uv sync --locked --python 3.11` from this service only. It resolves the root ML library as an editable dependency but does not install or alter the root environment. FFmpeg/FFprobe must be available on PATH; the worker Docker image already installs FFmpeg. A single spawned process bounds inference; a separate heartbeat thread renews the 120-second lease every 15 seconds. Three total transient attempts are permitted. Expired lease holders cannot commit. Redis may be restarted without treating its queue as the source of truth.
 
 ## Processing and privacy
 

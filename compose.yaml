@@ -24,7 +24,9 @@ services:
     build:
       context: .
       dockerfile: docker/api.Dockerfile
-    env_file: services/api/.env
+    # app.Settings reads only declared runtime fields from the mounted .env.
+    # Do not inject the whole file into the process: it also contains the
+    # migration-owner URL used only by explicitly invoked operator tools.
     ports:
       - "127.0.0.1:8000:8000"
     volumes:

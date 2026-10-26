@@ -1,5 +1,7 @@
 # FaceTrack — Project Overview & Deployment Cost Analysis
 
+This is a client-facing overview. For executable setup use [`INSTALLATION.md`](INSTALLATION.md); for the measured implementation state use [`PROGRESS.md`](../PROGRESS.md). Planning costs and reliability targets below are not production measurements.
+
 **Client & Institutional Leadership Briefing** · October 2026
 
 ---
