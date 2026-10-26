@@ -7,6 +7,8 @@ It tests the **ML model only**. It does not use logins, classes, Supabase, the A
 attendance records, and it never changes the frozen model, profile, thresholds or templates used by
 the product demo. Volunteer face data is kept in a separate, encrypted test folder.
 
+Client step-by-step (Windows): [CLIENT_MODEL_TEST_STEPS.md](CLIENT_MODEL_TEST_STEPS.md).
+
 ## What the client does
 
 1. Open the page and read the **System check** (green means the model and settings are unchanged).
