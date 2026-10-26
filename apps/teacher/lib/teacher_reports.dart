@@ -288,7 +288,8 @@ class _TeacherReportsState extends State<TeacherReports> {
                   ),
               ],
             ),
-          if (report['kind'] == 'final' &&
+          if (report['status'] == 'ready' &&
+              report['kind'] == 'final' &&
               details[report['id']]?['email_configured'] != true)
             const Text(
               'Email delivery is not configured. Downloads are available.',

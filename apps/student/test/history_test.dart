@@ -77,4 +77,67 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets(
+    'Resolved query stays visible after a correction changes the publication id',
+    (tester) async {
+      final h = (await tester.runAsync(() => harness()))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+        if (r.path == '/v1/me') return jsonResponse(h.account);
+        if (r.path == '/v1/me/attendance-disputes') {
+          // The query was raised against the original Absent publication
+          // ('pub1'); accepting it created a new publication ('pub2').
+          return jsonResponse({
+            'items': [
+              {
+                'id': 'dispute1',
+                'session_id': 'sess1',
+                'source_publication_id': 'pub1',
+                'status': 'accepted',
+                'resolution_reason': 'Corrected after review',
+              },
+            ],
+            'next_cursor': null,
+          });
+        }
+        return jsonResponse({
+          'items': [
+            {
+              'id': 'pub2',
+              'session_id': 'sess1',
+              'status': 'present',
+              'revision': 2,
+              'starts_at': '2026-10-20T09:00:00Z',
+            },
+          ],
+          'next_cursor': null,
+          'summary': {
+            'percentage': 100,
+            'present_or_late': 1,
+            'assessed': 1,
+            'unassessed': 0,
+          },
+        });
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [servicesProvider.overrideWithValue(h.services)],
+          child: ProductApp(
+            classesBuilder: (_) => const StudentHistory(offering: 'class'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      // Matched by session, not by the now-superseded publication id.
+      expect(
+        find.text(
+          'Your query was accepted and a corrected publication was created.',
+        ),
+        findsOneWidget,
+      );
+      expect(find.text('Teacher response: Corrected after review'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }
