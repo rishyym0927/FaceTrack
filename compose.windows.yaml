@@ -78,6 +78,34 @@ services:
     restart: unless-stopped
     networks: [facetrack-private]
 
+  # Client model-test page (docs/MODEL_TEST_CONSOLE.md). Started only with `--profile console`;
+  # needs no API, Redis, Supabase or .env. Volunteer face data lives in a private named volume.
+  console:
+    profiles: ["console"]
+    build:
+      context: .
+      dockerfile: docker/worker.Dockerfile
+    command: ["/opt/venv/bin/python", "-m", "facetrack_worker.console"]
+    environment:
+      FACETRACK_CONSOLE_HOST: "0.0.0.0"
+      FACETRACK_CONSOLE_PORT: "8010"
+      MANIFEST_PATH: /workspace/.local/spike/models/buffalo_sc/manifest.json
+      PROFILE_PATH: /workspace/.local/spike/profiles/frozen-phase1b-v1.json
+      CONSOLE_WEB_DIR: /workspace/.local/console-web
+      CONSOLE_ROOT: /data/test-console
+    ports:
+      - "127.0.0.1:8010:8010"
+    volumes:
+      - ./services/worker:/workspace/services/worker
+      - ./.local/spike:/workspace/.local/spike:ro
+      - ./.local/console-web:/workspace/.local/console-web:ro
+      - console-data:/data
+    restart: "no"
+    networks: [facetrack-private]
+
 networks:
   facetrack-private:
     driver: bridge
+
+volumes:
+  console-data:

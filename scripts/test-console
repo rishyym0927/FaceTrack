@@ -1,0 +1,4 @@
+#!/bin/sh
+# Start the local model test console on macOS/Linux: http://127.0.0.1:8010
+cd "$(dirname "$0")/../services/worker" || exit 1
+exec .venv/bin/python -m facetrack_worker.console

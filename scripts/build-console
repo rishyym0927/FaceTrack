@@ -1,0 +1,10 @@
+#!/bin/sh
+# Build the model test page and install it where the console service serves it.
+set -e
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT/apps/teacher"
+"$ROOT/scripts/flutter" build web -t lib/main_console.dart --output build/console --release --no-web-resources-cdn
+rm -rf "$ROOT/.local/console-web"
+mkdir -p "$ROOT/.local/console-web"
+cp -R build/console/. "$ROOT/.local/console-web/"
+echo "Installed to .local/console-web"
