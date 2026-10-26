@@ -109,6 +109,20 @@ class ProductApp extends ConsumerStatefulWidget {
 
 class _ProductAppState extends ConsumerState<ProductApp> {
   late final GoRouter router;
+
+  /// A real destination the user was heading to when auth gating bounced them
+  /// to an auth screen (login/loading/claim/…). Resumed once auth is ready, so
+  /// refreshing a deep link restores that page instead of defaulting home.
+  String? _pendingDestination;
+  static const _authScreens = {
+    '/login',
+    '/loading',
+    '/connection',
+    '/claim',
+    '/access',
+    '/institutes',
+  };
+
   @override
   void initState() {
     super.initState();
@@ -118,25 +132,25 @@ class _ProductAppState extends ConsumerState<ProductApp> {
       refreshListenable: auth,
       redirect: (context, state) {
         final path = state.uri.path;
-        if (!auth.signedIn) return path == '/login' ? null : '/login';
-        if (auth.loading) return path == '/loading' ? null : '/loading';
-        if (auth.error != null)
-          return path == '/connection' ? null : '/connection';
-        if (auth.memberships.isEmpty) {
-          final dest = auth.canClaim ? '/claim' : '/access';
+        final atAuthScreen = _authScreens.contains(path);
+        String? bounce(String dest) {
+          if (!atAuthScreen) _pendingDestination = state.uri.toString();
           return path == dest ? null : dest;
         }
-        if (auth.institute == null)
-          return path == '/institutes' ? null : '/institutes';
-        if ([
-          '/login',
-          '/loading',
-          '/connection',
-          '/claim',
-          '/access',
-          '/institutes',
-        ].contains(path))
-          return '/classes';
+
+        if (!auth.signedIn) return bounce('/login');
+        if (auth.loading) return bounce('/loading');
+        if (auth.error != null) return bounce('/connection');
+        if (auth.memberships.isEmpty) {
+          return bounce(auth.canClaim ? '/claim' : '/access');
+        }
+        if (auth.institute == null) return bounce('/institutes');
+        // Ready: if parked on an auth screen, resume the remembered route.
+        if (atAuthScreen) {
+          final dest = _pendingDestination ?? '/classes';
+          _pendingDestination = null;
+          return dest == path ? null : dest;
+        }
         return null;
       },
       routes: [

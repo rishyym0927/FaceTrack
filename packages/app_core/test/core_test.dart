@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
@@ -273,6 +274,45 @@ void main() {
         tooltip.message,
         'FaceTrack Institute of Engineering and Technology',
       );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+  testWidgets(
+    'Refreshing a deep route is restored after auth gating, not sent home',
+    (tester) async {
+      final h = (await tester.runAsync(
+        () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+      ))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      // Hold /me so auth stays in its loading gate, mimicking a fresh refresh.
+      // A fresh response per call: a ResponseBody stream can only be read once.
+      final gate = Completer<void>();
+      h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+        if (r.path == '/v1/me') {
+          await gate.future;
+          return jsonResponse(h.account);
+        }
+        return jsonResponse({'items': [], 'next_cursor': null});
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [servicesProvider.overrideWithValue(h.services)],
+          child: ProductApp(
+            classesBuilder: (_) => const Text('Classes content'),
+            detailBuilder: (_, id) => Text('Detail $id'),
+          ),
+        ),
+      );
+      await tester.pump();
+      // The browser URL is a deep route while auth is still resolving.
+      final gated = tester.element(find.byType(CircularProgressIndicator));
+      GoRouter.of(gated).go('/classes/abc123');
+      await tester.pump();
+      // Auth becomes ready: we must resume the deep route, not default home.
+      gate.complete();
+      await tester.pumpAndSettle();
+      expect(find.text('Detail abc123'), findsOneWidget);
+      expect(find.text('Classes content'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );
