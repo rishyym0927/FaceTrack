@@ -1032,52 +1032,12 @@ class _RevealState extends State<Reveal> with SingleTickerProviderStateMixin {
 }
 
 // --- Loading skeletons -------------------------------------------------------
+// Deliberately static (no ticker / ShaderMask): these render as transient
+// AnimatedSwitcher children during dialog-pop + reload transitions, where a
+// ticking child can trip an InheritedElement teardown assertion.
 
-/// Sweeps a soft highlight across its (grey-block) children; static when
-/// reduced-motion is on.
-class Shimmer extends StatefulWidget {
-  const Shimmer({super.key, required this.child});
-  final Widget child;
-  @override
-  State<Shimmer> createState() => _ShimmerState();
-}
-
-class _ShimmerState extends State<Shimmer> with SingleTickerProviderStateMixin {
-  late final AnimationController _c = AnimationController(
-    vsync: this,
-    duration: const Duration(milliseconds: 1400),
-  )..repeat();
-  @override
-  void dispose() {
-    _c.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    if (MediaQuery.disableAnimationsOf(context)) return widget.child;
-    const base = Color(0xffe7eeea), highlight = Color(0xfff6faf8);
-    return AnimatedBuilder(
-      animation: _c,
-      child: widget.child,
-      builder: (context, child) {
-        final t = _c.value * 2 - 1; // -1 → 1
-        return ShaderMask(
-          blendMode: BlendMode.srcATop,
-          shaderCallback: (bounds) => LinearGradient(
-            begin: Alignment(-1 + t, 0),
-            end: Alignment(1 + t, 0),
-            colors: const [base, highlight, base],
-            stops: const [0.35, 0.5, 0.65],
-          ).createShader(bounds),
-          child: child,
-        );
-      },
-    );
-  }
-}
-
-/// A single grey placeholder block.
+/// A single placeholder block with a soft baked gradient so it reads as
+/// designed rather than flat.
 class SkelBox extends StatelessWidget {
   const SkelBox({super.key, this.width, this.height = 14, this.radius = 8});
   final double? width, height, radius;
@@ -1086,7 +1046,11 @@ class SkelBox extends StatelessWidget {
     width: width,
     height: height,
     decoration: BoxDecoration(
-      color: const Color(0xffe7eeea),
+      gradient: const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [Color(0xffeaf0ed), Color(0xffdfe8e3)],
+      ),
       borderRadius: BorderRadius.circular(radius ?? 8),
     ),
   );
@@ -1133,22 +1097,20 @@ class SkeletonCard extends StatelessWidget {
   );
 }
 
-/// A shimmering stack of [count] skeleton cards for first-load states.
+/// A stack of [count] skeleton cards for first-load states.
 class SkeletonList extends StatelessWidget {
   const SkeletonList({super.key, this.count = 3});
   final int count;
   @override
-  Widget build(BuildContext context) => Shimmer(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        for (var i = 0; i < count; i++)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 12),
-            child: SkeletonCard(),
-          ),
-      ],
-    ),
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (var i = 0; i < count; i++)
+        const Padding(
+          padding: EdgeInsets.only(bottom: 12),
+          child: SkeletonCard(),
+        ),
+    ],
   );
 }
 
