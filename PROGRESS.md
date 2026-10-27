@@ -95,7 +95,7 @@ The loopback Model Test Console lets a nontechnical tester enrol consenting volu
 | Worker Ruff | Passed |
 | Root ML/contract suite | **42 passed, 1 expected frozen-baseline limitation** |
 | ML freeze receipt | **16/16 unchanged** |
-| Shared Flutter (`app_core`) | Analyze clean; **34 passed** |
+| Shared Flutter (`app_core`) | Analyze clean; **40 passed** (incl. sign-in layout at 360/768/1440 px, 200% text) |
 | Capture Flutter | Analyze clean; **8 passed** |
 | Student Flutter | Analyze clean; **10 passed** |
 | Teacher Flutter | Analyze clean; **47 passed** (re-run after the Absent pre-fill) |

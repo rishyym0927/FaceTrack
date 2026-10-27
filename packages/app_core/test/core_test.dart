@@ -165,6 +165,48 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+  for (final role in AppRole.values) {
+    for (final size in const [
+      Size(1440, 900),
+      Size(768, 1024),
+      Size(360, 640),
+    ]) {
+      testWidgets(
+        '${role.name} login layout holds at ${size.width.toInt()} px with 200% text',
+        (tester) async {
+          final h = (await tester.runAsync(
+            () => harness(role: role, signedIn: false),
+          ))!;
+          addTearDown(() => tester.runAsync(h.dispose));
+          tester.view.physicalSize = size;
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          await tester.pumpWidget(
+            ProviderScope(
+              overrides: [servicesProvider.overrideWithValue(h.services)],
+              child: MaterialApp(
+                theme: appTheme(),
+                home: MediaQuery(
+                  data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+                  child: const LoginPage(),
+                ),
+              ),
+            ),
+          );
+          expect(find.text('Welcome back'), findsOneWidget);
+          expect(
+            find.text(
+              role == AppRole.student ? 'Student portal' : 'Faculty portal',
+            ),
+            findsOneWidget,
+          );
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox());
+        },
+      );
+    }
+  }
   testWidgets(
     'A student cannot enter Teacher screens and logout removes protected state',
     (tester) async {

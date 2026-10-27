@@ -338,15 +338,11 @@ class ProductShell extends StatelessWidget {
             Icons.admin_panel_settings_outlined,
             Icons.admin_panel_settings,
           ),
-        const NavTab(
-          '/account',
-          'Account',
-          Icons.person_outline,
-          Icons.person,
-        ),
+        const NavTab('/account', 'Account', Icons.person_outline, Icons.person),
       ];
       var index = tabs.indexWhere((t) => path == t.path);
-      if (index < 0) index = 0; // subject/session detail routes fall under Subjects
+      if (index < 0)
+        index = 0; // subject/session detail routes fall under Subjects
       void navigate(int i) => context.go(tabs[i].path);
       return LayoutBuilder(
         builder: (context, c) {
@@ -511,7 +507,22 @@ class ContentPage extends StatelessWidget {
   );
 }
 
-class AuthFrame extends StatelessWidget {
+class _Highlight {
+  const _Highlight(this.icon, this.title, this.body);
+  final IconData icon;
+  final String title, body;
+}
+
+const _brandGradient = LinearGradient(
+  begin: Alignment.topLeft,
+  end: Alignment.bottomRight,
+  colors: [Color(0xff0d2a2c), Color(0xff135f50), Color(0xff23906f)],
+);
+
+/// Shared frame for sign-in and account screens in both apps (web and phone).
+/// Wide screens get a split layout with a branded panel; narrow screens get a
+/// compact branded header above the form.
+class AuthFrame extends ConsumerWidget {
   const AuthFrame({
     super.key,
     required this.title,
@@ -520,143 +531,390 @@ class AuthFrame extends StatelessWidget {
   });
   final String title, subtitle;
   final Widget child;
+
   @override
-  Widget build(BuildContext context) => Scaffold(
-    body: SafeArea(
-      child: LayoutBuilder(
-        builder: (context, c) {
-          final wide = c.maxWidth >= 900;
-          final brand = Container(
-            padding: const EdgeInsets.all(36),
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(28),
-              gradient: const LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  Color(0xff102f32),
-                  Color(0xff146b59),
-                  Color(0xff26947a),
-                ],
+  Widget build(BuildContext context, WidgetRef ref) {
+    final student = ref.read(servicesProvider).config.role == AppRole.student;
+    final portal = student ? 'Student portal' : 'Faculty portal';
+    final headline = student
+        ? 'Your attendance, always in view.'
+        : 'Attendance you can trust, in minutes.';
+    final highlights = student
+        ? const [
+            _Highlight(
+              Icons.face_outlined,
+              'Enrol your face once',
+              'A short guided recording, only with your consent.',
+            ),
+            _Highlight(
+              Icons.event_available_outlined,
+              'Every subject in one place',
+              'See published attendance and your percentage per subject.',
+            ),
+            _Highlight(
+              Icons.lock_outline,
+              'Private by design',
+              'Face data stays private and you can withdraw consent.',
+            ),
+          ]
+        : const [
+            _Highlight(
+              Icons.videocam_outlined,
+              'Record the class once',
+              'A short walk-through clip suggests who is present.',
+            ),
+            _Highlight(
+              Icons.fact_check_outlined,
+              'You stay in control',
+              'Review every suggestion before anything is published.',
+            ),
+            _Highlight(
+              Icons.insights_outlined,
+              'See the whole semester',
+              'Subject-wise and semester-wise attendance at a glance.',
+            ),
+          ];
+    final scheme = Theme.of(context).colorScheme;
+
+    Widget logo({double size = 44}) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: size,
+          height: size,
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: .14),
+            borderRadius: BorderRadius.circular(size * .3),
+            border: Border.all(color: Colors.white.withValues(alpha: .22)),
+          ),
+          child: Icon(
+            Icons.center_focus_strong,
+            color: Colors.white,
+            size: size * .56,
+          ),
+        ),
+        const SizedBox(width: 12),
+        const Flexible(
+          child: Text(
+            'FaceTrack',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 22,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -.3,
+            ),
+          ),
+        ),
+      ],
+    );
+
+    Widget portalChip({bool light = true}) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: light
+            ? Colors.white.withValues(alpha: .14)
+            : scheme.primary.withValues(alpha: .08),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            student ? Icons.school_outlined : Icons.co_present_outlined,
+            size: 16,
+            color: light ? const Color(0xffbbe9af) : scheme.primary,
+          ),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              portal,
+              style: TextStyle(
+                color: light ? Colors.white : scheme.primary,
+                fontWeight: FontWeight.w700,
+                fontSize: 13,
               ),
             ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Row(
-                  children: [
-                    Icon(
-                      Icons.center_focus_strong,
-                      color: Colors.white,
-                      size: 30,
-                    ),
-                    SizedBox(width: 12),
-                    Flexible(
-                      child: Text(
-                        'FaceTrack',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 23,
-                          fontWeight: FontWeight.w800,
+          ),
+        ],
+      ),
+    );
+
+    final form = ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 420),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            title,
+            style: Theme.of(context).textTheme.headlineMedium
+                ?.copyWith(fontWeight: FontWeight.w800, letterSpacing: -.7),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            subtitle,
+            style: TextStyle(color: scheme.onSurfaceVariant, height: 1.5),
+          ),
+          const SizedBox(height: 28),
+          child,
+          const SizedBox(height: 28),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.verified_user_outlined,
+                size: 18,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'Faces are processed privately. Attendance is final only after faculty review.',
+                  style: TextStyle(
+                    color: scheme.onSurfaceVariant,
+                    fontSize: 12.5,
+                    height: 1.45,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: LayoutBuilder(
+        builder: (context, c) {
+          if (c.maxWidth >= 900) {
+            final brand = DecoratedBox(
+              decoration: const BoxDecoration(gradient: _brandGradient),
+              child: CustomPaint(
+                painter: _ScanPainter(),
+                child: SafeArea(
+                  child: LayoutBuilder(
+                    builder: (context, b) => SingleChildScrollView(
+                      padding: const EdgeInsets.all(48),
+                      child: ConstrainedBox(
+                        constraints: BoxConstraints(
+                          minHeight: (b.maxHeight - 96).clamp(
+                            0,
+                            double.infinity,
+                          ),
+                        ),
+                        child: Align(
+                          alignment: Alignment.centerLeft,
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              logo(),
+                              const SizedBox(height: 64),
+                              portalChip(),
+                              const SizedBox(height: 20),
+                              ConstrainedBox(
+                                constraints: const BoxConstraints(
+                                  maxWidth: 520,
+                                ),
+                                child: Text(
+                                  headline,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 40,
+                                    fontWeight: FontWeight.w800,
+                                    height: 1.1,
+                                    letterSpacing: -1,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(height: 36),
+                              for (final h in highlights)
+                                Padding(
+                                  padding: const EdgeInsets.only(bottom: 20),
+                                  child: _HighlightRow(h),
+                                ),
+                              const SizedBox(height: 28),
+                              const Text(
+                                'Face-assisted attendance · human reviewed',
+                                style: TextStyle(
+                                  color: Color(0xffa9cfc2),
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ),
-                  ],
-                ),
-                if (wide) ...[
-                  const SizedBox(height: 80),
-                  const Icon(
-                    Icons.auto_awesome_outlined,
-                    color: Color(0xffbbe9af),
-                    size: 44,
                   ),
-                  const SizedBox(height: 24),
-                  const Text(
-                    'Attendance, with clarity.',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 36,
-                      fontWeight: FontWeight.w800,
-                      height: 1.1,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  const Text(
-                    'A calmer way to manage subjects, enrolment and attendance.',
-                    style: TextStyle(
-                      color: Color(0xffd5e9e2),
-                      fontSize: 16,
-                      height: 1.5,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          );
-          final form = ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 460),
-            child: Panel(
-              padding: wide ? 40 : 26,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: -.7,
-                    ),
-                  ),
-                  const SizedBox(height: 10),
-                  Text(
-                    subtitle,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.onSurfaceVariant,
-                      height: 1.5,
-                    ),
-                  ),
-                  const SizedBox(height: 30),
-                  child,
-                ],
-              ),
-            ),
-          );
-          return SingleChildScrollView(
-            padding: EdgeInsets.all(wide ? 28 : 18),
-            child: ConstrainedBox(
-              constraints: BoxConstraints(
-                minHeight: (c.maxHeight - (wide ? 56 : 36)).clamp(
-                  0,
-                  double.infinity,
                 ),
               ),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 1100),
-                  child: wide
-                      ? Row(
-                          children: [
-                            Expanded(child: brand),
-                            const SizedBox(width: 28),
-                            Expanded(child: form),
-                          ],
-                        )
-                      : Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [brand, const SizedBox(height: 16), form],
+            );
+            return Row(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Expanded(flex: 11, child: brand),
+                Expanded(
+                  flex: 9,
+                  child: SafeArea(
+                    child: LayoutBuilder(
+                      builder: (context, b) => SingleChildScrollView(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 48,
+                          vertical: 40,
                         ),
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            minHeight: (b.maxHeight - 80).clamp(
+                              0,
+                              double.infinity,
+                            ),
+                          ),
+                          child: Center(child: form),
+                        ),
+                      ),
+                    ),
+                  ),
                 ),
-              ),
+              ],
+            );
+          }
+          return SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                DecoratedBox(
+                  decoration: const BoxDecoration(
+                    gradient: _brandGradient,
+                    borderRadius: BorderRadius.vertical(
+                      bottom: Radius.circular(28),
+                    ),
+                  ),
+                  child: ClipRRect(
+                    borderRadius: const BorderRadius.vertical(
+                      bottom: Radius.circular(28),
+                    ),
+                    child: CustomPaint(
+                      painter: _ScanPainter(),
+                      child: SafeArea(
+                        bottom: false,
+                        child: Padding(
+                          padding: const EdgeInsets.fromLTRB(22, 22, 22, 26),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              logo(size: 38),
+                              const SizedBox(height: 22),
+                              portalChip(),
+                              const SizedBox(height: 12),
+                              Text(
+                                headline,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.w800,
+                                  height: 1.15,
+                                  letterSpacing: -.5,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(22, 28, 22, 28),
+                  child: Center(child: form),
+                ),
+              ],
             ),
           );
         },
       ),
+    );
+  }
+}
+
+class _HighlightRow extends StatelessWidget {
+  const _HighlightRow(this.h);
+  final _Highlight h;
+  @override
+  Widget build(BuildContext context) => ConstrainedBox(
+    constraints: const BoxConstraints(maxWidth: 460),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          padding: const EdgeInsets.all(10),
+          decoration: BoxDecoration(
+            color: Colors.white.withValues(alpha: .1),
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Icon(h.icon, color: const Color(0xffbbe9af), size: 22),
+        ),
+        const SizedBox(width: 16),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                h.title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 16,
+                ),
+              ),
+              const SizedBox(height: 3),
+              Text(
+                h.body,
+                style: const TextStyle(color: Color(0xffcfe5dc), height: 1.45),
+              ),
+            ],
+          ),
+        ),
+      ],
     ),
   );
+}
+
+/// Faint scan rings and a focus frame: decoration only.
+class _ScanPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final ring = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.2
+      ..color = Colors.white.withValues(alpha: .07);
+    final centre = Offset(size.width * .8, size.height * .2);
+    for (var r = 60.0; r < size.longestSide; r += 56) {
+      canvas.drawCircle(centre, r, ring);
+    }
+    final frame = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.4
+      ..strokeCap = StrokeCap.round
+      ..color = Colors.white.withValues(alpha: .16);
+    const arm = 22.0, box = 92.0;
+    final o = Offset(centre.dx - box / 2, centre.dy - box / 2);
+    for (final (x, y, dx, dy) in [
+      (0.0, 0.0, 1.0, 1.0),
+      (box, 0.0, -1.0, 1.0),
+      (0.0, box, 1.0, -1.0),
+      (box, box, -1.0, -1.0),
+    ]) {
+      final p = o + Offset(x, y);
+      canvas
+        ..drawLine(p, p + Offset(arm * dx, 0), frame)
+        ..drawLine(p, p + Offset(0, arm * dy), frame);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_ScanPainter oldDelegate) => false;
 }
 
 class LoginPage extends ConsumerStatefulWidget {
@@ -701,74 +959,149 @@ class _LoginPageState extends ConsumerState<LoginPage> {
   }
 
   @override
-  Widget build(BuildContext context) => AuthFrame(
-    title: 'Welcome back',
-    subtitle: 'Sign in to ' + ref.read(servicesProvider).config.title + '.',
-    child: AutofillGroup(
-      child: Form(
-        key: form,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            TextFormField(
-              controller: email,
-              enabled: !busy,
-              decoration: const InputDecoration(labelText: 'Email address'),
-              keyboardType: TextInputType.emailAddress,
-              autofillHints: const [AutofillHints.username],
-              textInputAction: TextInputAction.next,
-              validator: (v) =>
-                  v != null &&
-                      RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v.trim())
-                  ? null
-                  : 'Enter a valid email address.',
-            ),
-            const SizedBox(height: 16),
-            TextFormField(
-              controller: password,
-              enabled: !busy,
-              obscureText: obscured,
-              decoration: InputDecoration(
-                labelText: 'Password',
-                suffixIcon: IconButton(
-                  tooltip: obscured ? 'Show password' : 'Hide password',
-                  onPressed: () => setState(() => obscured = !obscured),
-                  icon: Icon(
-                    obscured
-                        ? Icons.visibility_outlined
-                        : Icons.visibility_off_outlined,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final student = ref.read(servicesProvider).config.role == AppRole.student;
+    return AuthFrame(
+      title: 'Welcome back',
+      subtitle: student
+          ? 'Sign in with your institute student account to see your subjects and attendance.'
+          : 'Sign in with your institute faculty account to take and review attendance.',
+      child: AutofillGroup(
+        child: Form(
+          key: form,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: email,
+                enabled: !busy,
+                decoration: const InputDecoration(
+                  labelText: 'Email address',
+                  hintText: 'you@institute.edu',
+                  prefixIcon: Icon(Icons.mail_outline),
+                ),
+                keyboardType: TextInputType.emailAddress,
+                autofillHints: const [AutofillHints.username],
+                textInputAction: TextInputAction.next,
+                validator: (v) =>
+                    v != null &&
+                        RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(v.trim())
+                    ? null
+                    : 'Enter a valid email address.',
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: password,
+                enabled: !busy,
+                obscureText: obscured,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: const Icon(Icons.lock_outline),
+                  suffixIcon: IconButton(
+                    tooltip: obscured ? 'Show password' : 'Hide password',
+                    onPressed: () => setState(() => obscured = !obscured),
+                    icon: Icon(
+                      obscured
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
                   ),
                 ),
+                autofillHints: const [AutofillHints.password],
+                onFieldSubmitted: (_) => busy ? null : login(),
+                validator: requiredText,
               ),
-              autofillHints: const [AutofillHints.password],
-              onFieldSubmitted: (_) => busy ? null : login(),
-              validator: requiredText,
-            ),
-            if (error != null) ...[
-              const SizedBox(height: 16),
-              Semantics(
-                liveRegion: true,
-                child: Text(
-                  error!,
-                  style: TextStyle(color: Theme.of(context).colorScheme.error),
+              if (error != null) ...[
+                const SizedBox(height: 16),
+                Semantics(
+                  liveRegion: true,
+                  child: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: scheme.errorContainer.withValues(alpha: .6),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(
+                          Icons.error_outline,
+                          color: scheme.error,
+                          size: 20,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            error!,
+                            style: TextStyle(color: scheme.onErrorContainer),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 24),
+              FilledButton(
+                style: FilledButton.styleFrom(
+                  minimumSize: const Size.fromHeight(54),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                ),
+                onPressed: busy ? null : login,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    if (busy) ...[
+                      const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2.2),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
+                    Flexible(child: Text(busy ? 'Signing in…' : 'Sign in')),
+                    if (!busy) ...[
+                      const SizedBox(width: 8),
+                      const Icon(Icons.arrow_forward, size: 20),
+                    ],
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: scheme.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: scheme.outline),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.help_outline, size: 20, color: scheme.primary),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        student
+                            ? 'No login yet? Your institute administrator creates student logins in the Admin section. For a forgotten password, contact the administrator.'
+                            : 'No login yet? Your institute administrator creates faculty logins in the Admin section. For a forgotten password, contact the administrator.',
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.45,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ),
             ],
-            const SizedBox(height: 24),
-            FilledButton(
-              onPressed: busy ? null : login,
-              child: Text(busy ? 'Signing in…' : 'Sign in'),
-            ),
-            const SizedBox(height: 16),
-            const Text(
-              'Use your institute-approved account. Contact your institute for account help.',
-              textAlign: TextAlign.center,
-            ),
-          ],
+          ),
         ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class ClaimPage extends ConsumerStatefulWidget {
