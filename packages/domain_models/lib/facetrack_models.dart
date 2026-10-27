@@ -117,21 +117,31 @@ class JoinCode {
   final DateTime expires;
 }
 
+/// A subject, semester term or section from the institute's academic setup.
 class Academic {
   Academic.fromJson(Json j)
     : id = j['id'] as String,
       termId = j['term_id'] as String?,
-      label =
-          (j['title'] ??
-                  j['code'] ??
-                  (j['branch'].toString() +
-                      ' · Semester ' +
-                      j['semester'].toString() +
-                      ' · ' +
-                      j['section'].toString()))
-              as String;
-  final String id, label;
-  final String? termId;
+      code = j['code'] as String?,
+      title = j['title'] as String?,
+      branch = j['branch'] as String?,
+      section = j['section'] as String?,
+      semester = (j['semester'] as num?)?.toInt();
+  final String id;
+  final String? termId, code, title, branch, section;
+  final int? semester;
+
+  /// "BCS 201 · Design & Analysis of Algorithm", "Odd Semester 2026 (2026-ODD)"
+  /// or "CSE · 3rd Semester · Section CSE1".
+  String get label {
+    if (semester != null) {
+      return '$branch · ${semesterLabel(semester!)} · Section $section';
+    }
+    if (title != null) return code == null ? title! : '$code · $title';
+    final c = code ?? '';
+    final pretty = termLabel(c);
+    return pretty == c ? c : '$pretty ($c)';
+  }
 }
 
 class PageData<T> {
