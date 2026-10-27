@@ -8,6 +8,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'attendance_overview.dart';
 import 'biometric_reviews.dart';
 import 'teacher_sessions.dart';
+import 'teacher_dashboard.dart';
 import 'teacher_disputes.dart';
 
 class TeacherClasses extends ConsumerStatefulWidget {
@@ -22,6 +23,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   late final String institute;
   late final PagedController<Offering> controller;
   bool preparing = false;
+  int dashboardTick = 0;
   @override
   void initState() {
     super.initState();
@@ -36,7 +38,12 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
 
   @override
   void refreshOnResume() {
-    controller.load();
+    refreshAll();
+  }
+
+  Future<void> refreshAll() async {
+    if (mounted) setState(() => dashboardTick++);
+    await controller.load();
   }
 
   @override
@@ -147,7 +154,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
           ),
         ),
       );
-      if (mounted) await controller.load();
+      if (mounted) await refreshAll();
     } catch (e) {
       if (mounted) {
         showMessage(
@@ -164,7 +171,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
 
   Future<void> open(String id) async {
     await context.push('/classes/$id');
-    if (mounted) await controller.load();
+    if (mounted) await refreshAll();
   }
 
   @override
@@ -180,7 +187,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
           runSpacing: 8,
           children: [
             OutlinedButton.icon(
-              onPressed: () => controller.load(),
+              onPressed: refreshAll,
               icon: const Icon(Icons.refresh),
               label: const Text('Refresh'),
             ),
@@ -192,6 +199,12 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
           ],
         ),
       ),
+      TeacherDashboard(
+        key: ValueKey(dashboardTick),
+        api: api,
+        institute: institute,
+      ),
+      const SizedBox(height: 20),
       PagedList(
         controller: controller,
         emptyTitle: 'No assigned subjects',

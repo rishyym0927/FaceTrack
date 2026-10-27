@@ -766,7 +766,11 @@ class PercentRing extends StatelessWidget {
               track,
             ),
             child: Center(
-              child: Column(
+              child: Padding(
+                padding: EdgeInsets.all(stroke + 4),
+                child: FittedBox(
+                  fit: BoxFit.scaleDown,
+                  child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Text(
@@ -790,6 +794,8 @@ class PercentRing extends StatelessWidget {
                       ),
                     ),
                 ],
+                  ),
+                ),
               ),
             ),
           ),
