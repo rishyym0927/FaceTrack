@@ -45,6 +45,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   bool loading = true;
   String? loadError, studentsError;
   final _keys = {for (final t in _Target.values) t: GlobalKey()};
+  final Set<_Target> _opened = {}, _closed = {};
 
   List<Academic> terms = [], courses = [], groups = [];
   List<Offering> offerings = [];
@@ -142,7 +143,11 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
 
   /// Switches section, then brings the requested form into view.
   void _goTo(_Section target, _Target form) {
-    setState(() => section = target);
+    setState(() {
+      section = target;
+      _closed.remove(form);
+      _opened.add(form);
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final ctx = _keys[form]!.currentContext;
       if (ctx != null) Scrollable.ensureVisible(ctx, alignment: .05);
@@ -256,6 +261,15 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     final next = steps.where((s) => s.count != null && !s.done).firstOrNull;
     final theme = Theme.of(context);
     return [
+      const _HowTo(
+        title: 'How to use Administration',
+        steps: [
+          'Work through the setup checklist below from top to bottom. "Start" opens the right form.',
+          'Steps 1–4 build the academic structure, steps 5 and 7 add people, and step 6 gives faculty their subjects.',
+          'When the checklist is done, faculty can take attendance. This page then shows institute-wide attendance.',
+        ],
+        tip: 'Every section has its own instructions at the top. Nothing here deletes data.',
+      ),
       Panel(
         accent: true,
         child: Column(
@@ -464,41 +478,113 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     );
   }
 
+  // --- Task cards ------------------------------------------------------------
+  /// Forms start folded into one-line cards; the next unfinished step and the
+  /// short Access forms start open, and the admin can open or hide any card.
+  bool _isOpen(_Target t) {
+    if (_opened.contains(t)) return true;
+    if (_closed.contains(t)) return false;
+    if (t == _Target.assign || t == _Target.role) return true;
+    return _steps.where((s) => s.count != null && !s.done).firstOrNull?.target == t;
+  }
+
+  void _toggle(_Target t) => setState(() {
+        if (_isOpen(t)) {
+          _opened.remove(t);
+          _closed.add(t);
+        } else {
+          _closed.remove(t);
+          _opened.add(t);
+        }
+      });
+
+  Widget _task(
+    _Target t, {
+    required IconData icon,
+    required String title,
+    required String summary,
+    required Widget form,
+    Widget? below,
+  }) {
+    final open = _isOpen(t);
+    return KeyedSubtree(
+      key: _keys[t],
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            if (open) ...[
+              form,
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton.icon(
+                  onPressed: () => _toggle(t),
+                  icon: const Icon(Icons.expand_less),
+                  label: const Text('Hide form'),
+                ),
+              ),
+            ] else
+              _TaskHeader(icon: icon, title: title, summary: summary, onOpen: () => _toggle(t)),
+            ?below,
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _count(int n, String noun) => n == 0 ? 'None yet' : '$n $noun created';
+
   // --- Academics -------------------------------------------------------------
   List<Widget> _academics() => [
-        const _Intro(
-          'Build the academic structure in this order: semester term → subjects → '
-          'sections → allocate subjects to sections. Use the names and codes from the '
-          'institute timetable so faculty and students recognise them.',
+        const _HowTo(
+          title: 'How to set up the academic structure',
+          steps: [
+            'Create the semester term once each semester, e.g. 2026-ODD.',
+            'Add every subject from the timetable with its code, e.g. BCS 201.',
+            'Add each section: branch, semester and section, e.g. CSE · 3rd Semester · CSE1.',
+            'Allocate each subject to the section that studies it.',
+          ],
+          tip: 'Open "Show existing" under a card before adding, so nothing is created twice. '
+              'Use the names and codes from the timetable so everyone recognises them.',
         ),
-        KeyedSubtree(
-          key: _keys[_Target.term],
-          child: _TermForm(
+        _task(
+          _Target.term,
+          icon: Icons.date_range_outlined,
+          title: 'Add semester term',
+          summary: _count(terms.length, 'semester terms'),
+          form: _TermForm(
             onSubmit: (body) => _run('Semester term created.', () => _post('/v1/admin/terms', body)),
           ),
+          below: _Existing('semester terms', [for (final t in terms) t.label]),
         ),
-        _Existing('semester terms', [for (final t in terms) t.label]),
-        const SizedBox(height: 16),
-        KeyedSubtree(
-          key: _keys[_Target.subject],
-          child: _CourseForm(
+        _task(
+          _Target.subject,
+          icon: Icons.menu_book_outlined,
+          title: 'Add subject',
+          summary: _count(courses.length, 'subjects'),
+          form: _CourseForm(
             onSubmit: (body) => _run('Subject created.', () => _post('/v1/admin/courses', body)),
           ),
+          below: _Existing('subjects', [for (final c in courses) c.label]),
         ),
-        _Existing('subjects', [for (final c in courses) c.label]),
-        const SizedBox(height: 16),
-        KeyedSubtree(
-          key: _keys[_Target.section],
-          child: _GroupForm(
+        _task(
+          _Target.section,
+          icon: Icons.groups_2_outlined,
+          title: 'Add section',
+          summary: _count(groups.length, 'sections'),
+          form: _GroupForm(
             terms: terms,
             onSubmit: (body) => _run('Section created.', () => _post('/v1/admin/class-groups', body)),
           ),
+          below: _Existing('sections', [for (final g in groups) g.label]),
         ),
-        _Existing('sections', [for (final g in groups) g.label]),
-        const SizedBox(height: 16),
-        KeyedSubtree(
-          key: _keys[_Target.allocation],
-          child: _OfferingForm(
+        _task(
+          _Target.allocation,
+          icon: Icons.link_outlined,
+          title: 'Allocate subject to a section',
+          summary: _count(offerings.length, 'allocations'),
+          form: _OfferingForm(
             courses: courses,
             groups: groups,
             onSubmit: (body) => _run(
@@ -506,22 +592,31 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               () => _post('/v1/admin/offerings', body),
             ),
           ),
+          below: _Existing('subject allocations', [for (final o in offerings) '${o.title} · ${o.subtitle}']),
         ),
-        _Existing('subject allocations', [for (final o in offerings) '${o.title} · ${o.subtitle}']),
       ];
 
   // --- People ----------------------------------------------------------------
   List<Widget> _people() => [
-        const _Intro(
-          'Add faculty and students exactly as they appear in institute records. Turn on '
-          '"Also create a login account" to let someone sign in straight away. A student '
-          'without one can sign up later with the same official email and link their '
-          'enrolment number. Faculty always need a login account. For someone already '
-          'listed without one, use "Create login" in the directory.',
+        const _HowTo(
+          title: 'How to add people',
+          steps: [
+            'Add each faculty member with their employee number and official email. Turn on '
+                '"Also create a login account" and set a temporary password.',
+            'Add students with their enrolment number and official email. Create their login now, '
+                'or later with "Create login" in the student directory.',
+            'Share each temporary password privately, never by email or chat.',
+            'Students then join their subjects with the faculty member\'s join code, and faculty '
+                'approve the requests.',
+          ],
+          tip: 'The official email must be the one the person signs in with. Faculty always need a login.',
         ),
-        KeyedSubtree(
-          key: _keys[_Target.faculty],
-          child: _IdentityForm(
+        _task(
+          _Target.faculty,
+          icon: Icons.badge_outlined,
+          title: 'Add faculty',
+          summary: '${teachers.length} faculty · ${_linked(teachers)} with login',
+          form: _IdentityForm(
             title: 'Add faculty',
             numberLabel: 'Employee number',
             numberHelp: 'Exactly as on institute records.',
@@ -530,17 +625,19 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               () => _post('/v1/admin/teachers', body),
             ),
           ),
+          below: _Directory(
+            title: 'Faculty directory',
+            people: teachers,
+            numberKey: 'employee_number',
+            onCreateLogin: (p, password) => _addLogin('teachers', p, password),
+          ),
         ),
-        _Directory(
-          title: 'Faculty directory',
-          people: teachers,
-          numberKey: 'employee_number',
-          onCreateLogin: (p, password) => _addLogin('teachers', p, password),
-        ),
-        const SizedBox(height: 16),
-        KeyedSubtree(
-          key: _keys[_Target.student],
-          child: _IdentityForm(
+        _task(
+          _Target.student,
+          icon: Icons.school_outlined,
+          title: 'Add student',
+          summary: '${students.length} students · ${_linked(students)} with login',
+          form: _IdentityForm(
             title: 'Add student',
             numberLabel: 'Enrolment number',
             numberHelp: 'Exactly as on institute records; students use it to link their account.',
@@ -549,43 +646,165 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               () => _post('/v1/admin/students', body),
             ),
           ),
+          below: studentsError != null
+              ? _Note('Students could not be loaded: $studentsError')
+              : _Directory(
+                  title: 'Student directory',
+                  people: students,
+                  numberKey: 'enrollment_number',
+                  onCreateLogin: (p, password) => _addLogin('students', p, password),
+                ),
         ),
-        if (studentsError != null)
-          _Note('Students could not be loaded: $studentsError')
-        else
-          _Directory(
-            title: 'Student directory',
-            people: students,
-            numberKey: 'enrollment_number',
-            onCreateLogin: (p, password) => _addLogin('students', p, password),
-          ),
       ];
 
   // --- Access & assignments --------------------------------------------------
   List<Widget> _access() => [
-        const _Intro(
-          'Faculty only see the subjects they are assigned to. First make sure the person has '
-          'a login account with the Faculty role (grant it below if needed), then assign '
-          'them to each subject they teach.',
+        const _HowTo(
+          title: 'How to give access',
+          steps: [
+            'Assign every subject to the faculty member who teaches it. They then see it, its '
+                'students and its attendance.',
+            'If someone cannot be chosen as faculty, give them the Faculty role first with '
+                '"Grant a role" below.',
+            'Use "Grant a role" to make someone an Admin, or set Suspended to stop their access.',
+          ],
+          tip: 'The person sees the change after refreshing or signing in again.',
         ),
-        KeyedSubtree(
-          key: _keys[_Target.assign],
-          child: _AssignForm(
+        _task(
+          _Target.assign,
+          icon: Icons.assignment_ind_outlined,
+          title: 'Assign faculty to a subject',
+          summary: '${offerings.length} subjects · ${teachers.length} faculty',
+          form: _AssignForm(
             offerings: offerings,
             teachers: teachers,
             onSubmit: (body) => _run('Faculty assigned to the subject.', () => _post('/v1/admin/assignments', body)),
           ),
         ),
-        const SizedBox(height: 16),
-        KeyedSubtree(
-          key: _keys[_Target.role],
-          child: _RoleForm(
+        _task(
+          _Target.role,
+          icon: Icons.key_outlined,
+          title: 'Grant a role to an existing account',
+          summary: 'Faculty, Admin or Student; active or suspended',
+          form: _RoleForm(
             teachers: teachers,
             students: students,
             onSubmit: (body) => _run('Role updated.', () => _post('/v1/admin/memberships', body)),
           ),
         ),
       ];
+}
+
+/// A folded task: what it is, how much exists, and a button to open its form.
+class _TaskHeader extends StatelessWidget {
+  const _TaskHeader({required this.icon, required this.title, required this.summary, required this.onOpen});
+  final IconData icon;
+  final String title, summary;
+  final VoidCallback onOpen;
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Panel(
+      padding: 16,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.all(9),
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primary.withValues(alpha: .08),
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(icon, color: theme.colorScheme.primary, size: 22),
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: theme.textTheme.titleMedium),
+                const SizedBox(height: 2),
+                Text(summary, style: TextStyle(color: theme.colorScheme.onSurfaceVariant)),
+                const SizedBox(height: 8),
+                FilledButton.tonalIcon(
+                  onPressed: onOpen,
+                  icon: const Icon(Icons.add, size: 18),
+                  label: const Text('Open form'),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Numbered instructions at the top of a section.
+class _HowTo extends StatelessWidget {
+  const _HowTo({required this.title, required this.steps, this.tip});
+  final String title;
+  final List<String> steps;
+  final String? tip;
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: primary.withValues(alpha: .06),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: primary.withValues(alpha: .18)),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.menu_book_outlined, size: 20, color: primary),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(title, style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15)),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            for (final (i, step) in steps.indexed)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    CircleAvatar(
+                      radius: 11,
+                      backgroundColor: primary,
+                      child: Text('${i + 1}',
+                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w700)),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(step, style: const TextStyle(height: 1.45))),
+                  ],
+                ),
+              ),
+            if (tip != null)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.lightbulb_outline, size: 18, color: primary),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(tip!,
+                        style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant, height: 1.45)),
+                  ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 typedef _Submit = Future<bool> Function(Json body);
@@ -1105,16 +1324,6 @@ class _Dropdown extends StatelessWidget {
           onChanged: onChanged,
           validator: (v) => v == null ? 'Select $label.' : null,
         ),
-      );
-}
-
-class _Intro extends StatelessWidget {
-  const _Intro(this.text);
-  final String text;
-  @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.only(bottom: 16),
-        child: _Callout(icon: Icons.lightbulb_outline, text: text),
       );
 }
 

@@ -145,8 +145,26 @@ void main() {
     // The term created earlier is listed under its form with the institute wording.
     await tester.tap(find.text('Show 1 existing semester terms'));
     await tester.pumpAndSettle();
-    // Also shown as the pre-selected term in the section form's dropdown.
-    expect(find.text('Odd Semester 2026 (2026-ODD)'), findsNWidgets(2));
+    // The section form stays folded, so the label appears only in the list.
+    expect(find.text('Odd Semester 2026 (2026-ODD)'), findsOneWidget);
+  });
+
+  testWidgets('Academic setup explains the steps and opens only the next form', (tester) async {
+    final h = await _admin(tester);
+    h.services.api.dio.httpClientAdapter = _adapter(h.account, []);
+    await _pumpAdmin(tester, h);
+    await tester.tap(find.text('1 · Academic setup'));
+    await tester.pumpAndSettle();
+    expect(find.text('How to set up the academic structure'), findsOneWidget);
+    // No term yet, so the term form is open and the others are folded cards.
+    expect(find.text('Semester term code (e.g. 2026-ODD)'), findsOneWidget);
+    expect(find.text('Subject code (e.g. BCS 201)'), findsNothing);
+    await tester.tap(find.text('Open form').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Subject code (e.g. BCS 201)'), findsOneWidget);
+    await tester.tap(find.text('Hide form').first);
+    await tester.pumpAndSettle();
+    expect(find.text('Semester term code (e.g. 2026-ODD)'), findsNothing);
   });
 
   testWidgets('Academic setup shows every creation form', (tester) async {
@@ -174,7 +192,10 @@ void main() {
     expect(find.text('Faculty directory (1)'), findsOneWidget);
     expect(find.text('Student directory (2)'), findsOneWidget);
     expect(find.text('Temporary password (min 8)'), findsNothing);
-    // Toggle the first "create login" switch (faculty form).
+    expect(find.text('How to add people'), findsOneWidget);
+    // Forms start folded; open the faculty form, then toggle its "create login" switch.
+    await tester.tap(find.text('Open form').first);
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(SwitchListTile).first);
     await tester.pumpAndSettle();
     expect(find.text('Temporary password (min 8)'), findsOneWidget);
