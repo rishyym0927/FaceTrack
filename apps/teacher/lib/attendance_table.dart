@@ -50,6 +50,16 @@ String aiStatusLabel(Json row) => switch (row['status']) {
   _ => 'Confirmed',
 };
 
+/// Draft decisions a review starts with: every student the recognizer did not
+/// find in a usable capture ("Not recognized") starts as Absent, so a class
+/// with real absentees needs no per-row changes. Matched and Unassessed rows
+/// are left for the teacher. Nothing is recorded until the teacher saves or
+/// publishes, and the AI column still shows "Not recognized".
+Map<String, String> draftAbsentDecisions(List<Json> rows) => {
+  for (final row in rows)
+    if (row['status'] == 'proposed_absent') row['student_id'] as String: 'absent',
+};
+
 String _statusText(String status) => status == 'unassessed'
     ? 'Unassessed'
     : status[0].toUpperCase() + status.substring(1);

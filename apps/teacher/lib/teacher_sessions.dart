@@ -346,6 +346,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         data = result;
         error = null;
         decisions.clear();
+        // Pre-fill only once processing is over, so polling keeps refreshing
+        // while a capture is still running.
+        if (const {'closed', 'review_required', 'no_data'}
+                .contains(result['session']['status']) &&
+            !_captureIsPending(capture?['status'])) {
+          decisions.addAll(
+            draftAbsentDecisions((result['items'] as List).cast<Json>()),
+          );
+        }
         syncExitGuard();
         captureStatusRequest = null;
       });
@@ -735,7 +744,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               Text(
                 s['status'] == 'open'
                     ? 'After the final capture finishes processing, close this session. Then review each student and publish attendance. Saving decisions while open only saves a draft.'
-                    : 'Open to freeze the roster, capture the classroom, then review and publish. Missing faces stay unassessed.',
+                    : 'Open to freeze the roster, capture the classroom, then review and publish. Students not recognized start as Absent for you to check; students who could not be assessed stay unassessed.',
               ),
               const SizedBox(height: 12),
               Wrap(
@@ -772,7 +781,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const Text(
-                  'Use good lighting and include every consenting student. Recording lasts 15 seconds with audio off. Keep this page open until upload completes.',
+                  'Use good lighting and walk slowly so each face is large and steady for a few seconds. Recording lasts 15 seconds with audio off. For a larger class, record two or three clips, each covering part of the room: every clip adds recognized students. Keep this page open until upload completes.',
                 ),
                 if (camera.controller != null && camera.clip == null)
                   AspectRatio(
@@ -838,6 +847,20 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             onCorrect: correct,
           ),
         if (editable) ...[
+          if (s['status'] != 'open' &&
+              rows.any(
+                (row) =>
+                    row['status'] == 'proposed_absent' &&
+                    decisions[row['student_id']] == 'absent',
+              ))
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Text(
+                '${rows.where((row) => row['status'] == 'proposed_absent' && decisions[row['student_id']] == 'absent').length} '
+                'students not recognized are set to Absent. Change anyone who was actually present before publishing.',
+                style: TextStyle(color: Theme.of(context).colorScheme.primary),
+              ),
+            ),
           if (hasUnconfirmedProposal && s['status'] != 'open')
             Padding(
               padding: const EdgeInsets.only(bottom: 4),

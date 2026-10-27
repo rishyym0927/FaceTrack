@@ -55,7 +55,7 @@ Recovery/lifecycle acceptance remains open for interrupted upload, worker restar
 
 - Manual/scheduled sessions, frozen roster and private classroom capture
 - Roster-scoped recognition suggestions and evidence-coded drafts
-- `proposed_absent` is shown as **Not recognized**; it never becomes final absence automatically
+- `proposed_absent` is shown as **Not recognized**. Since 27 October (client request) the Teacher review pre-fills these rows as a draft **Absent** that the teacher can change; it becomes final only when the teacher publishes. Widget/unit-tested only, not yet seen signed in
 - Failed/limited processing and missing templates remain Unassessed
 - Explicit teacher decisions, immutable publication revisions and corrections
 - Student own published history
@@ -98,7 +98,7 @@ The loopback Model Test Console lets a nontechnical tester enrol consenting volu
 | Shared Flutter (`app_core`) | Analyze clean; **34 passed** |
 | Capture Flutter | Analyze clean; **8 passed** |
 | Student Flutter | Analyze clean; **10 passed** |
-| Teacher Flutter | Analyze clean; **44 passed** |
+| Teacher Flutter | Analyze clean; **47 passed** (re-run after the Absent pre-fill) |
 | OpenAPI contract | Regenerated; includes the admin and attendance-summary endpoints |
 | Running API | `/health/live` and `/health/ready` return 200 |
 | Hosted database | `public.alembic_version` read directly: `0008_admin` |

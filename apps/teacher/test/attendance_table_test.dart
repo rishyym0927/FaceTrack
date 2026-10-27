@@ -137,4 +137,14 @@ void main() {
     expect(find.byTooltip('Approve (present)'), findsNothing);
     expect(find.textContaining('Approve all matched'), findsNothing);
   });
+
+  test('Review starts with only not-recognized students as Absent', () {
+    final rows = [
+      ..._rows,
+      student('d', 'Dev', 'EN004', 'proposed_absent'),
+      student('e', 'Esha', 'EN005', 'present'),
+    ];
+    expect(draftAbsentDecisions(rows), {'b': 'absent', 'd': 'absent'});
+    expect(draftAbsentDecisions(const []), isEmpty);
+  });
 }

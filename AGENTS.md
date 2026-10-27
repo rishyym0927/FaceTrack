@@ -39,7 +39,7 @@ Applies to this directory and its descendants.
 - Use real inference for demonstrations; mocks belong in clearly identified tests.
 - Enforce tenant and object authorization, private media, consent and template revocation from the first working slice.
 - Never commit secrets, raw student media or face templates. Do not reuse credentials embedded in reference documents.
-- Missing recognition or processing failure leaves attendance unassessed; teachers review and publish authoritative results.
+- Processing failure, limited capture or a missing template leaves attendance unassessed. A student not recognized in a usable capture is pre-filled as a draft Absent (user-approved, 27 October 2026). Teachers review and publish authoritative results; never publish without them.
 - Preserve idempotent job effects, immutable publication revisions and manual corrections.
 - Measure accuracy and latency before claiming targets. Architecture alone does not establish production readiness.
 - Run focused, meaningful checks for each change; record failures and checks not run explicitly.

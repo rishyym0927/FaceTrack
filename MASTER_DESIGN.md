@@ -260,8 +260,9 @@ Rejected/failed attempts show actionable reasons and permit a new attempt. Appro
 
 Before publication: unassessed or proposed_present. Reviewed decisions: present/absent/late/excused/unassessed.
 
-- ML can propose presence; it cannot mark absence or overwrite a manual decision.
-- A worker failure, occlusion, missed face or no camera data leaves the student unassessed.
+- ML can propose presence; it cannot record absence or overwrite a manual decision.
+- After a usable capture, an eligible student who was not matched is `proposed_absent` ("Not recognized"). On user/client instruction (27 October 2026), the Teacher review pre-fills these rows as a draft **Absent**; the AI column still shows "Not recognized", the teacher can change any row, and nothing is recorded until the teacher saves or publishes.
+- A worker failure, a limited capture, no camera data or a missing template leaves the student unassessed; these are never pre-filled.
 - Teachers explicitly confirm decisions before finalization. Unassessed rows may remain only after acknowledgement; mark the report incomplete.
 - Additional captures can add proposals, not silently remove previous ones.
 - Corrections require reason, actor, expected version and a new publication revision.
