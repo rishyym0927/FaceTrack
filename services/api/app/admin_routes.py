@@ -233,7 +233,8 @@ def install(app, engine, settings, principal, storage, auth):
         async def call(conn):
             row = await one(
                 conn,
-                f"SELECT official_email,auth_user_id FROM app.{table} WHERE institute_id=:i AND id=:id",
+                # Lock the row so a concurrent request waits, then sees the link and gets 409.
+                f"SELECT official_email,auth_user_id FROM app.{table} WHERE institute_id=:i AND id=:id FOR UPDATE",
                 {"i": institute_id, "id": identity_id},
             )
             if not row:
