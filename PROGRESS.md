@@ -10,14 +10,14 @@
 
 ## Current state
 
-The current demo is **cloud-hosted data with local processing**:
+The demo runs **online on one Azure VM** (27 October 2026, see [docs/DEPLOY_AZURE.md](docs/DEPLOY_AZURE.md)):
 
 - Supabase hosts Auth, PostgreSQL and private Storage.
-- FastAPI, Redis, one Celery CPU worker and the outbound agent run on the development computer.
-- Teacher and Student are separate Flutter Android/web apps on ports 5300/5301.
-- Android reaches the local API through USB port forwarding.
+- The VM (Central India, B2as_v2) runs FastAPI, Redis, one Celery CPU worker and the outbound agent in Docker, with Caddy HTTPS in front, and serves both web apps at `https://facetrack.centralindia.cloudapp.azure.com/teacher/` and `/student/`.
+- Verified: HTTPS health ready, both web apps load, the model and profile load in the VM worker, the agent is authorized and polling. **Not yet verified: a signed-in end-to-end enrolment and recognition run through the VM.**
+- Only one processing backend may run at a time; the Mac's worker and agent are stopped. Local development still works on ports 5300/5301 against the local API, and Android debug APKs pointing at the VM are built (not installed).
 
-macOS Apple Silicon is the verified demo host. The canonical Docker stack supports the same local services on Windows/Linux; both Compose configurations validate and the API/worker images build, but physical Windows/Linux acceptance remains pending. HTTPS/cloud API and institute deployment are later gates.
+macOS Apple Silicon is the verified demo host. The canonical Docker stack supports the same local services on Windows/Linux; both Compose configurations validate and the API/worker images build, but physical Windows/Linux acceptance remains pending. Institute deployment (model rights, monitoring, backups) remains a later gate.
 
 Schema head is **`0008_admin`**, with **37 forced-RLS business tables**. The running API's `/health/ready` passes against the hosted development project, which checks exactly that head and table count.
 
@@ -30,6 +30,8 @@ Schema head is **`0008_admin`**, with **37 forced-RLS business tables**. The run
 - Admin tab: setup checklist with the next step and jump-to-form, statistics, login-account and by-semester charts, institute-wide attendance, guided forms with institute examples, lists of existing records, searchable faculty/student directories, role grant by person picker.
 - Verified by widget tests at 360/768/1440 px with 200% text. **Not yet seen in an authenticated browser or on the phone**; the running 5300/5301 dev servers were not reloaded with these changes.
 - Theory/Lab and lab batches (A1, B1) from the timetable are not modelled.
+- Sign-in page redesigned for both apps (split branded layout on wide screens, compact header on phones).
+- In-app notifications (bell with unread badge, `/notifications` panel) for students (enrolment decisions, face-enrolment state, newly published attendance, below-75% subjects, resolved queries), faculty (join requests, face reviews, open queries, sessions to review and publish, long-open sessions) and admins (setup and missing logins). Derived on the device from existing endpoints; no server-side store, push or email. Read state is per account on each device. Faculty checks cover the first 20 subjects. Unit- and widget-tested only; not yet seen signed in.
 
 ### Accounts and classes
 
@@ -95,10 +97,10 @@ The loopback Model Test Console lets a nontechnical tester enrol consenting volu
 | Worker Ruff | Passed |
 | Root ML/contract suite | **42 passed, 1 expected frozen-baseline limitation** |
 | ML freeze receipt | **16/16 unchanged** |
-| Shared Flutter (`app_core`) | Analyze clean; **40 passed** (incl. sign-in layout at 360/768/1440 px, 200% text) |
+| Shared Flutter (`app_core`) | Analyze clean; **49 passed** (incl. sign-in and notification layouts at 360/768/1440 px, 200% text) |
 | Capture Flutter | Analyze clean; **8 passed** |
-| Student Flutter | Analyze clean; **10 passed** |
-| Teacher Flutter | Analyze clean; **47 passed** (re-run after the Absent pre-fill) |
+| Student Flutter | Analyze clean; **14 passed** |
+| Teacher Flutter | Analyze clean; **49 passed** |
 | OpenAPI contract | Regenerated; includes the admin and attendance-summary endpoints |
 | Running API | `/health/live` and `/health/ready` return 200 |
 | Hosted database | `public.alembic_version` read directly: `0008_admin` |

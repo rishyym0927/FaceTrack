@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'auth.dart';
 import 'api.dart';
 import 'config.dart';
+import 'notifications.dart';
 import 'widgets.dart';
 
 typedef DetailBuilder = Widget Function(BuildContext, String);
@@ -47,6 +48,7 @@ Future<void> launchProduct(
   DetailBuilder? sessionBuilder,
   WidgetBuilder? enrollmentBuilder,
   WidgetBuilder? adminBuilder,
+  NotificationsLoader? notificationsLoader,
   Future<void> Function(AppServices)? configure,
 }) async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -63,6 +65,7 @@ Future<void> launchProduct(
           sessionBuilder: sessionBuilder,
           enrollmentBuilder: enrollmentBuilder,
           adminBuilder: adminBuilder,
+          notificationsLoader: notificationsLoader,
         ),
       ),
     );
@@ -98,17 +101,33 @@ class ProductApp extends ConsumerStatefulWidget {
     this.sessionBuilder,
     this.enrollmentBuilder,
     this.adminBuilder,
+    this.notificationsLoader,
   });
   final WidgetBuilder classesBuilder;
   final DetailBuilder? detailBuilder, sessionBuilder;
   final WidgetBuilder? enrollmentBuilder;
   final WidgetBuilder? adminBuilder;
+
+  /// Supplies this app's in-app notices; null shows no bell.
+  final NotificationsLoader? notificationsLoader;
   @override
   ConsumerState<ProductApp> createState() => _ProductAppState();
 }
 
 class _ProductAppState extends ConsumerState<ProductApp> {
   late final GoRouter router;
+  NotificationCenter? notifications;
+  AppLifecycleListener? lifecycle;
+
+  void refreshNotifications({bool force = false}) {
+    final auth = ref.read(authProvider);
+    if (!auth.signedIn || auth.loading || auth.error != null) return;
+    notifications?.ensureFresh(
+      ref.read(servicesProvider).api,
+      auth,
+      force: force,
+    );
+  }
 
   static const _authScreens = {
     '/login',
@@ -123,6 +142,12 @@ class _ProductAppState extends ConsumerState<ProductApp> {
   void initState() {
     super.initState();
     final auth = ref.read(authProvider);
+    if (widget.notificationsLoader != null) {
+      notifications = NotificationCenter(widget.notificationsLoader!);
+      lifecycle = AppLifecycleListener(
+        onResume: () => refreshNotifications(force: true),
+      );
+    }
     router = GoRouter(
       initialLocation: '/classes',
       refreshListenable: auth,
@@ -179,20 +204,33 @@ class _ProductAppState extends ConsumerState<ProductApp> {
         GoRoute(path: '/claim', builder: (_, _) => const ClaimPage()),
         GoRoute(path: '/institutes', builder: (_, _) => const InstitutePage()),
         ShellRoute(
-          builder: (context, state, child) => ProductShell(
-            key: ValueKey(
-              (auth.account?.userId ?? '') + (auth.institute ?? ''),
-            ),
-            path: state.uri.path,
-            hasAdmin: widget.adminBuilder != null,
-            child: child,
-          ),
+          builder: (context, state, child) {
+            // Navigating is a natural moment to refresh stale notices.
+            refreshNotifications();
+            return ProductShell(
+              key: ValueKey(
+                (auth.account?.userId ?? '') + (auth.institute ?? ''),
+              ),
+              path: state.uri.path,
+              hasAdmin: widget.adminBuilder != null,
+              notifications: notifications,
+              child: child,
+            );
+          },
           routes: [
             GoRoute(
               path: '/classes',
               builder: (c, s) => widget.classesBuilder(c),
             ),
             GoRoute(path: '/account', builder: (_, _) => const AccountPage()),
+            if (notifications != null)
+              GoRoute(
+                path: '/notifications',
+                builder: (_, _) => NotificationsPage(
+                  center: notifications!,
+                  refresh: () => refreshNotifications(force: true),
+                ),
+              ),
             if (widget.adminBuilder != null)
               GoRoute(
                 path: '/admin',
@@ -272,6 +310,8 @@ class _ProductAppState extends ConsumerState<ProductApp> {
 
   @override
   void dispose() {
+    lifecycle?.dispose();
+    notifications?.dispose();
     router.dispose();
     super.dispose();
   }
@@ -297,10 +337,12 @@ class ProductShell extends StatelessWidget {
     required this.path,
     required this.child,
     this.hasAdmin = false,
+    this.notifications,
   });
   final String path;
   final Widget child;
   final bool hasAdmin;
+  final NotificationCenter? notifications;
   @override
   Widget build(BuildContext context) => Consumer(
     builder: (context, ref, _) {
@@ -384,6 +426,11 @@ class ProductShell extends StatelessWidget {
                 ],
               ),
               actions: [
+                if (notifications != null)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: NotificationBell(center: notifications!),
+                  ),
                 if (auth.instituteName.isNotEmpty)
                   Padding(
                     padding: const EdgeInsets.only(right: 12),

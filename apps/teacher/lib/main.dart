@@ -2,6 +2,7 @@ import 'package:facetrack_core/facetrack_core.dart';
 
 import 'teacher_admin.dart';
 import 'teacher_classes.dart';
+import 'teacher_notifications.dart';
 import 'teacher_sessions.dart';
 
 void main() => launchProduct(
@@ -10,4 +11,5 @@ void main() => launchProduct(
   sessionBuilder: (_, id) => TeacherSessionDetail(id: id),
   detailBuilder: (_, id) => TeacherClassDetail(id: id),
   adminBuilder: (_) => const TeacherAdmin(),
+  notificationsLoader: teacherNotifications,
 );
