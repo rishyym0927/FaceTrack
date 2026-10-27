@@ -81,7 +81,7 @@ def run(args):
         visited = present + intruders
         rng.shuffle(visited)
         # ~15% of students never present a usable face (look down / turned away / occluded).
-        uncooperative = set(rng.sample(present, int(round(n_present * 0.15))))
+        uncooperative = set() if args.steady else set(rng.sample(present, int(round(n_present * 0.15))))
         # each student centered on a frame, visible in a +/-2 band (teacher approaches & leaves)
         centre = {pid: 2 + int(i / max(1, len(visited) - 1) * (frames_n - 5))
                   for i, pid in enumerate(visited)}
@@ -96,6 +96,8 @@ def run(args):
             for k, pid in enumerate(here):
                 near = centre[pid] == t                      # closest at the centre frame
                 px = rng.randint(220, 300) if near else rng.randint(150, 210)
+                if args.face_cap:  # 112px sources lose sharpness when enlarged far beyond ~180px
+                    px = min(px, args.face_cap)
                 cx = int(W * (k + 0.5) / max(1, slots)) + rng.randint(-30, 30)
                 cy = int(H * 0.46) + rng.randint(-40, 40)
                 face = frame_face(pid, t)
@@ -111,11 +113,11 @@ def run(args):
                 frame[y:y + px, x:x + px] = f
                 rects.append(((x, y, x + px, y + px), pid))
             # walking motion blur on ~25% of frames
-            if rng.random() < 0.25:
+            if rng.random() < 0.25 and not args.steady:
                 frame = cv2.GaussianBlur(frame, (0, 0), 1.3)
             frame = np.clip(frame.astype(np.float32) +
                             np.random.default_rng(t).normal(0, 3, frame.shape), 0, 255).astype(np.uint8)
-            ok, enc = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            ok, enc = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 95 if args.steady else 80])
             frames.append(cv2.imdecode(enc, cv2.IMREAD_COLOR))
             gt.append(rects)
 
@@ -185,6 +187,10 @@ def main():
     ap.add_argument("--dwell", type=int, default=2,
                     help="half-width of frames each student is visible; larger = slower walk / longer pause")
     ap.add_argument("--run", type=int, default=1)
+    ap.add_argument("--steady", action="store_true",
+                    help="Steady recording of cooperative students: no motion blur, light compression")
+    ap.add_argument("--face-cap", type=int, default=0,
+                    help="Optional maximum pasted face size in pixels (0 = unchanged behaviour)")
     ap.add_argument("--models", default=".local/spike/models/buffalo_sc")
     ap.add_argument("--profile", type=Path, default=Path(".local/spike/profiles/frozen-phase1b-v1.json"))
     run(ap.parse_args())
