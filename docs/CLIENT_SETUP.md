@@ -70,7 +70,7 @@ C. Install the private configuration
 D. Start and verify FaceTrack
 - Make sure Docker Desktop is running.
 - Windows: run `.\scripts\windows\start-demo.ps1` (add `-Browser edge` only if Chrome is unavailable). It builds and starts the containers and opens both apps.
-- macOS: run `make build`, then `make up`. Then start the two apps in two separate Terminal windows:
+- macOS: run `make build`, then `make up` (without make: `docker compose build`, then `docker compose up -d`). Then start the two apps in two separate Terminal windows:
   - in apps/teacher: `../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5300 --dart-define-from-file=../../.local/flutter/development.json`
   - in apps/student: `../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5301 --dart-define-from-file=../../.local/flutter/development.json`
 - Wait until all four containers are running: api, redis, worker and agent (`docker compose ps`).
@@ -97,7 +97,7 @@ Give Claude this shorter prompt on later days:
 Open my FaceTrack folder (C:\FaceTrack on Windows, ~/FaceTrack on macOS). Read docs/INSTALLATION.md. Start Docker Desktop if needed. On Windows run `.\scripts\windows\start-demo.ps1`. On macOS run `make up`, then start the Teacher app on port 5300 and the Student app on port 5301 with the flutter run commands in docs/INSTALLATION.md section 4. Verify all four containers, API readiness, Teacher on 5300 and Student on 5301. Do not change code, configuration, database data, biometrics or attendance. If a private credential is missing or expired, stop and tell me to contact Rishi without printing the credential.
 ```
 
-To stop: Windows `.\scripts\windows\stop-demo.ps1`; macOS `make down`. Then close the two Flutter windows.
+To stop: Windows `.\scripts\windows\stop-demo.ps1`; macOS `make down`. Then close the two Flutter windows. If `make` is not available on the Mac, use the equivalent `docker compose build`, `docker compose up -d` and `docker compose down`.
 
 ## Model test only (no application login)
 

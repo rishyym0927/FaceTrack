@@ -160,7 +160,7 @@ cd ~/FaceTrack/apps/student && flutter pub get --enforce-lockfile
 cd ~/FaceTrack && make build
 ```
 
-`make build` is required. `make up` alone does **not** rebuild, and would run the old images. Do not use `scripts/setup.sh` for this upgrade. Like `setup.ps1`, it creates config files when they are missing.
+`make build` is required. `make up` alone does **not** rebuild, and would run the old images. If `make` is not available on the Mac, use the equivalent `docker compose build`, `docker compose up -d` and `docker compose down`. Do not use `scripts/setup.sh` for this upgrade. Like `setup.ps1`, it creates config files when they are missing.
 
 ### 7. Start FaceTrack
 

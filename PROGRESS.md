@@ -101,7 +101,10 @@ The loopback Model Test Console lets a nontechnical tester enrol consenting volu
 | Teacher Flutter | Analyze clean; **44 passed** |
 | OpenAPI contract | Regenerated; includes the admin and attendance-summary endpoints |
 | Running API | `/health/live` and `/health/ready` return 200 |
-| Not re-run today | Release web bundles, Android APK builds, Docker image builds, physical-device and authenticated visual checks |
+| Hosted database | `public.alembic_version` read directly: `0008_admin` |
+| Teacher web build | `flutter build web` with the configured public file succeeds |
+| Upgrade-guide model check | `load_manifest` + `load_profile` print "model and profile OK" natively and inside the worker image |
+| Not re-run today | Student web build, Android APK builds, Docker image rebuilds, PowerShell syntax (no `pwsh` on the Mac), physical-device and authenticated visual checks |
 
 The configuration audit also removed whole-file API environment injection from Compose. The mounted API `.env` still supplies declared runtime settings through Pydantic, and explicit operator tools can read `MIGRATION_DATABASE_URL`; the running API process no longer receives that owner URL as an exported environment variable.
 
