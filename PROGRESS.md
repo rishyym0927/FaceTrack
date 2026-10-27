@@ -31,6 +31,7 @@ Schema head is **`0008_admin`**, with **37 forced-RLS business tables**. The run
 - Verified by widget tests at 360/768/1440 px with 200% text. **Not yet seen in an authenticated browser or on the phone**; the running 5300/5301 dev servers were not reloaded with these changes.
 - Theory/Lab and lab batches (A1, B1) from the timetable are not modelled.
 - Sign-in page redesigned for both apps (split branded layout on wide screens, compact header on phones).
+- Home pages simplified for both apps: greeting banner with the main actions, a "Needs your attention" card (top three notifications), compact tappable subject rows; the faculty attendance overview follows the subject list. Widget-tested only; not yet seen signed in.
 - In-app notifications (bell with unread badge, `/notifications` panel) for students (enrolment decisions, face-enrolment state, newly published attendance, below-75% subjects, resolved queries), faculty (join requests, face reviews, open queries, sessions to review and publish, long-open sessions) and admins (setup and missing logins). Derived on the device from existing endpoints; no server-side store, push or email. Read state is per account on each device. Faculty checks cover the first 20 subjects. Unit- and widget-tested only; not yet seen signed in.
 
 ### Accounts and classes
@@ -97,7 +98,7 @@ The loopback Model Test Console lets a nontechnical tester enrol consenting volu
 | Worker Ruff | Passed |
 | Root ML/contract suite | **42 passed, 1 expected frozen-baseline limitation** |
 | ML freeze receipt | **16/16 unchanged** |
-| Shared Flutter (`app_core`) | Analyze clean; **49 passed** (incl. sign-in and notification layouts at 360/768/1440 px, 200% text) |
+| Shared Flutter (`app_core`) | Analyze clean; **54 passed** (incl. sign-in, notification and home layouts at 360/768/1440 px, 200% text) |
 | Capture Flutter | Analyze clean; **8 passed** |
 | Student Flutter | Analyze clean; **14 passed** |
 | Teacher Flutter | Analyze clean; **49 passed** |

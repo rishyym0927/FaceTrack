@@ -82,119 +82,60 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
   }
 
   @override
-  Widget build(BuildContext context) => ContentPage(
-    children: [
-      PageHeader(
-        title: 'Your subjects',
-        subtitle: 'Join a subject and follow your membership requests.',
-        eyebrow: 'STUDENT SPACE',
-        icon: Icons.school_outlined,
-        action: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            OutlinedButton.icon(
-              onPressed: () => controller.load(),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh'),
-            ),
+  Widget build(BuildContext context) {
+    final auth = ref.watch(authProvider);
+    String? name;
+    for (final p in auth.account?.students ?? const <Person>[]) {
+      if (p.instituteId == institute) name = firstName(p.name);
+    }
+    return ContentPage(
+      children: [
+        HomeHero(
+          title: '${greeting()}${name == null ? '' : ', $name'}',
+          subtitle: 'Tap a subject to see your attendance. Use a join code from your faculty to add a new one.',
+          actions: [
             FilledButton.icon(
               onPressed: join,
               icon: const Icon(Icons.add),
               label: const Text('Join subject'),
             ),
+            OutlinedButton.icon(
+              onPressed: () => controller.load(),
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh'),
+            ),
           ],
         ),
-      ),
-      PagedList(
-        controller: controller,
-        emptyTitle: 'No subjects yet',
-        emptyMessage:
-            'Enter a join code from your faculty to request membership.',
-        item: (Enrollment e) => Panel(
-          accent: true,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary
-                          .withValues(alpha: .08),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(
-                      Icons.menu_book_outlined,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          e.offering!.title,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          e.offering!.subtitle,
-                          style: TextStyle(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                e.offering!.termCode,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 12),
-              StatusBadge(e.status),
-              const SizedBox(height: 12),
-              Text(switch (e.status) {
-                'requested' => 'Your faculty needs to approve this request. You do not need to send it again.',
-                'active' => 'Your subject membership is approved. Face enrolment is reviewed separately.',
-                'rejected' => 'Your faculty declined this request.',
-                'withdrawn' => 'Your membership in this subject has ended.',
-                _ => 'Refresh to check your membership status.',
-              }),
-              if (e.reason != null && e.reason!.isNotEmpty)
-                Text('Faculty note: ${e.reason}'),
-              if (e.status == 'active')
-                Padding(
-                  padding: const EdgeInsets.only(top: 12),
-                  child: OutlinedButton.icon(
-                    onPressed: () => context.go('/classes/${e.offeringId}'),
-                    icon: const Icon(Icons.arrow_forward),
-                    label: const Text('View attendance'),
-                  ),
-                ),
-              if (['rejected', 'withdrawn'].contains(e.status))
-                const Padding(
-                  padding: EdgeInsets.only(top: 12),
-                  child: Text(
-                    'Contact your faculty if you need to rejoin this subject.',
-                  ),
-                ),
-            ],
+        const SizedBox(height: 16),
+        const AttentionCard(),
+        const SectionTitle('Your subjects'),
+        PagedList(
+          controller: controller,
+          emptyTitle: 'No subjects yet',
+          emptyMessage:
+              'Enter a join code from your faculty to request membership.',
+          item: (Enrollment e) => SubjectTile(
+            title: e.offering!.title,
+            subtitle: e.offering!.subtitle,
+            status: e.status == 'active' ? null : e.status,
+            note: switch (e.status) {
+              'active' => 'View attendance',
+              'requested' =>
+                'Waiting for faculty approval. No need to send it again.',
+              'rejected' =>
+                e.reason != null && e.reason!.isNotEmpty
+                    ? 'Declined: ${e.reason}'
+                    : 'Declined. Contact your faculty to rejoin.',
+              'withdrawn' =>
+                'Membership ended. Contact your faculty to rejoin.',
+              _ => null,
+            },
+            onTap: e.status == 'active'
+                ? () => context.go('/classes/${e.offeringId}')
+                : null,
           ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }

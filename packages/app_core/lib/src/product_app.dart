@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'auth.dart';
 import 'api.dart';
 import 'config.dart';
+import 'home.dart';
 import 'notifications.dart';
 import 'widgets.dart';
 
@@ -322,6 +323,9 @@ class _ProductAppState extends ConsumerState<ProductApp> {
     theme: appTheme(),
     debugShowCheckedModeBanner: false,
     routerConfig: router,
+    builder: (context, child) => notifications == null
+        ? child!
+        : NotificationScope(notifier: notifications!, child: child!),
   );
 }
 

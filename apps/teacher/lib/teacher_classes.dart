@@ -175,105 +175,54 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   }
 
   @override
-  Widget build(BuildContext context) => ContentPage(
-    children: [
-      PageHeader(
-        title: 'Your subjects',
-        subtitle: 'Manage subject enrolment and student requests.',
-        eyebrow: 'FACULTY WORKSPACE',
-        icon: Icons.space_dashboard_outlined,
-        action: Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            OutlinedButton.icon(
-              onPressed: refreshAll,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh'),
-            ),
+  Widget build(BuildContext context) {
+    final auth = ref.watch(authProvider);
+    String? name;
+    for (final t in auth.account?.teachers ?? const <Person>[]) {
+      if (t.instituteId == institute) name = firstName(t.name);
+    }
+    return ContentPage(
+      children: [
+        HomeHero(
+          title: '${greeting()}${name == null ? '' : ', $name'}',
+          subtitle: 'Open a subject to take attendance, review requests and publish results.',
+          actions: [
             FilledButton.icon(
               onPressed: preparing ? null : create,
               icon: const Icon(Icons.add),
               label: Text(preparing ? 'Loading…' : 'Add subject'),
             ),
+            OutlinedButton.icon(
+              onPressed: refreshAll,
+              icon: const Icon(Icons.refresh),
+              label: const Text('Refresh'),
+            ),
           ],
         ),
-      ),
-      TeacherDashboard(
-        key: ValueKey(dashboardTick),
-        api: api,
-        institute: institute,
-      ),
-      const SizedBox(height: 20),
-      PagedList(
-        controller: controller,
-        emptyTitle: 'No assigned subjects',
-        emptyMessage:
-            'Add a subject or ask your institute to assign one.',
-        item: (Offering o) => Panel(
-          accent: true,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 44,
-                    height: 44,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary
-                          .withValues(alpha: .08),
-                      borderRadius: BorderRadius.circular(14),
-                    ),
-                    child: Icon(
-                      Icons.class_outlined,
-                      color: Theme.of(context).colorScheme.primary,
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          o.title,
-                          style: Theme.of(context).textTheme.titleLarge
-                              ?.copyWith(fontWeight: FontWeight.w700),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          o.subtitle,
-                          style: TextStyle(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                o.termCode,
-                style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => open(o.id),
-                icon: const Icon(Icons.arrow_forward_rounded),
-                label: const Text('Manage subject'),
-              ),
-            ],
+        const SizedBox(height: 16),
+        const AttentionCard(),
+        const SectionTitle('Your subjects'),
+        PagedList(
+          controller: controller,
+          emptyTitle: 'No assigned subjects',
+          emptyMessage: 'Add a subject or ask your institute to assign one.',
+          item: (Offering o) => SubjectTile(
+            icon: Icons.class_outlined,
+            title: o.title,
+            subtitle: o.subtitle,
+            note: o.termTitle,
+            onTap: () => open(o.id),
           ),
         ),
-      ),
-    ],
-  );
+        const SizedBox(height: 28),
+        TeacherDashboard(
+          key: ValueKey(dashboardTick),
+          api: api,
+          institute: institute,
+        ),
+      ],
+    );
+  }
 }
 
 class TeacherClassDetail extends ConsumerStatefulWidget {
@@ -628,7 +577,11 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
           else if (tab == 4)
             TeacherDisputes(api: api, institute: institute, offering: widget.id)
           else if (tab == 5)
-            AttendanceOverview(api: api, institute: institute, offering: widget.id)
+            AttendanceOverview(
+              api: api,
+              institute: institute,
+              offering: widget.id,
+            )
           else
             PagedList(
               controller: tab == 0 ? requests : students,
