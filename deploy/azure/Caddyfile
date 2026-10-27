@@ -1,0 +1,32 @@
+# FaceTrack on one Azure VM: Teacher and Student web apps plus the API behind one HTTPS origin.
+# Caddy obtains and renews the Let's Encrypt certificate automatically (ports 80 and 443 must be open).
+# Install: sudo cp deploy/azure/Caddyfile /etc/caddy/Caddyfile && sudo systemctl reload caddy
+facetrack.centralindia.cloudapp.azure.com {
+	encode zstd gzip
+
+	route {
+		# The worker agent reaches the API on the private Docker network; never expose these.
+		respond /internal/* 404
+		@docs path /docs /docs/* /redoc /openapi.json
+		respond @docs 404
+
+		redir / /teacher/
+		redir /teacher /teacher/
+		redir /student /student/
+
+		# Always revalidate the entry files so a new build is picked up on the next load.
+		@entry path */ */index.html */flutter_bootstrap.js */flutter_service_worker.js */version.json
+		header @entry Cache-Control "no-cache"
+
+		handle_path /teacher/* {
+			root * /srv/facetrack/teacher
+			file_server
+		}
+		handle_path /student/* {
+			root * /srv/facetrack/student
+			file_server
+		}
+
+		reverse_proxy 127.0.0.1:8000
+	}
+}
