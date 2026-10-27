@@ -184,6 +184,31 @@ void main() {
     expect(find.text('Asha Verma'), findsNothing);
   });
 
+  testWidgets('An existing student without a login gets one from the directory', (tester) async {
+    final h = await _admin(tester);
+    final posts = <RequestOptions>[];
+    h.services.api.dio.httpClientAdapter = _adapter(h.account, posts, students: [
+      {'id': 's1', 'official_name': 'Asha Verma', 'enrollment_number': '0101', 'official_email': 'asha@example.edu', 'status': 'approved'},
+    ]);
+    await _pumpAdmin(tester, h);
+    await tester.tap(find.text('2 · People'));
+    await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Create login'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Create login'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('asha@example.edu and this temporary password'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Temporary password (min 8)').last, 'short');
+    await tester.tap(find.widgetWithText(FilledButton, 'Create login'));
+    await tester.pumpAndSettle();
+    expect(find.text('At least 8 characters.'), findsOneWidget);
+    await tester.enterText(find.widgetWithText(TextFormField, 'Temporary password (min 8)').last, 'long-enough-1');
+    await tester.tap(find.widgetWithText(FilledButton, 'Create login'));
+    await tester.pumpAndSettle();
+    final login = posts.singleWhere((p) => p.path == '/v1/admin/students/s1/login');
+    expect((login.data as Map)['password'], 'long-enough-1');
+  });
+
   testWidgets('Granting a role picks a person instead of pasting an id', (tester) async {
     final h = await _admin(tester);
     final posts = <RequestOptions>[];

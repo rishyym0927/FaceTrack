@@ -175,3 +175,60 @@ async def test_admin_create_login_requires_service_role_key(backend):
             (UUID(b.ids["institute"]),),
         ).fetchone()
         assert row is None
+
+
+async def test_admin_adds_login_to_existing_student_and_links_it(backend, monkeypatch):
+    b = backend
+    make_admin(b)
+    made = await b.client.post(
+        "/v1/admin/students",
+        headers=b.headers("unassigned", key="nologin"),
+        json={"number": "9200", "official_name": "Later Login", "official_email": "later@example.test"},
+    )
+    assert made.status_code == 201, made.text
+    student = made.json()["id"]
+    auth_id = str(uuid4())
+    with connect(b.urls["owner"]) as c:
+        c.execute(
+            "INSERT INTO auth.users(id,email,email_confirmed_at) VALUES(%s,%s,now())",
+            (UUID(auth_id), "later@example.test"),
+        )
+    seen = {}
+
+    async def fake_login(auth, settings, email, password):
+        seen["email"] = email
+        return auth_id
+
+    monkeypatch.setattr(admin_routes, "create_login_account", fake_login)
+    created = await b.client.post(
+        f"/v1/admin/students/{student}/login",
+        headers=b.headers("unassigned", key="addlogin"),
+        json={"password": "a-strong-password"},
+    )
+    assert created.status_code == 201, created.text
+    assert created.json()["auth_user_id"] == auth_id
+    assert seen["email"] == "later@example.test"  # the record's own email, never client-supplied
+    with connect(b.urls["owner"]) as c:
+        linked = c.execute("SELECT auth_user_id FROM app.students WHERE id=%s", (UUID(student),)).fetchone()[0]
+        role = c.execute(
+            "SELECT role,status FROM app.memberships WHERE auth_user_id=%s", (UUID(auth_id),)
+        ).fetchone()
+    assert str(linked) == auth_id
+    assert role == ("student", "active")
+    again = await b.client.post(
+        f"/v1/admin/students/{student}/login",
+        headers=b.headers("unassigned", key="addlogin-again"),
+        json={"password": "a-strong-password"},
+    )
+    assert again.status_code == 409, again.text
+    assert again.json()["error"]["code"] == "LOGIN_EXISTS"
+
+
+async def test_adding_a_login_requires_admin(backend):
+    b = backend
+    denied = await b.client.post(
+        f"/v1/admin/students/{b.ids['student1_profile']}/login",
+        headers=b.headers("teacher", key="nope"),
+        json={"password": "a-strong-password"},
+    )
+    assert denied.status_code == 403, denied.text

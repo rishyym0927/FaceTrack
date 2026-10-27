@@ -134,6 +134,12 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     }
   }
 
+  /// Creates a login for an existing faculty/student record using its own email.
+  Future<bool> _addLogin(String kind, Json person, String password) => _run(
+    'Login created for ${person['official_name']}. Share the password privately.',
+    () => _post('/v1/admin/$kind/${person['id']}/login', {'password': password}),
+  );
+
   /// Switches section, then brings the requested form into view.
   void _goTo(_Section target, _Target form) {
     setState(() => section = target);
@@ -510,7 +516,8 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
           'Add faculty and students exactly as they appear in institute records. Turn on '
           '"Also create a login account" to let someone sign in straight away. A student '
           'without one can sign up later with the same official email and link their '
-          'enrolment number. Faculty always need a login account.',
+          'enrolment number. Faculty always need a login account. For someone already '
+          'listed without one, use "Create login" in the directory.',
         ),
         KeyedSubtree(
           key: _keys[_Target.faculty],
@@ -524,7 +531,12 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
             ),
           ),
         ),
-        _Directory(title: 'Faculty directory', people: teachers, numberKey: 'employee_number'),
+        _Directory(
+          title: 'Faculty directory',
+          people: teachers,
+          numberKey: 'employee_number',
+          onCreateLogin: (p, password) => _addLogin('teachers', p, password),
+        ),
         const SizedBox(height: 16),
         KeyedSubtree(
           key: _keys[_Target.student],
@@ -541,7 +553,12 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         if (studentsError != null)
           _Note('Students could not be loaded: $studentsError')
         else
-          _Directory(title: 'Student directory', people: students, numberKey: 'enrollment_number'),
+          _Directory(
+            title: 'Student directory',
+            people: students,
+            numberKey: 'enrollment_number',
+            onCreateLogin: (p, password) => _addLogin('students', p, password),
+          ),
       ];
 
   // --- Access & assignments --------------------------------------------------
@@ -1209,15 +1226,29 @@ class _ExistingState extends State<_Existing> {
 
 /// Searchable people list with login status.
 class _Directory extends StatefulWidget {
-  const _Directory({required this.title, required this.people, required this.numberKey});
+  const _Directory({
+    required this.title,
+    required this.people,
+    required this.numberKey,
+    required this.onCreateLogin,
+  });
   final String title, numberKey;
   final List<Json> people;
+  final Future<bool> Function(Json person, String password) onCreateLogin;
   @override
   State<_Directory> createState() => _DirectoryState();
 }
 
 class _DirectoryState extends State<_Directory> {
   final _search = TextEditingController();
+
+  Future<void> _createLogin(Json person) async {
+    final password = await showDialog<String>(
+      context: context,
+      builder: (_) => _LoginDialog(person: person),
+    );
+    if (password != null) await widget.onCreateLogin(person, password);
+  }
 
   @override
   void dispose() {
@@ -1280,17 +1311,21 @@ class _DirectoryState extends State<_Directory> {
                         ),
                       ),
                       const SizedBox(width: 8),
-                      Flexible(
-                        child: Text(
-                          p['auth_user_id'] != null ? 'Login linked' : 'No login',
-                          textAlign: TextAlign.right,
-                          style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: p['auth_user_id'] != null ? _green : _grey,
+                      if (p['auth_user_id'] != null)
+                        const Flexible(
+                          child: Text(
+                            'Login linked',
+                            textAlign: TextAlign.right,
+                            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w700, color: _green),
+                          ),
+                        )
+                      else
+                        Flexible(
+                          child: TextButton(
+                            onPressed: () => _createLogin(p),
+                            child: const Text('Create login'),
                           ),
                         ),
-                      ),
                     ],
                   ),
                 ),
@@ -1299,6 +1334,64 @@ class _DirectoryState extends State<_Directory> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Asks for a temporary password for an existing record's login account.
+class _LoginDialog extends StatefulWidget {
+  const _LoginDialog({required this.person});
+  final Json person;
+  @override
+  State<_LoginDialog> createState() => _LoginDialogState();
+}
+
+class _LoginDialogState extends State<_LoginDialog> {
+  final _key = GlobalKey<FormState>();
+  final _password = TextEditingController();
+
+  @override
+  void dispose() {
+    _password.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = widget.person;
+    return AlertDialog(
+      title: Text('Create login for ${p['official_name']}'),
+      content: Form(
+        key: _key,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('They will sign in with ${p['official_email']} and this temporary password.'),
+            const SizedBox(height: 12),
+            TextFormField(
+              controller: _password,
+              obscureText: true,
+              maxLength: 128,
+              decoration: const InputDecoration(
+                labelText: 'Temporary password (min 8)',
+                helperText: 'Share it privately; never by email or chat.',
+                counterText: '',
+              ),
+              validator: (v) => (v ?? '').trim().length < 8 ? 'At least 8 characters.' : null,
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(context), child: const Text('Cancel')),
+        FilledButton(
+          onPressed: () {
+            if (_key.currentState!.validate()) Navigator.pop(context, _password.text);
+          },
+          child: const Text('Create login'),
+        ),
+      ],
     );
   }
 }

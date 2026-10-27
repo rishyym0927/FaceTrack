@@ -101,6 +101,10 @@ class IdentityCreate(Strict):
         return self
 
 
+class LoginCreate(Strict):
+    password: str = Field(min_length=8, max_length=128)
+
+
 class RoleGrant(Strict):
     auth_user_id: UUID
     role: Literal["student", "teacher", "admin"]
@@ -221,6 +225,39 @@ def install(app, engine, settings, principal, storage, auth):
         return await provision(
             request, user, institute_id, body, key, _identity_call(body, "student", auth, settings)
         )
+
+    async def add_login(kind, identity_id, body, request, user, institute_id, key):
+        """Give an existing faculty or student record a login account, then link it."""
+        table, role = {"teacher": ("teachers", "teacher"), "student": ("students", "student")}[kind]
+
+        async def call(conn):
+            row = await one(
+                conn,
+                f"SELECT official_email,auth_user_id FROM app.{table} WHERE institute_id=:i AND id=:id",
+                {"i": institute_id, "id": identity_id},
+            )
+            if not row:
+                raise APIError(404, "NOT_FOUND", "Person not found.")
+            if row["auth_user_id"]:
+                raise APIError(409, "LOGIN_EXISTS", "This person already has a login account.")
+            auth_user_id = await create_login_account(auth, settings, row["official_email"], body.password)
+            await conn.execute(_link_sql(), {"k": role, "id": str(identity_id), "a": auth_user_id})
+            await conn.execute(_role_sql(), {"a": auth_user_id, "r": role})
+            return {"id": str(identity_id), "auth_user_id": auth_user_id, "login_created": True}
+
+        return await provision(request, user, institute_id, body, key, call)
+
+    @app.post("/v1/admin/teachers/{identity_id}/login", status_code=201)
+    async def create_teacher_login(
+        identity_id: UUID, body: LoginCreate, request: Request, user: User, institute_id: Institute, key: Key
+    ):
+        return await add_login("teacher", identity_id, body, request, user, institute_id, key)
+
+    @app.post("/v1/admin/students/{identity_id}/login", status_code=201)
+    async def create_student_login(
+        identity_id: UUID, body: LoginCreate, request: Request, user: User, institute_id: Institute, key: Key
+    ):
+        return await add_login("student", identity_id, body, request, user, institute_id, key)
 
     @app.post("/v1/admin/memberships", status_code=201)
     async def grant_role(body: RoleGrant, request: Request, user: User, institute_id: Institute, key: Key):

@@ -303,7 +303,7 @@ ON CONFLICT DO NOTHING;
 
 After signing in again, the admin opens **Admin → Overview** and follows the setup checklist: semester term, subjects, sections, subject allocations, faculty, faculty assignments and students. Every step links to its form. Further admins and faculty roles are granted from **Admin → Access & assignments**; the SQL step is never needed again.
 
-Creating login accounts from the Admin tab needs `SUPABASE_SERVICE_ROLE_KEY` in `services/api/.env`. Without it, admins can still create faculty and student records, and students can sign up and link their enrolment number themselves.
+Admins can create a login when adding someone, or later with **Create login** next to anyone in the faculty or student directory who has none; the account uses the record's own official email and is linked and given its role automatically. Creating login accounts from the Admin tab needs `SUPABASE_SERVICE_ROLE_KEY` in `services/api/.env`. Without it, admins can still create faculty and student records, and students can sign up and link their enrolment number themselves.
 
 ## 6. Native macOS developer path
 

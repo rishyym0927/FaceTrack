@@ -10,7 +10,7 @@ The home screen (`lib/teacher_dashboard.dart`) shows faculty-published attendanc
 
 ## Administration
 
-Accounts with an active admin membership also see the **Admin** tab (`lib/teacher_admin.dart`). **Overview** shows a setup checklist with the next step, statistics, charts and the institute-wide attendance dashboard. **1 · Academic setup** creates semester terms, subjects, sections and subject allocations. **2 · People** adds faculty and students and lists them. **3 · Access & assignments** assigns faculty to subjects and grants roles by picking a person. The server re-checks the admin role on every write.
+Accounts with an active admin membership also see the **Admin** tab (`lib/teacher_admin.dart`). **Overview** shows a setup checklist with the next step, statistics, charts and the institute-wide attendance dashboard. **1 · Academic setup** creates semester terms, subjects, sections and subject allocations. **2 · People** adds faculty and students, lists them, and creates a login for anyone listed without one (**Create login**, using the record's own email). **3 · Access & assignments** assigns faculty to subjects and grants roles by picking a person. The server re-checks the admin role on every write.
 
 Complete host setup and configuration: [installation guide](../../docs/INSTALLATION.md).
 
