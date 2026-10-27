@@ -10,13 +10,13 @@ The upgrade does three things:
 
 Nothing is reinstalled. Nothing in Supabase is changed. No migration, seed or provisioning is run. The hosted database is already at schema `0008_admin`, which the latest code expects.
 
-It assumes the client uses **Claude Code** (or another Claude session with terminal and file access), like the [first-time Windows handoff](CLIENT_WINDOWS_HANDOFF.md). The human steps are below. The [copy-paste prompt for Claude Code](#prompt-to-copy-into-claude-code) is at the end.
+It assumes the client uses **Claude Code** (or another Claude session with terminal and file access), like the [first-time client setup](CLIENT_SETUP.md). The human steps are below. The [copy-paste prompt for Claude Code](#prompt-to-copy-into-claude-code) is at the end.
 
 > **Licence:** the InsightFace `buffalo_sc` model permission covers only this non-commercial academic experiment. The model files must never be committed, uploaded, emailed unencrypted or pasted into a chat.
 
 ## Owner checklist (Rishi, before sending)
 
-1. **Put the latest code on `main`.** The client runs `git pull` on `main`, so she only gets what is merged and pushed there. That includes the Teacher dashboard (overall, semester-wise and subject-wise attendance) and the academic terminology changes, which are on `admin-docs-upgrade` and not yet on `origin/main`, and this guide itself. The dashboard is Flutter-only: it adds no API route or migration. `origin/main` already contains `services/api/migrations/versions/0008_admin.py` and the `0008_admin` readiness check.
+1. **Put the latest code on `main`.** The client runs `git pull` on `main`, so she only gets what is merged and pushed there. That includes the faculty dashboard (overall, semester-wise and subject-wise attendance), the guided Admin tab, the academic terminology changes and this guide, which are on `admin-docs-upgrade` and not yet on `origin/main`. These are Flutter-only: they add no API route or migration. `origin/main` already contains `services/api/migrations/versions/0008_admin.py` and the `0008_admin` readiness check.
 2. **Build the encrypted archive** with this structure. The ML part is required. The worker `.env` is optional (see step 4).
 
    ```text
@@ -212,7 +212,7 @@ cd ~/FaceTrack/apps/student
 
 - Open Teacher at `http://localhost:5300` and Student at `http://localhost:5301`.
 - The client types her own demo passwords directly into the apps. Never paste them into a chat.
-- Check that the Teacher and Student class lists load, and that the Teacher dashboard shows overall, semester-wise and subject-wise attendance. Use read-only navigation only. Claude must not create sessions, record faces, accept consent, approve enrolments, publish attendance or rotate join codes for her.
+- Check that the Teacher and Student subject lists load, and that the faculty dashboard shows overall, semester-wise and subject-wise attendance. Use read-only navigation only. Claude must not create sessions, record faces, accept consent, approve enrolments, publish attendance or rotate join codes for her.
 
 ### 10. Rollback (only if the upgrade fails)
 
@@ -288,7 +288,7 @@ H. Verify ML without any face data (on Windows add `-f compose.windows.yaml` aft
 
 I. Functional check
 - Open Teacher at http://localhost:5300 and Student at http://localhost:5301. I will type my demo passwords into the apps myself; never ask me to paste them here.
-- Confirm the Teacher and Student class lists load and the Teacher dashboard (overall, semester-wise and subject-wise attendance) opens, using read-only navigation only.
+- Confirm the Teacher and Student subject lists load and the faculty dashboard (overall, semester-wise and subject-wise attendance) opens, using read-only navigation only.
 
 J. If something fails
 - Report the failing step, command and error text (without secrets) and stop. Do not roll back unless I ask.
@@ -303,5 +303,5 @@ Completion report: a short table with Passed/Failed for backup, code update (rec
 
 - [Installation and configuration reference](INSTALLATION.md)
 - [Windows checklist](WINDOWS_SETUP.md)
-- [First-time Windows handoff](CLIENT_WINDOWS_HANDOFF.md)
+- [First-time client setup (Windows and macOS)](CLIENT_SETUP.md)
 - [Model-test console only](MODEL_TEST_CONSOLE.md)

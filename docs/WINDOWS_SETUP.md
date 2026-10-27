@@ -76,7 +76,7 @@ Expected readiness:
 
 Expected output: `ready`.
 
-Daily backend-only commands use the root launcher:
+Daily backend-only commands use the root launcher (`.\run.ps1 build` rebuilds the images after pulling new code):
 
 ```powershell
 .\run.ps1 up
@@ -128,4 +128,4 @@ See [MODEL_TEST_CONSOLE.md](MODEL_TEST_CONSOLE.md).
 - **Camera denied:** allow camera access for `http://localhost:5300` or `http://localhost:5301` in the browser settings.
 - **Port conflict:** check ports 8000, 5300 and 5301 before stopping any unrelated process.
 
-Use [CLIENT_WINDOWS_HANDOFF.md](CLIENT_WINDOWS_HANDOFF.md) when a nontechnical user wants an LLM with terminal access to perform these steps.
+Use [CLIENT_SETUP.md](CLIENT_SETUP.md) when a nontechnical user wants Claude Code to perform these steps, and [UPGRADE_EXISTING_INSTALL.md](UPGRADE_EXISTING_INSTALL.md) to update an existing install.

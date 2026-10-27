@@ -87,7 +87,7 @@ Required automated checks cover degenerate landmarks, coordinate mapping, cross-
 ## 7. Delivery order
 
 1. Preserve and verify the 16-file production freeze.
-2. Keep the locally and hosted-verified migration 0007 evidence/query contract covered by regression tests.
+2. Keep the evidence/attendance-query contract (introduced in migration 0007; current head `0008_admin`) covered by regression tests.
 3. Run the Model Test Console with real volunteers (client and developer rehearsal) and record the result in `PROGRESS.md`.
 4. Complete and safely accept the Student and Teacher attendance-query interfaces on authenticated web/Android clients.
 5. Freeze dataset indexes and hashes after the licensed datasets are obtained.
@@ -117,6 +117,17 @@ Required automated checks cover degenerate landmarks, coordinate mapping, cross-
 
 Interpretation: the quality gate, not detection or matching, limits recall on medium and hard scenes, and the safe lever for a demo is capture quality (faces large in frame, front lighting) plus multiple clips per session. Loosening the gate or thresholds would change the frozen profile and must be a separately benchmarked candidate.
 
-## 10. Client-run real testing
+## 10. Steady walk-around benchmark (27 October)
+
+A second synthetic benchmark models the recommended capture: the faculty member walks up to each student and records steadily. It uses a class of 70 cooperative DigiFace students plus 15 absent roster members and 3 intruders, the unchanged frozen model, 210 frames at 500 ms, faces capped at 180 px (the source renders are 112 px) and 10 runs per row:
+
+| Time each student is in view | Recognised (mean, range) | False presence, intruder matches, confusions |
+|---|---|---|
+| About 4 s in total (`--dwell 4`) | 91.4% (84–97%) | 0 |
+| About 4 s on each side (`--dwell 8`) | 96.6% (93–99%) | 0 |
+
+Command: `services/worker/.venv/bin/python -m experiments.ml_accuracy.run_phone_walk --zip DIGIFACE.zip --out OUT --present 70 --frames 210 --steady --face-cap 180 --dwell 4`. Recall depends mainly on how long each student stays in view, because a suggestion needs two matched frames at least 0.5 s apart. This is a **synthetic benchmark**, not classroom accuracy; the product currently samples 12 frames per clip, so a whole class needs several short clips.
+
+## 11. Client-run real testing
 
 The Model Test Console (`docs/MODEL_TEST_CONSOLE.md`) lets a nontechnical person enrol consenting volunteers and score six scenarios on the frozen model, producing a readable report. It is not a classroom-accuracy, liveness or capacity test.

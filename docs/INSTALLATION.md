@@ -1,6 +1,6 @@
 # FaceTrack installation and setup
 
-This is the canonical setup guide for the current repository. It describes the software that is actually implemented as of **26 October 2026**.
+This is the canonical setup guide for the current repository. It describes the software that is actually implemented as of **27 October 2026** (migration head `0008_admin`).
 
 FaceTrack has three different run modes. Choose one before installing anything:
 
@@ -156,7 +156,18 @@ On Windows, the one-command equivalent is:
 
 Use `-Browser edge` if Chrome is unavailable. Enter demo passwords only in the apps. Public registration and password recovery are not configured.
 
-Stop the stack with `docker compose down`, `make down`, `./run.ps1 down`, or `scripts\windows\stop-demo.ps1` as appropriate. Close the two Flutter terminals separately.
+Stop the stack with `docker compose down`, `make down`, `./run.ps1 down`, or `scripts\windows\stop-demo.ps1` as appropriate. Close the two Flutter terminals separately. Never add `-v` to `down`: it deletes the Model Test Console's volunteer data volume.
+
+The same short verbs work on every host: `make <verb>` on macOS/Linux and `./run.ps1 <verb>` on Windows.
+
+| Verb | What it does |
+|---|---|
+| `up` / `down` | Start / stop redis, api, worker and agent |
+| `build` | Rebuild the API and worker images (after pulling new code) |
+| `restart` | `down` then `up` |
+| `logs` / `ps` | Follow logs / show service status |
+| `health` | Print API readiness |
+| `console` / `console-down` | Start / stop the Model Test Console on port 8010 |
 
 ## 5. First-time owner setup with a new Supabase project
 
@@ -219,7 +230,7 @@ Apply the schema:
 docker compose run --rm api /opt/venv/bin/alembic upgrade head
 ```
 
-Expected head: `0007_attendance_queries`, with 37 forced-RLS business tables.
+Expected head: `0008_admin`, with 37 forced-RLS business tables.
 
 ### 5.3 Create controlled Auth accounts and seed demo academics
 
@@ -279,6 +290,20 @@ Edit `.local/flutter/development.json`:
 These four values are public application configuration. Never put the database password, Supabase secret key, worker token or template keys in this file.
 
 Start the product using section 4. After the API is ready, run the hosted smoke check from a trusted operator machine as described in the API guide; it intentionally writes to seeded development data.
+
+### 5.6 Make the first admin and set up the institute
+
+Admins use the **Admin** tab in the Teacher app. Nobody is an admin by default. The operator grants the first admin once, in the Supabase SQL editor, using that person's Auth user ID and the institute ID from `demo-ids.json`:
+
+```sql
+INSERT INTO app.memberships(institute_id, auth_user_id, role, status)
+VALUES ('INSTITUTE_UUID', 'AUTH_USER_UUID', 'admin', 'active')
+ON CONFLICT DO NOTHING;
+```
+
+After signing in again, the admin opens **Admin → Overview** and follows the setup checklist: semester term, subjects, sections, subject allocations, faculty, faculty assignments and students. Every step links to its form. Further admins and faculty roles are granted from **Admin → Access & assignments**; the SQL step is never needed again.
+
+Creating login accounts from the Admin tab needs `SUPABASE_SERVICE_ROLE_KEY` in `services/api/.env`. Without it, admins can still create faculty and student records, and students can sign up and link their enrolment number themselves.
 
 ## 6. Native macOS developer path
 
@@ -379,9 +404,10 @@ On Windows, replace `../../scripts/flutter` with `flutter`.
 | `ENROLLMENT_BUCKET` | Optional override | Defaults to `facetrack-enrollment-dev` |
 | `DOCUMENTS_BUCKET` | Optional override | Defaults to `facetrack-documents-dev` |
 | `CORS_ORIGINS` | Yes for web | Exact JSON list; defaults to ports 5300 and 5301 |
+| `SUPABASE_SERVICE_ROLE_KEY` | Optional | Lets admins create login accounts from the Admin tab; blank disables only that option |
 | `ENVIRONMENT` | Yes | Development label |
 | `RESEND_API_KEY`, `RESEND_FROM` | Optional | Faculty report email; blank disables delivery |
-| `FACULTY_REPORT_URL` | Email only | Teacher application base URL |
+| `FACULTY_REPORT_URL` | Email only | Teacher (faculty) application base URL |
 
 ### `services/worker/.env` — private, worker only
 
@@ -405,7 +431,7 @@ Only `API_BASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `DEFAULT_INS
 
 ### API returns `NOT_READY`
 
-Run `docker compose logs --tail 100 api`. Confirm migration head `0007_attendance_queries`, the runtime URL uses `facetrack_api` rather than the owner, 37 tables have forced RLS, and the publishable key is configured.
+Run `docker compose logs --tail 100 api`. Confirm migration head `0008_admin`, the runtime URL uses `facetrack_api` rather than the owner, 37 tables have forced RLS, and the publishable key is configured.
 
 ### Worker repeatedly reports unauthorized or no jobs complete
 
@@ -427,9 +453,13 @@ The app was started without `--dart-define-from-file`, or `.local/flutter/develo
 
 Reconnect USB, unlock the phone and rerun the platform `android-connect` helper. Verify `adb devices` shows `device`, then reopen the app.
 
-### Login works but classes say access unavailable
+### Login works but subjects say access unavailable
 
-Use the correct controlled role account. The API derives roles from approved memberships and profiles; selecting the Teacher app cannot grant Teacher access.
+Use the correct role account. The API derives roles from approved memberships and profiles; opening the Teacher app cannot grant faculty access. An admin grants roles in **Admin → Access & assignments** and assigns faculty to subjects there.
+
+### The Admin tab is missing
+
+Only accounts with an active `admin` membership see it. See section 5.6.
 
 ### Camera does not open
 
@@ -473,4 +503,4 @@ Before giving the project to another user or LLM:
 5. Never send `.env` contents, model files, recordings, embeddings or templates through chat.
 6. Ask them to report only command names, error messages and service status.
 
-For a nontechnical Windows recipient, use [the prepared handoff prompt](CLIENT_WINDOWS_HANDOFF.md).
+For a nontechnical recipient on Windows or macOS, use [the client setup prompt](CLIENT_SETUP.md). To bring an older install up to date, use [the upgrade guide](UPGRADE_EXISTING_INSTALL.md).

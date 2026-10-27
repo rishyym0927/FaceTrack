@@ -28,15 +28,15 @@ uv sync --locked --python 3.11
 .venv\Scripts\python -m pytest tests -q
 ```
 
-Expected locally on 26 October: root **42 passing, one expected failure** documenting a frozen alignment limitation; worker **35 passing** (including the Model Test Console). Synthetic DigiFace benchmark results are described in `docs/ML_ACCURACY_AND_ATTENDANCE_PLAN.md` section 9; real-volunteer testing uses `docs/MODEL_TEST_CONSOLE.md`. A fresh clone may report a different count after new tests land. If a command fails, copy the **error code and command**, not private `.env` contents, into your team issue. `uv sync` installs into each directory's own `.venv`; do not use the system Python or change the root `uv.lock` for worker dependencies.
+Expected locally on 27 October: root **42 passing, one expected failure** documenting a frozen alignment limitation; worker **35 passing** (including the Model Test Console). Synthetic DigiFace benchmark results are described in `docs/ML_ACCURACY_AND_ATTENDANCE_PLAN.md` sections 9 and 10; real-volunteer testing uses `docs/MODEL_TEST_CONSOLE.md`. A fresh clone may report a different count after new tests land. If a command fails, copy the **error code and command**, not private `.env` contents, into your team issue. `uv sync` installs into each directory's own `.venv`; do not use the system Python or change the root `uv.lock` for worker dependencies.
 
 ## 2. Understand the ML flow
 
-`video → sample frames → detect faces → reject poor crops → align → 512D embeddings → compare only with the session roster → require separated matching frames → teacher reviews suggestion`.
+`video → sample frames → detect faces → reject poor crops → align → 512D embeddings → compare only with the session roster → require separated matching frames → faculty reviews suggestion`.
 
 The code is in `services/worker/src/facetrack_ml`. The worker bridge is in `services/worker/src/facetrack_worker`. Unit tests are in `tests` and `services/worker/tests`. Read `MASTER_DESIGN.md` for requirements, `PROGRESS.md` for the actual checkpoint and `docs/ML_SPIKE.md` for the detailed experiment guide.
 
-No training is necessary for this demo: enrolment stores encrypted templates from a pretrained model. A matching result is **not** proof of identity, liveness or attendance. Unknown or missed people remain unassessed until a teacher decides.
+No training is necessary for this demo: enrolment stores encrypted templates from a pretrained model. A matching result is **not** proof of identity, liveness or attendance. Unknown or missed people remain unassessed until the faculty member decides.
 
 ## 3. Authorized demo operator only
 

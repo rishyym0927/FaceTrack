@@ -16,7 +16,7 @@ Check a milestone only after its required outcomes are verified. Implemented cod
 
 - [x] **2. Backend foundation**
 
-  FastAPI, hosted Supabase Auth/PostgreSQL, restricted runtime role, 37 forced-RLS tables at migration 0007, approved identities, academics, join codes, requests/approval, audit, idempotency and rate limits are implemented and verified.
+  FastAPI, hosted Supabase Auth/PostgreSQL, restricted runtime role, 37 forced-RLS tables (migration head `0008_admin`), approved identities, academics, join codes, requests/approval, audit, idempotency and rate limits are implemented and verified.
 
 - [x] **3A. Flutter account and class flows**
 
@@ -37,6 +37,10 @@ Check a milestone only after its required outcomes are verified. Implemented cod
 - [ ] **6. Timetable and reports**
 
   One real CSV timetable occurrence and final CSV/PDF downloads are verified. Keep email delivery open until a permitted Resend sender and recipient test exist.
+
+- [ ] **6A. Institute terminology, faculty dashboard and administration**
+
+  Institute wording, the faculty attendance dashboard and the guided Admin tab are implemented and widget-tested. Close after an authenticated faculty and admin walkthrough on web and on the phone.
 
 - [ ] **7. Integration and presentation readiness**
 

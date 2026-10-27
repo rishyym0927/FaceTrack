@@ -1,32 +1,30 @@
 # FaceTrack — Cost Structure and Reliability by Scenario
 
-Prepared 25 October 2026. This replaces the earlier cost table in `CLIENT_PROJECT_DOCUMENT.md` §4. Architecture authority remains `MASTER_DESIGN.md`.
+Prepared 25 October 2026. The summary in `CLIENT_PROJECT_DOCUMENT.md` §4 is drawn from this document. Architecture authority remains `MASTER_DESIGN.md`.
 
 This document is a dated planning estimate. Current executable setup and verified status live in [`INSTALLATION.md`](INSTALLATION.md) and [`PROGRESS.md`](../PROGRESS.md).
 
 **Read this first.** Prices below were read from provider pages on 25 October 2026 unless marked *derived* (calculated from a verified price) or *estimate* (my assumption, not a quote). Availability and recognition figures are **planning targets, not measurements and not SLAs**. FaceTrack has no institute-scale benchmark yet.
 
-Exchange rates used: **₹94.95 per US$** (banklive.net, 25 Oct 2026) and **US$1.1202 per €** (EUR/USD close, 23 Oct 2026). The previous document used ₹84/$, which understated every rupee figure by about 13%.
+Exchange rates used: **₹94.95 per US$** (banklive.net, 25 Oct 2026) and **US$1.1202 per €** (EUR/USD close, 23 Oct 2026).
 
 ---
 
-## 1. What was wrong with the old cost model
+## 1. Key cost findings
 
-| Old assumption | Finding | Effect |
-|---|---|---|
-| "AI workers: CPU/GPU, $75/mo", upgrade path "expands to GPU" | The measured worker pipeline for a 12-frame clip took **356 ms** on the Mac CPU (PROGRESS.md). Recognition is exact matching against 40–60 enrolled students. Nothing in the pipeline needs a GPU. | GPU line removed. 7,200 clips/month at an assumed 10 s each is about **20 CPU-hours/month**. |
-| Hetzner/DigitalOcean 2 vCPU VPS at "$5–6" | Hetzner raised prices on 1 Apr and 15 Jun 2026. The cheap CX/CAX lines are listed as unavailable to order; the orderable 2 vCPU/4 GB CPX22 is **€19.99 (≈$22.39)**. Servers are in the EU, not India. | Cheaper and in-country: AWS Mumbai t4g.small is **$0.0112/h (≈$8.18/mo)**. |
-| Separate API host ($35) + Redis ($10) + VPS | The API, Redis and Celery worker already run together in the Windows compose profile. Render's smallest 1-CPU/2 GB service is $25 and its managed Redis is $10–$20. | One VM runs all three. Redis is self-hosted. |
-| "Maintenance & Operations $150/mo" inside infrastructure | This is people time, not infrastructure. | Moved to a separate, institute-decided support line. |
-| "Operational services $45" (Sentry/Cloudflare) | Cloudflare DNS/SSL and Sentry both have free plans that suit this scale (plan limits not re-verified here). | $0 until limits are hit. |
-| Free Supabase for pilot, "1 GB storage" | Free is 500 MB database, 1 GB storage, **5 GB egress**, **no backups**, and **projects pause after 1 week of inactivity**. | See the egress calculation in §3. A free project can also pause over a holiday week. |
-| Model weights treated as free to deploy | `buffalo_sc` / `w600k_mbf` / SCRFD-500M are published for **non-commercial research only**. InsightFace offers commercial licences for these models but publishes no prices. | **Unpriced licence risk.** Not in any total below. |
+- The measured worker pipeline for a 12-frame clip took **356 ms** on the Mac CPU (PROGRESS.md). Recognition is exact matching against 40–60 enrolled students. Nothing in the pipeline needs a GPU. **Effect:** GPU line removed. 7,200 clips/month at an assumed 10 s each is about **20 CPU-hours/month**.
+- Hetzner raised prices on 1 Apr and 15 Jun 2026. The cheap CX/CAX lines are listed as unavailable to order; the orderable 2 vCPU/4 GB CPX22 is **€19.99 (≈$22.39)**. Servers are in the EU, not India. **Effect:** Cheaper and in-country: AWS Mumbai t4g.small is **$0.0112/h (≈$8.18/mo)**.
+- The API, Redis and Celery worker already run together in the Windows compose profile. Render's smallest 1-CPU/2 GB service is $25 and its managed Redis is $10–$20. **Effect:** One VM runs all three. Redis is self-hosted.
+- Maintenance and operations staff time is people time, not infrastructure. **Effect:** Listed as a separate, institute-decided support line.
+- Cloudflare DNS/SSL and Sentry both have free plans that suit this scale (plan limits not re-verified here). **Effect:** $0 until limits are hit.
+- Free Supabase is 500 MB database, 1 GB storage, **5 GB egress**, **no backups**, and **projects pause after 1 week of inactivity**. **Effect:** See the egress calculation in §3. A free project can also pause over a holiday week.
+- `buffalo_sc` / `w600k_mbf` / SCRFD-500M are published for **non-commercial research only**. InsightFace offers commercial licences for these models but publishes no prices. **Effect:** **Unpriced licence risk.** Not in any total below.
 
 ---
 
 ## 2. The workload that drives cost
 
-Baseline is the previous document's mid-sized college: 3,000 students, 60 rooms, 360 sessions per day, 20 teaching days, so **7,200 clips per month**.
+Baseline is a mid-sized college: 3,000 students, 60 rooms, 360 sessions per day, 20 teaching days, so **7,200 clips per month**.
 
 Cost drivers, in order:
 
@@ -75,7 +73,7 @@ Monthly USD with INR in brackets (₹94.95/$). Totals are infrastructure only.
 
 ### S3 — Mid-sized college baseline, 3,000 students, 360 sessions/day
 - **Stack:** Supabase Pro + t4g.medium (API + Redis) + t4g.large worker (2 slots; $32.70 *derived*) + about $5 disk/snapshots (*estimate*).
-- **Cost:** **≈ $79 (₹7,500)** versus $355 (₹33,700 at today's rate) in the old table. Egress is 70–105 GB, within the 250 GB included.
+- **Cost:** **≈ $79 (₹7,500)**. Egress is 70–105 GB, within the 250 GB included.
 - **Burst:** 60 simultaneous clips clear in about 90 s (3 s/clip) to 300 s (10 s/clip) on 2 slots. Both figures are untested; the benchmark in §6 decides whether 4 slots are needed.
 - **Availability target (estimate):** 99–99.5% (about 3.7–7 h/month).
 - **With high availability:** add a second API node, a second worker and a load balancer, plus tested failover. **≈ $130 (₹12,300)** (*estimate*; load-balancer price not verified). Target 99.9% (about 44 min/month) **only after a failover test passes**.
@@ -83,7 +81,7 @@ Monthly USD with INR in brackets (₹94.95/$). Totals are infrastructure only.
 ### S4 — Large university, 10,000–20,000 students, up to 2,400 sessions/day
 - **Stack:** Supabase Pro with a Small compute add-on ($15, verified; larger sizes not verified) + t4g.large API node + two t4g.xlarge workers (8 vCPU in total; $65.41 each *derived*) + egress overage.
 - **Egress:** 48,000 clips × 10–15 MB = 469–703 GB per month. Overage beyond 250 GB is $0.09/GB, so **≈ $20–$41**.
-- **Cost:** **≈ $220–$290 (₹20,900–₹27,500)** versus $780 in the old table.
+- **Cost:** **≈ $220–$290 (₹20,900–₹27,500)**.
 - **Availability:** needs the HA design from S3 plus load testing at 20 simultaneous classes, which `MASTER_DESIGN.md` makes the institute gate.
 
 | Scenario | Students | Monthly (USD) | Monthly (INR) | Availability target | Recognition evidence available |
@@ -136,7 +134,7 @@ A GPU does not improve accuracy by itself. It only makes sense for continuous ro
 2. **Data location.** AWS Mumbai keeps video in India. Hetzner's orderable regions are in the EU. Indian data-protection applicability needs institute review (as already noted in `MASTER_DESIGN.md`).
 3. **Supabase plan.** Move to Pro before real enrolment: free egress cannot cover it and has no backups.
 4. **Clip size.** Measure real class and enrolment clip sizes on the Samsung phone and web, then recompute egress.
-5. **Support line.** Decide whether the institute funds the maintenance and security-review time (previously $150/mo, not infrastructure).
+5. **Support line.** Decide whether the institute funds the maintenance and security-review time (not infrastructure).
 
 ## 6. Measurements that would replace estimates
 

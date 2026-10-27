@@ -48,7 +48,7 @@ make console-down                # stop; test data remains until deleted in the 
 For the native verified-Mac path, first install `services/worker/.venv` with its locked Python 3.11 environment, then use `scripts/test-console` instead of Docker.
 
 For a Windows client, add these to the encrypted private archive described in
-`CLIENT_WINDOWS_HANDOFF.md`, in addition to the existing model and profile files:
+[`CLIENT_SETUP.md`](CLIENT_SETUP.md), in addition to the existing model and profile files:
 
 ```text
 .local/console-web/              # output of scripts/build-console

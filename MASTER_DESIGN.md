@@ -1,6 +1,6 @@
 # FaceTrack — Development Master Design
 
-**Version 2.2 · 26 October 2026 · Asia/Kolkata**
+**Version 2.3 · 27 October 2026 · Asia/Kolkata**
 
 **Goal:** a stable, functional demonstration by **28 October 2026**, followed by a supervised institute pilot. This document is the active implementation specification. Production readiness and measured performance remain release gates, not claims about existing software.
 
@@ -127,7 +127,7 @@ packages/app_core/             auth, API client, errors, theme
 packages/domain_models/        typed DTOs shared by apps
 packages/capture/              Android/web camera, guidance, playback and TUS upload
 services/api/app/              FastAPI auth, academics, biometrics, attendance and documents
-services/api/migrations/       Alembic 0001–0007 and immutable SQL snapshots
+services/api/migrations/       Alembic 0001–0008 and immutable SQL snapshots
 services/api/tools/            local DB, Supabase, seed, Storage and smoke utilities
 services/worker/src/facetrack_worker/
   agent.py                     claim/heartbeat/dispatch and reconciliation loop
@@ -152,7 +152,7 @@ Generated OpenAPI describes implemented routes only; future routes below are con
 
 ### Phase 3A: approved Flutter implementation specification
 
-Student and teacher are separate Flutter applications, each delivered for Android and web. Administration is a later web-only interface. Controlled-account login, identity linkage, class requests, faculty class creation, join codes, approval, biometric enrolment, session review, timetable import and report screens are implemented in source. Their real-device and classroom acceptance is tracked separately in PROGRESS; public registration and recovery follow later.
+Student and teacher are separate Flutter applications, each delivered for Android and web. Administration is an **Admin** tab inside the Teacher app (web and Android), shown only to accounts with an active admin membership. Controlled-account login, identity linkage, class requests, faculty class creation, join codes, approval, biometric enrolment, session review, timetable import and report screens are implemented in source. Their real-device and classroom acceptance is tracked separately in PROGRESS; public registration and recovery follow later.
 
 Use shared `app_core` (auth, API client, adaptive theme/controls) and `domain_models` packages with path dependencies; retain role-specific screens in each application. Riverpod, go_router, Dio and stable supabase_flutter 2.18.3 are fixed. Persist Android sessions in secure storage; web uses SDK-compatible browser persistence with app-specific storage keys. Sessions/requests/caches are invalidated on logout/account change; JWT metadata cannot grant roles. After auth restoration fetch `/v1/me`, derive profile/membership access, and select only an eligible institute. Unlinked students claim against the public configured demo institute ID; there is no public institute directory.
 
@@ -203,7 +203,7 @@ Demo bootstrap uses controlled, already-confirmed Supabase accounts. An owner-on
 
 ### Feature tables and staged implementation
 
-The nine biometric/media/model/job/worker tables below are implemented in migrations 0003/0004. Migration 0005 implements six session, roster, capture, evidence, attendance and publication tables. Migration 0006 implements seven room, timetable and report/delivery tables. Migration 0007 adds evidence-coded absence proposals and the tenant-scoped attendance-dispute table. All migrations through `0007_attendance_queries` are applied to the development database: **37 business tables with forced RLS**. Schema state does not itself verify real classroom acceptance.
+The nine biometric/media/model/job/worker tables below are implemented in migrations 0003/0004. Migration 0005 implements six session, roster, capture, evidence, attendance and publication tables. Migration 0006 implements seven room, timetable and report/delivery tables. Migration 0007 adds evidence-coded absence proposals and the tenant-scoped attendance-dispute table. Migration 0008 adds no tables: it adds the `app.is_admin()` predicate, admin write policies and `app.admin_*` SECURITY DEFINER provisioning functions. All migrations through `0008_admin` are applied to the development database: **37 business tables with forced RLS**. Schema state does not itself verify real classroom acceptance.
 
 | Table | Required business fields | Integrity |
 |---|---|---|
@@ -431,7 +431,7 @@ Separate ML tasks from CPU report/email/maintenance tasks so rendering cannot bl
 
 ```csv
 entry_key,term_code,course_code,branch,semester,section,teacher_email,room_code,weekday,start_time,end_time,effective_from,effective_until,timezone
-CSE-A-ML-MON-01,2026-ODD,CS401,CSE,5,A,faculty@example.edu,LAB-1,MON,09:00,10:00,2026-10-26,2026-12-18,Asia/Kolkata
+BCS201-CSE1-MON-01,2026-ODD,BCS 201,CSE,3,CSE1,faculty@example.edu,E-311,MON,09:00,10:00,2026-08-03,2026-12-18,Asia/Kolkata
 ```
 
 Resolve offering by term + course + branch + semester + section; section alone is ambiguous across branches. Resolve teacher_email to an approved stable teacher_id. Require stable entry_key, existing offering/assigned teacher/room, valid term dates and ordered local times. Weekday MON–SUN; no overnight periods in v1. Resolve the designated teacher even if offering has multiple teachers. Reject unknown/ambiguous values, duplicates and teacher/room overlaps; adjacent intervals are allowed.
@@ -517,7 +517,7 @@ Flutter config is exactly `API_BASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_
 
 ### Minimum operations
 
-Health: `/health/live` checks only the process. `/health/ready` verifies restricted DB ownership, 37 forced-RLS tables, migration 0007 and publishable-key configuration. It does not test a real login, Storage, Redis or worker. Public responses reveal no secrets. Lack of ML capacity must not block manual attendance browsing.
+Health: `/health/live` checks only the process. `/health/ready` verifies restricted DB ownership, 37 forced-RLS tables, migration `0008_admin` and publishable-key configuration. It does not test a real login, Storage, Redis or worker. Public responses reveal no secrets. Lack of ML capacity must not block manual attendance browsing.
 
 Log request IDs, opaque job/session IDs, stage, duration and error code, never media, vectors, signed grants or full request bodies. Current structured API logs are local; Sentry is not integrated. A future monitoring deployment must scrub PII and track API errors, oldest queued job, worker last-seen, failures, processing latency, correction rate, deletion backlog and provider quotas.
 
@@ -618,7 +618,7 @@ Primary references supporting the retained choices and constraints:
 
 ### Deferred, not required before the demo
 
-Do not implement now: arbitrary PDF/OCR timetable parsing, ERP connectors, automated camera fleet/MQTT, continuous streaming, attendance-duration inference, push inbox/bulk alerts, live chat, dispute evidence uploads, full administration UI, institute-wide face search, FAISS/vector database, Kubernetes, microservice splitting, multi-region infrastructure, complex autoscaling, and remote certified liveness.
+Do not implement now: arbitrary PDF/OCR timetable parsing, ERP connectors, automated camera fleet/MQTT, continuous streaming, attendance-duration inference, push inbox/bulk alerts, live chat, dispute evidence uploads, self-service institute onboarding beyond the Admin tab, institute-wide face search, FAISS/vector database, Kubernetes, microservice splitting, multi-region infrastructure, complex autoscaling, and remote certified liveness.
 
 Keep future timetable identity, session boundaries, job durability, model/version metadata, tenant relationships, audit and privacy controls now. Those are the foundations that avoid an architectural rewrite. Expand only when an actual requirement or benchmark justifies it.
 
@@ -652,10 +652,18 @@ Build sequence: docs → small UI polish/targeted acceptance → sessions/captur
 
 ### Implemented attendance, timetable and reporting contract — 23 October 2026
 
-Development schema head is 0007 with 37 forced-RLS business tables after local and hosted migration verification. Opening a manually scheduled session freezes approved class members and the current active, consented template set/model/profile references. Ineligible learners stay on the roster for manual review. The classroom capture uses the same private 25 MiB MP4/WebM bucket and signed resumable upload pattern as enrolment. The local worker decrypts only the job's eligible frozen roster vectors in memory and runs the unchanged pinned recognition pipeline. Corroborated matches become `proposed_present`. After successful processing with at least two usable observations, eligible unmatched students may become `proposed_absent`, displayed as **Not recognized**; limited coverage, unavailable templates and processing failures remain `unassessed`. Every proposal is unresolved until a teacher explicitly converts it to a final decision. The result is checked against consent, template epochs, session state and lease before evidence is committed. Teacher decisions override proposals, with explicit publication and reasoned immutable corrections. Student history reads only the latest published revision of their own rows. A percentage excludes unassessed, excused and unpublished sessions; show no percentage for a zero assessed denominator.
+Development schema head is `0008_admin` with 37 forced-RLS business tables after local and hosted migration verification. Opening a manually scheduled session freezes approved class members and the current active, consented template set/model/profile references. Ineligible learners stay on the roster for manual review. The classroom capture uses the same private 25 MiB MP4/WebM bucket and signed resumable upload pattern as enrolment. The local worker decrypts only the job's eligible frozen roster vectors in memory and runs the unchanged pinned recognition pipeline. Corroborated matches become `proposed_present`. After successful processing with at least two usable observations, eligible unmatched students may become `proposed_absent`, displayed as **Not recognized**; limited coverage, unavailable templates and processing failures remain `unassessed`. Every proposal is unresolved until a teacher explicitly converts it to a final decision. The result is checked against consent, template epochs, session state and lease before evidence is committed. Teacher decisions override proposals, with explicit publication and reasoned immutable corrections. Student history reads only the latest published revision of their own rows. A percentage excludes unassessed, excused and unpublished sessions; show no percentage for a zero assessed denominator.
 
 Students may open one attendance query against their own latest published Absent row and publication revision. The query contains text only. Assigned teachers see offering-scoped open queries and resolve each with a reason. Acceptance atomically changes that student to Present and creates a new immutable publication plus corrected report; rejection preserves attendance. Optimistic versions, idempotency, tenant authorization and audit events apply. Push/email notification, attachments and geolocation are deferred.
 
 Teacher Classes → Sessions supports manual create/open/close/cancel, capture/review/publication and a compact timetable import. The exact UTF-8 CSV header is `entry_key,term_code,course_code,branch,semester,section,teacher_email,room_code,weekday,start_time,end_time,effective_from,effective_until,timezone`. Use 1–500 rows, ≤1 MiB, MON–SUN uppercase weekday, 24-hour local times, ISO dates and Asia/Kolkata timezone. Entry keys remain stable across replacement imports. An assigned teacher creates a room code first, uploads to the private document bucket, reviews a validated preview and confirms a materialization date in the term. Confirmation creates or updates sessions **for that selected date only**; the app defaults to the next date matching a CSV weekday/effective range, and the API rejects a date with no matching entry. Weekly series persist for later materialization, but automatic generation/opening/closing remain later work. The term revision and preview hash protect stale confirmation; overlapping teacher, room and offering times are rejected even across terms. Repeated confirmation has one effect. Opened/published sessions retain their historical assignment. Future timetable exceptions remain later work.
 
 Closing creates a draft report job; each immutable publication revision creates a final report job from its snapshot. The immutable snapshot carries roster IDs and names; generated CSV/PDF show institute, course, group, term, session, enrolment numbers/names, status, notes, totals, policy/revision and incomplete marker. The worker uses pandas/ReportLab, sanitizes CSV formula-leading strings and leading-zero enrolment IDs, and produces private CSV/PDF artifacts in a separate 25 MiB bucket. Report completion commits generated assets and closes unused pre-render reservation metadata in the same transaction; failed attempts remain bounded by job reconciliation and expiry cleanup. An assigned teacher gets 60-second download grants; failed generation can be retried without changing its snapshot. Current PDF font coverage is verified for the bundled Latin sample; wider institute-script coverage is a release check. Optional Resend delivery sends a protected Teacher-app report link only to the session faculty's verified official email. Provider acceptance is distinct from inbox delivery. Resend is not configured for the demo yet, so the UI keeps downloads available and explains that email is unavailable. The worker remains a single local CPU slot across job kinds for this cost-limited demo; concurrent institute-scale throughput remains unproven.
+
+### Institute terminology, faculty dashboard and administration — 27 October 2026
+
+User-visible wording follows the institute timetable: an offering is a **Subject** (shown as "BCS 201 · CSE · 3rd Semester · Section CSE1"), a class group is a **Section**, a term is a **Semester term** ("2026-ODD" reads "Odd Semester 2026"), and a teacher is **Faculty** in visible text. Routes, API paths, JSON keys, role values (`teacher`) and the timetable CSV columns are unchanged. Theory/Lab and lab batches (A1, B1) are not modelled yet.
+
+The faculty home shows an attendance dashboard computed in the app from `/v1/offerings` and each subject's `/v1/offerings/{id}/attendance-summary`, with bounded concurrency: overall attendance weighted across assessed classes (unassessed and excused never count as absence), semester filter and semester-wise bars, sortable subject-wise statistics, a distribution chart, a below-75% attention list and a semester CSV export. A subject that fails to load is reported without breaking the rest. No new endpoint exists for it.
+
+The Admin tab is a client over the existing `/v1/admin/*` endpoints: an Overview with a setup checklist (term → subjects → sections → allocations → faculty → assignments → students) that names the next step and jumps to its form, statistics, login-account and by-semester charts, and the institute-wide attendance dashboard; Academic setup, People and Access & assignments sections with plain guidance, institute examples, lists of existing records and searchable directories. Roles are granted by picking a person who has a login, with the raw account ID kept as an advanced option. The first admin is still granted once by the operator in SQL; every admin write is re-checked by an `app.admin_*` database function.

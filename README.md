@@ -1,6 +1,6 @@
 # FaceTrack
 
-FaceTrack is a human-reviewed, face-assisted attendance system with separate Student and Teacher Flutter apps. Students join approved classes and enrol a face template with consent. Teachers create sessions, upload short classroom videos, review recognition suggestions, publish attendance and download CSV/PDF reports.
+FaceTrack is a human-reviewed, face-assisted attendance system with separate Student and Teacher (faculty) Flutter apps. Students join their subjects and enrol a face template with consent. Faculty create sessions, upload short classroom videos, review recognition suggestions, publish attendance and download CSV/PDF reports. Admins set up semester terms, subjects, sections, faculty and students.
 
 The current demonstration uses:
 
@@ -9,9 +9,9 @@ The current demonstration uses:
 - hosted Supabase Auth, PostgreSQL and private Storage
 - local Redis, Celery and CPU inference
 - SCRFD detection and ArcFace-family 512D embeddings through ONNX Runtime
-- teacher-controlled attendance publication
+- faculty-controlled attendance publication
 
-Face recognition never publishes attendance by itself. A missed face, processing failure or ineligible template remains unassessed until a teacher decides.
+Face recognition never publishes attendance by itself. A missed face, processing failure or ineligible template remains unassessed until the faculty member decides.
 
 ## Start here
 
@@ -20,8 +20,8 @@ Use the [complete installation guide](docs/INSTALLATION.md). It covers macOS, Wi
 Quick start for an already provisioned checkout:
 
 ```sh
-docker compose up -d --build
-curl -fsS http://127.0.0.1:8000/health/ready
+make up          # macOS/Linux; same as docker compose up -d
+make health      # API readiness
 ```
 
 Then start Teacher web on port 5300 and Student web on 5301 using the commands in the installation guide. Windows users can run:
@@ -34,24 +34,22 @@ Private configuration and approved model files are deliberately excluded from Gi
 
 ## Current status
 
-- Schema head: `0007_attendance_queries`
-- 37 business tables with forced RLS
-- Account/class flows verified on web and Android
-- Real consented enrolment and supervised template activation verified
-- One low-light classroom session teacher-reviewed and published
-- Student history, timetable import and private CSV/PDF downloads verified
-- Evidence-coded Not recognized drafts and attendance queries implemented and locally tested
-- Independent real recognition acceptance remains **1 of 6** held-out scenarios
-- Faculty email, physical Windows/Linux acceptance, cloud deployment and institute-scale accuracy/capacity remain open
+- Database: migration head `0008_admin`, 37 business tables with forced row-level security
+- Student and Teacher apps (web and Android) use the institute's terms: Subject, Section, Semester term, Faculty
+- Faculty home shows an attendance dashboard: overall, semester-wise and subject-wise figures, a distribution chart, a needs-attention list and a CSV report
+- Admins get a guided Administration tab: setup checklist, statistics, directories, and access management
+- Verified with real people: consented face enrolment and template activation; one classroom session reviewed and published; student history; timetable import; CSV/PDF downloads
+- Independent real recognition acceptance: **1 of 6** held-out scenarios. Synthetic benchmarks are reported separately and are not classroom accuracy
+- Still open: faculty email (no permitted Resend sender), physical Windows/Linux acceptance, cloud deployment, institute-scale accuracy and capacity
 
-Do not claim >95% accuracy, two-second end-to-end response, liveness or 20 simultaneous classes from the current evidence.
+Do not claim >95% accuracy, a two-second end-to-end response, liveness detection or 20 simultaneous classes from the current evidence.
 
 ## Repository map
 
 | Path | Purpose |
 |---|---|
 | `apps/student` | Student Android/web app |
-| `apps/teacher` | Teacher Android/web app, camera spike and model-test UI |
+| `apps/teacher` | Teacher (faculty) Android/web app, admin tab, camera spike and model-test UI |
 | `packages/app_core` | Shared auth, API transport, navigation and design system |
 | `packages/domain_models` | Shared Dart models |
 | `packages/capture` | Camera, pose guidance, pending media and resumable upload |
@@ -64,12 +62,14 @@ Do not claim >95% accuracy, two-second end-to-end response, liveness or 20 simul
 
 ## Documentation
 
-- [Master design](MASTER_DESIGN.md) — architecture and product rules
-- [Installation](docs/INSTALLATION.md) — canonical setup and configuration
-- [Progress](PROGRESS.md) — actual verified state and blockers
-- [Roadmap](ROADMAP.md) — milestone completion gates
-- [Platform support](docs/PLATFORM_SUPPORT.md) — verified versus prepared targets
-- [ML quickstart](docs/ML_TEAM_QUICKSTART.md) — safe contributor tests
-- [Model test console](docs/MODEL_TEST_CONSOLE.md) — nontechnical volunteer evaluation
+- [Installation](docs/INSTALLATION.md): canonical setup and configuration for macOS, Windows and Linux
+- [Client setup](docs/CLIENT_SETUP.md): first install for a nontechnical user, done by Claude Code
+- [Upgrade an existing install](docs/UPGRADE_EXISTING_INSTALL.md): bring an older install up to date with full ML
+- [Windows](docs/WINDOWS_SETUP.md) and [Linux](docs/LINUX_SETUP.md) checklists, and [platform support](docs/PLATFORM_SUPPORT.md)
+- [Master design](MASTER_DESIGN.md): architecture and product rules
+- [Progress](PROGRESS.md) and [roadmap](ROADMAP.md): verified state, blockers and milestone gates
+- [ML quickstart](docs/ML_TEAM_QUICKSTART.md), [ML model and evaluation](docs/ML_SPIKE.md), [accuracy plan](docs/ML_ACCURACY_AND_ATTENDANCE_PLAN.md)
+- [Model test console](docs/MODEL_TEST_CONSOLE.md) and [tester steps](docs/CLIENT_MODEL_TEST_STEPS.md): volunteer evaluation without logins
+- [Project overview](docs/CLIENT_PROJECT_DOCUMENT.md) and [cost and reliability](docs/COST_AND_RELIABILITY.md): client briefing and dated planning estimates
 
 Never commit credentials, tokens, face recordings, embeddings, templates, ONNX files or participant-level results.

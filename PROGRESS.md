@@ -1,6 +1,6 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 26 October 2026 (Asia/Kolkata)
+**Reviewed:** 27 October 2026 (Asia/Kolkata)
 
 **Architecture:** [`MASTER_DESIGN.md`](MASTER_DESIGN.md)
 
@@ -19,9 +19,17 @@ The current demo is **cloud-hosted data with local processing**:
 
 macOS Apple Silicon is the verified demo host. The canonical Docker stack supports the same local services on Windows/Linux; both Compose configurations validate and the API/worker images build, but physical Windows/Linux acceptance remains pending. HTTPS/cloud API and institute deployment are later gates.
 
-Schema head is **`0007_attendance_queries`**, with **37 forced-RLS business tables** locally and on the hosted development project.
+Schema head is **`0008_admin`**, with **37 forced-RLS business tables**. The running API's `/health/ready` passes against the hosted development project, which checks exactly that head and table count.
 
 ## Implemented and verified
+
+### Terminology, faculty dashboard and administration (27 October 2026)
+
+- Both apps use the institute's wording from the CSE timetable: Subject, Section, Semester term, Faculty, ordinal semesters ("3rd Semester"), "Odd Semester 2026". Labels only; routes, API, roles and CSV columns are unchanged.
+- Faculty home dashboard: overall attendance, semester filter and semester-wise bars, sortable subject-wise statistics with drill-down, distribution chart, below-75% attention list, semester CSV export. Built in the app from the existing summary endpoint.
+- Admin tab: setup checklist with the next step and jump-to-form, statistics, login-account and by-semester charts, institute-wide attendance, guided forms with institute examples, lists of existing records, searchable faculty/student directories, role grant by person picker.
+- Verified by widget tests at 360/768/1440 px with 200% text. **Not yet seen in an authenticated browser or on the phone**; the running 5300/5301 dev servers were not reloaded with these changes.
+- Theory/Lab and lab batches (A1, B1) from the timetable are not modelled.
 
 ### Accounts and classes
 
@@ -72,29 +80,28 @@ One real low-light two-person capture sampled 12 frames, produced 23 detections 
 - Six calibration scenarios passed; independent real held-out acceptance remains **1 of 6**
 - Isolated research package covers detector-only CLAHE, contrast/yaw candidates, two-scale SCRFD and per-crop alignment rejection without modifying production files
 - DigiFace 60-scene synthetic benchmark: baseline 22/60 present suggestions and zero wrong-present marks; two-scale 24/60 and zero wrong-present marks; CLAHE unchanged; contrast filter worse
+- Synthetic steady walk-around, class of 70 cooperative students plus 15 absent roster members and 3 intruders, frozen model unchanged, 10 runs each (`experiments/ml_accuracy/run_phone_walk.py --steady --face-cap 180 --frames 210`): each student in view about 4 s in total (`--dwell 4`) gave 91.4% recognised (84–97%); about 4 s on each side (`--dwell 8`) gave 96.6% (93–99%); zero false presences, intruder matches or confusions. Result files are in ignored `.local/experiments/phonewalk-4s/`. This is synthetic DigiFace data, not classroom accuracy.
 - Synthetic results are not classroom accuracy. No >95% accuracy, liveness, ≤2-second end-to-end response or 20-class capacity claim is established.
 
 The loopback Model Test Console lets a nontechnical tester enrol consenting volunteers and run six scenarios. Its automated tests and synthetic smoke pass; real-camera volunteer and Windows acceptance are pending.
 
-## Verification on 26 October 2026
+## Verification on 27 October 2026
 
 | Check | Result |
 |---|---|
-| API PostgreSQL suite | **43 passed** |
+| API PostgreSQL suite | **50 passed** |
 | API Ruff | Passed |
 | Worker suite | **35 passed** |
 | Worker Ruff | Passed |
 | Root ML/contract suite | **42 passed, 1 expected frozen-baseline limitation** |
 | ML freeze receipt | **16/16 unchanged** |
-| Shared Flutter | Analyze clean; **23 passed** |
+| Shared Flutter (`app_core`) | Analyze clean; **34 passed** |
 | Capture Flutter | Analyze clean; **8 passed** |
 | Student Flutter | Analyze clean; **10 passed** |
-| Teacher Flutter | Analyze clean; **19 passed** |
-| Product builds | Student and Teacher configured web bundles and Android arm64 debug APKs build |
-| Docker Compose | `compose.yaml` and compatibility alias validate |
-| Docker images | API and worker build successfully |
+| Teacher Flutter | Analyze clean; **44 passed** |
+| OpenAPI contract | Regenerated; includes the admin and attendance-summary endpoints |
 | Running API | `/health/live` and `/health/ready` return 200 |
-| Documentation | Local Markdown links resolve; shell scripts pass syntax checks |
+| Not re-run today | Release web bundles, Android APK builds, Docker image builds, physical-device and authenticated visual checks |
 
 The configuration audit also removed whole-file API environment injection from Compose. The mounted API `.env` still supplies declared runtime settings through Pydantic, and explicit operator tools can read `MIGRATION_DATABASE_URL`; the running API process no longer receives that owner URL as an exported environment variable.
 
@@ -109,6 +116,9 @@ The root suite's expected failure records the frozen baseline's degenerate-landm
 5. Perform a physical Windows x64 run; record Docker, camera, web and worker results. Repeat on Linux only if it will be demonstrated.
 6. Configure/test Resend only after a permitted sender exists.
 7. Keep the existing detector/profile for the presentation. Adopt no research candidate until real held-out accuracy, latency, rights and reliability gates pass.
+8. Sign in as faculty and as an admin, and check the new dashboard and Admin tab on web and on the phone before relying on them in a presentation.
+9. Later: inspect the latest release web bundles and APKs on an idle phone (carried over from the 25 October review).
+10. Later, before institute scale: benchmark recognition input, which fetches templates one roster member at a time (`services/api/app/recognition_jobs.py`), before batching it.
 
 ## Setup and privacy notes
 

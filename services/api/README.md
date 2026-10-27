@@ -5,7 +5,7 @@ FastAPI owns authentication, tenant/object authorization, academic records, biom
 ## Current contract
 
 - Python `>=3.11,<3.12`, FastAPI, Pydantic 2, SQLAlchemy Core/asyncio and psycopg 3
-- PostgreSQL schema head `0007_attendance_queries`
+- PostgreSQL schema head `0008_admin`
 - 37 business tables with forced RLS
 - restricted `facetrack_api` runtime role; separate owner credential for migrations/tools
 - Supabase ES256 user-token verification; no development login bypass
@@ -19,6 +19,8 @@ Implemented route groups:
 - sessions, frozen roster, classroom captures, attendance review/publication/corrections/history
 - student attendance disputes and teacher resolution
 - rooms, timetable import/schedule and private report/download/delivery
+- per-subject attendance summary (`/v1/offerings/{id}/attendance-summary`) used by the faculty and admin dashboards
+- admin provisioning `/v1/admin/*`: terms, subjects, sections, allocations, faculty, students, memberships and assignments (every write re-checked by an `app.admin_*` database function)
 - scoped `/internal/v1/*` worker lease/input/result/reconciliation endpoints
 
 ## Native development
@@ -49,7 +51,7 @@ Start the API:
 - Liveness: `http://127.0.0.1:8000/health/live`
 - Readiness: `http://127.0.0.1:8000/health/ready`
 
-Readiness checks the restricted runtime role, migration 0007, 37 forced-RLS tables and publishable-key configuration. It does not test a real Auth login, Storage or worker.
+Readiness checks the restricted runtime role, migration `0008_admin`, 37 forced-RLS tables and publishable-key configuration. It does not test a real Auth login, Storage or worker.
 
 ## Docker development
 
@@ -93,6 +95,8 @@ python -m tools.provision_documents
 The configuration commands prompt for secrets without echoing them. `provision_enrollment` refuses to overwrite an existing worker environment. The scoped worker credential expires after 30 days; do not rotate it during normal startup.
 
 For an already provisioned hosted project, do not reseed, rerun migrations or regenerate credentials merely to start the app.
+
+The first admin is granted once by the operator with one SQL statement (see [installation §5.6](../../docs/INSTALLATION.md#56-make-the-first-admin-and-set-up-the-institute)); after that, admins manage everything from the Teacher app's **Admin** tab. Creating login accounts from that tab needs the optional, server-only `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## Controlled demo seed
 

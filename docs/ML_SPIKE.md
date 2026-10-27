@@ -1,6 +1,6 @@
-# Local ML spike
+# ML model, provenance and held-out evaluation
 
-Run shell commands below from the repository root unless a section says otherwise. This guide records the verified macOS research experiment; Windows users should use `docs/WINDOWS_SETUP.md` to run the product and translate `.venv/bin/python` to `.venv\Scripts\python` only for authorized local ML experiments. The active product architecture is in ../MASTER_DESIGN.md.
+Run shell commands below from the repository root unless a section says otherwise. This guide covers the frozen model's provenance and permission gate, the research CLI (`scripts/spike`) and the held-out evaluation protocol, as run on the verified Mac; Windows users should use `docs/WINDOWS_SETUP.md` to run the product and translate `.venv/bin/python` to `.venv\Scripts\python` only for authorized local ML experiments. The active product architecture is in ../MASTER_DESIGN.md.
 
 ## Installed environment
 
@@ -15,7 +15,7 @@ uv sync --locked
 scripts/spike doctor
 ```
 
-To reproduce Flutter, use the recorded stable version, not an unpinned upgrade. `.tools/flutter/bin/flutter --version` reports the exact framework/engine revisions. Docker, Android Studio and full Xcode are intentionally deferred.
+To reproduce Flutter, use the recorded stable version, not an unpinned upgrade. `.tools/flutter/bin/flutter --version` reports the exact framework/engine revisions.
 
 ## Capture a clip
 
@@ -58,7 +58,9 @@ Before real inference:
 scripts/spike models --manifest .local/spike/models/manifest.json
 ```
 
-The official v0.7 `buffalo_sc` package is now provisioned locally at `.local/spike/models/buffalo_sc/`, after the user confirmed a strictly non-commercial academic experiment. Its `det_500m.onnx` and `w600k_mbf.onnx` artifacts pass CPU contract execution; real reference detection/embedding has also run. The local manifest records actual tensor names, SHA-256s and scoped licence evidence. It does not permit paid delivery or institute use. Sources: [official model catalogue](https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md), [official release](https://github.com/deepinsight/insightface/releases/tag/v0.7). Reproducing this setup requires a fresh intended-use review; do not copy an approval into another use case. Synthetic ONNX test graphs remain contract tests only.
+The official v0.7 `buffalo_sc` package is now provisioned locally at `.local/spike/models/buffalo_sc/`, after the user confirmed a strictly non-commercial academic experiment. Its `det_500m.onnx` and `w600k_mbf.onnx` artifacts pass CPU contract execution; real reference detection/embedding has also run. The local manifest records actual tensor names, SHA-256s and scoped licence evidence. It does not permit paid delivery or institute use. Sources: [official model catalogue](https://github.com/deepinsight/insightface/blob/master/python-package/docs/model_zoo.md), [official release](https://github.com/deepinsight/insightface/releases/tag/v0.7). Reproducing this setup requires a fresh intended-use review; do not copy an approval into another use case.
+
+`scripts/fetch-model.sh` (macOS/Linux) and `scripts/fetch-model.ps1` (Windows) download that same official `buffalo_sc.zip`, verify its SHA-256 (`57d31b56…de47c72`) and extract the two ONNX files into `.local/spike/models/buffalo_sc/`. They do **not** create `manifest.json`, `license-evidence.json` or the frozen profile; those stay private and come from the project owner, because they record the reviewed permission. Synthetic ONNX test graphs remain contract tests only.
 
 ## Freeze an experimental profile
 
