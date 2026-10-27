@@ -160,7 +160,7 @@ class ApiClient {
               401 => 'Your session expired. Please sign in again.',
               403 =>
                 'Your account does not have access. Contact your institute.',
-              404 => 'This item or code is unavailable. Check the code or contact your teacher.',
+              404 => 'This item or code is unavailable. Check the code or contact your faculty.',
               409 => 'This record changed or already exists. Refresh and confirm your action again.',
               422 => 'Check the entered information and try again.',
               429 => 'Too many attempts. Please try again later.',

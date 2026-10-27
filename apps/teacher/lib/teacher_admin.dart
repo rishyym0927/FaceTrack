@@ -140,29 +140,29 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
 
   // --- Academics -------------------------------------------------------------
   List<Widget> _academics() => [
-        _TermForm(onSubmit: (body) => _run('Term created.', () => _post('/v1/admin/terms', body).then((_) {}))),
+        _TermForm(onSubmit: (body) => _run('Semester term created.', () => _post('/v1/admin/terms', body).then((_) {}))),
         const SizedBox(height: 16),
-        _CourseForm(onSubmit: (body) => _run('Course created.', () => _post('/v1/admin/courses', body).then((_) {}))),
+        _CourseForm(onSubmit: (body) => _run('Subject created.', () => _post('/v1/admin/courses', body).then((_) {}))),
         const SizedBox(height: 16),
         _GroupForm(
           terms: terms,
-          onSubmit: (body) => _run('Class group created.', () => _post('/v1/admin/class-groups', body).then((_) {})),
+          onSubmit: (body) => _run('Section created.', () => _post('/v1/admin/class-groups', body).then((_) {})),
         ),
         const SizedBox(height: 16),
         _OfferingForm(
           courses: courses,
           groups: groups,
-          onSubmit: (body) => _run('Class (offering) created.', () => _post('/v1/admin/offerings', body).then((_) {})),
+          onSubmit: (body) => _run('Subject allocated to the section.', () => _post('/v1/admin/offerings', body).then((_) {})),
         ),
       ];
 
   // --- People ----------------------------------------------------------------
   List<Widget> _people() => [
         _IdentityForm(
-          title: 'Add teacher',
+          title: 'Add faculty',
           numberLabel: 'Employee number',
           onSubmit: (body) => _run(
-            body['create_login'] == true ? 'Teacher created with a login account.' : 'Teacher identity created.',
+            body['create_login'] == true ? 'Faculty created with a login account.' : 'Faculty identity created.',
             () => _post('/v1/admin/teachers', body).then((_) {}),
           ),
         ),
@@ -178,7 +178,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         const SizedBox(height: 8),
         const _Note(
           'Without a login account, a student signs up with the approved email and links their '
-          'enrolment number. Teachers need a login account (or an existing one granted the teacher role).',
+          'enrolment number. Faculty need a login account (or an existing one granted the faculty role).',
         ),
       ];
 
@@ -187,13 +187,13 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         _AssignForm(
           offerings: offerings,
           teachers: teachers,
-          onSubmit: (body) => _run('Teacher assigned to the class.', () => _post('/v1/admin/assignments', body).then((_) {})),
+          onSubmit: (body) => _run('Faculty assigned to the subject.', () => _post('/v1/admin/assignments', body).then((_) {})),
         ),
         const SizedBox(height: 16),
         _RoleForm(onSubmit: (body) => _run('Role updated.', () => _post('/v1/admin/memberships', body).then((_) {}))),
         const SizedBox(height: 8),
         const _Note(
-          'Assigning a teacher requires that account to already hold an active teacher role. '
+          'Assigning faculty requires that account to already hold an active teacher role. '
           'Grant the role by the account user id below if needed.',
         ),
       ];
@@ -285,11 +285,11 @@ class _TermForm extends StatelessWidget {
   Widget build(BuildContext context) {
     final code = TextEditingController(), start = TextEditingController(), end = TextEditingController();
     return _Form(
-      title: 'Add term',
-      action: 'Create term',
+      title: 'Add semester term',
+      action: 'Create semester term',
       onSubmit: onSubmit,
       fields: (_) => [
-        _field(code, 'Term code (e.g. 2026-ODD)', max: 32),
+        _field(code, 'Semester term code (e.g. 2026-ODD)', max: 32),
         _field(start, 'Start date (YYYY-MM-DD)', validator: _date),
         _field(end, 'End date (YYYY-MM-DD)', validator: _date),
       ],
@@ -305,12 +305,12 @@ class _CourseForm extends StatelessWidget {
   Widget build(BuildContext context) {
     final code = TextEditingController(), title = TextEditingController();
     return _Form(
-      title: 'Add course',
-      action: 'Create course',
+      title: 'Add subject',
+      action: 'Create subject',
       onSubmit: onSubmit,
       fields: (_) => [
-        _field(code, 'Course code (e.g. CS401)', max: 32),
-        _field(title, 'Course title'),
+        _field(code, 'Subject code (e.g. BCS 201)', max: 32),
+        _field(title, 'Subject name'),
       ],
       collect: () => {'code': code.text.trim(), 'title': title.text.trim()},
     );
@@ -332,12 +332,12 @@ class _GroupFormState extends State<_GroupForm> {
     final branch = TextEditingController(), sem = TextEditingController(), section = TextEditingController();
     term ??= widget.terms.length == 1 ? widget.terms.first.id : null;
     return _Form(
-      title: 'Add class group',
-      action: 'Create class group',
+      title: 'Add section',
+      action: 'Create section',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
         _Dropdown(
-          label: 'Term',
+          label: 'Semester term',
           value: term,
           items: {for (final t in widget.terms) t.id: t.label},
           onChanged: (v) {
@@ -379,12 +379,12 @@ class _OfferingFormState extends State<_OfferingForm> {
   Widget build(BuildContext context) {
     final title = TextEditingController();
     return _Form(
-      title: 'Add class (offering)',
-      action: 'Create class',
+      title: 'Allocate subject to a section',
+      action: 'Allocate subject',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
         _Dropdown(
-          label: 'Course',
+          label: 'Subject',
           value: course,
           items: {for (final c in widget.courses) c.id: c.label},
           onChanged: (v) {
@@ -393,7 +393,7 @@ class _OfferingFormState extends State<_OfferingForm> {
           },
         ),
         _Dropdown(
-          label: 'Class group',
+          label: 'Section',
           value: group,
           items: {for (final g in widget.groups) g.id: g.label},
           onChanged: (v) {
@@ -401,7 +401,7 @@ class _OfferingFormState extends State<_OfferingForm> {
             rebuild();
           },
         ),
-        _field(title, 'Class title'),
+        _field(title, 'Display title'),
       ],
       collect: () {
         if (course == null || group == null) return null;
@@ -477,12 +477,12 @@ class _AssignFormState extends State<_AssignForm> {
   @override
   Widget build(BuildContext context) {
     return _Form(
-      title: 'Assign teacher to a class',
+      title: 'Assign faculty to a subject',
       action: 'Assign',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
         _Dropdown(
-          label: 'Class',
+          label: 'Subject',
           value: offering,
           items: {for (final o in widget.offerings) o.id: '${o.title} · ${o.subtitle}'},
           onChanged: (v) {
@@ -491,7 +491,7 @@ class _AssignFormState extends State<_AssignForm> {
           },
         ),
         _Dropdown(
-          label: 'Teacher',
+          label: 'Faculty',
           value: teacher,
           items: {
             for (final t in widget.teachers)

@@ -70,13 +70,13 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
         context: context,
         builder: (_) => StatefulBuilder(
           builder: (context, setLocal) => ActionDialog(
-            title: 'Create an attendance class',
-            button: 'Create class',
+            title: 'Add a subject',
+            button: 'Add subject',
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 const Text(
-                  'Choose the approved subject, term and student group. You will be assigned as its teacher.',
+                  'Choose the subject, semester term and section. You will be assigned as its faculty.',
                 ),
                 const SizedBox(height: 20),
                 DropdownButtonFormField<String>(
@@ -97,7 +97,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
                 DropdownButtonFormField<String>(
                   initialValue: term,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Term'),
+                  decoration: const InputDecoration(labelText: 'Semester term'),
                   items: [
                     for (final x in lists[1])
                       DropdownMenuItem(
@@ -116,7 +116,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
                   key: ValueKey(term),
                   initialValue: group,
                   isExpanded: true,
-                  decoration: const InputDecoration(labelText: 'Student group'),
+                  decoration: const InputDecoration(labelText: 'Section'),
                   items: [
                     for (final x in lists[2].where((g) => g.termId == term))
                       DropdownMenuItem(
@@ -171,9 +171,9 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   Widget build(BuildContext context) => ContentPage(
     children: [
       PageHeader(
-        title: 'Your attendance classes',
-        subtitle: 'Manage class membership and student requests.',
-        eyebrow: 'TEACHER WORKSPACE',
+        title: 'Your subjects',
+        subtitle: 'Manage subject enrolment and student requests.',
+        eyebrow: 'FACULTY WORKSPACE',
         icon: Icons.space_dashboard_outlined,
         action: Wrap(
           spacing: 8,
@@ -187,16 +187,16 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
             FilledButton.icon(
               onPressed: preparing ? null : create,
               icon: const Icon(Icons.add),
-              label: Text(preparing ? 'Loading…' : 'Create class'),
+              label: Text(preparing ? 'Loading…' : 'Add subject'),
             ),
           ],
         ),
       ),
       PagedList(
         controller: controller,
-        emptyTitle: 'No assigned classes',
+        emptyTitle: 'No assigned subjects',
         emptyMessage:
-            'Create an attendance class or ask your institute to assign one.',
+            'Add a subject or ask your institute to assign one.',
         item: (Offering o) => Panel(
           accent: true,
           child: Column(
@@ -253,7 +253,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
               FilledButton.icon(
                 onPressed: () => open(o.id),
                 icon: const Icon(Icons.arrow_forward_rounded),
-                label: const Text('Manage class'),
+                label: const Text('Manage subject'),
               ),
             ],
           ),
@@ -347,7 +347,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             const SizedBox(height: 16),
             if (approve)
               const Text(
-                'Confirm this student belongs to this class. This approves course membership only.',
+                'Confirm this student belongs to this subject and section. This approves subject membership only.',
               )
             else
               TextFormField(
@@ -370,7 +370,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             body: {
               'status': approve ? 'active' : 'rejected',
               'reason': approve
-                  ? 'Verified class membership'
+                  ? 'Verified subject membership'
                   : reason.text.trim(),
             },
             mutation: mutation,
@@ -397,7 +397,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
       final choice = await showDialog<String>(
         context: context,
         builder: (c) => AlertDialog(
-          title: const Text('Class join code'),
+          title: const Text('Subject join code'),
           content: SizedBox(
             width: 400,
             child: Column(
@@ -464,7 +464,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             button: existing == null ? 'Create' : 'Rotate',
             child: Text(
               existing == null
-                  ? 'Students can use this code to request class membership.'
+                  ? 'Students can use this code to request subject membership.'
                   : 'The previous code will stop accepting new requests. Existing memberships are preserved.',
             ),
             submit: (mutation) async {
@@ -515,14 +515,14 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             child: TextButton.icon(
               onPressed: () => context.go('/classes'),
               icon: const Icon(Icons.arrow_back),
-              label: const Text('All classes'),
+              label: const Text('All subjects'),
             ),
           ),
           PageHeader(
             compact: true,
             title: o.title,
             subtitle: '${o.subtitle} · ${o.termCode}',
-            eyebrow: 'TEACHER WORKSPACE',
+            eyebrow: 'FACULTY WORKSPACE',
             icon: Icons.space_dashboard_outlined,
             action: Wrap(
               spacing: 8,
@@ -587,13 +587,13 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                   tab == 3
                       ? 'Create a session, capture the classroom and review attendance before publishing.'
                       : tab == 2
-                      ? 'Review each recording before activating face enrolment. Class membership is approved separately.'
+                      ? 'Review each recording before activating face enrolment. Subject membership is approved separately.'
                       : tab == 4
                       ? 'Review questions about published Absent results. Accepted queries create a corrected publication and report.'
                       : tab == 5
-                      ? 'Cumulative attendance across every published session for this class.'
+                      ? 'Cumulative attendance across every published class for this subject.'
                       : tab == 0
-                      ? 'Approve requests only after confirming the student belongs in this class.'
+                      ? 'Approve requests only after confirming the student belongs in this subject.'
                       : 'These approved students can be included when a classroom session opens.',
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -624,7 +624,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                   : 'No approved students',
               emptyMessage: tab == 0
                   ? 'New student requests will appear here.'
-                  : 'Approve class requests to build your roster.',
+                  : 'Approve subject requests to build your roster.',
               item: (Enrollment e) => Panel(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,

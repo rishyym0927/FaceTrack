@@ -81,7 +81,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             const Text(
-              'Explain why this published Absent result should be reviewed. Your assigned teacher will decide and any accepted correction creates a new publication.',
+              'Explain why this published Absent result should be reviewed. Your assigned faculty will decide and any accepted correction creates a new publication.',
             ),
             const SizedBox(height: 16),
             TextFormField(
@@ -113,7 +113,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
-            content: Text('Attendance query sent to your teacher.'),
+            content: Text('Attendance query sent to your faculty.'),
           ),
         );
       }
@@ -171,12 +171,12 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
       TextButton.icon(
         onPressed: () => context.go('/classes'),
         icon: const Icon(Icons.arrow_back),
-        label: const Text('Your classes'),
+        label: const Text('Your subjects'),
       ),
       PageHeader(
         compact: true,
         title: 'Your published attendance',
-        subtitle: 'Only teacher-published decisions appear here. Processing suggestions are not final attendance.',
+        subtitle: 'Only faculty-published decisions appear here. Processing suggestions are not final attendance.',
         eyebrow: 'ATTENDANCE HISTORY',
         icon: Icons.fact_check_outlined,
         action: OutlinedButton(
@@ -217,7 +217,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
       PagedList<Json>(
         controller: controller,
         emptyTitle: 'No published attendance yet',
-        emptyMessage: 'Your teacher must review and publish a session before it appears here.',
+        emptyMessage: 'Your faculty must review and publish a session before it appears here.',
         item: (r) {
           final d = DateTime.parse(r['starts_at']).toLocal(),
               l = MaterialLocalizations.of(context);
@@ -241,31 +241,31 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                 if (r['assessment_code'] != null) ...[
                   const SizedBox(height: 8),
                   Text(switch (r['assessment_code']) {
-                    'recognized' => 'Recognition evidence was available before teacher review.',
-                    'not_recognized' => 'The system did not recognize you in the usable capture; your teacher confirmed the final result.',
-                    'template_ineligible' => 'Face recognition was unavailable; your teacher assessed this manually.',
-                    'limited_capture' => 'Capture coverage was limited; your teacher assessed this manually.',
+                    'recognized' => 'Recognition evidence was available before faculty review.',
+                    'not_recognized' => 'The system did not recognize you in the usable capture; your faculty confirmed the final result.',
+                    'template_ineligible' => 'Face recognition was unavailable; your faculty assessed this manually.',
+                    'limited_capture' => 'Capture coverage was limited; your faculty assessed this manually.',
                     'processing_failed' =>
-                      'Processing failed; your teacher assessed this manually.',
-                    _ => 'Your teacher reviewed this result.',
+                      'Processing failed; your faculty assessed this manually.',
+                    _ => 'Your faculty reviewed this result.',
                   }),
                 ],
                 const SizedBox(height: 12),
                 Text('Publication revision ${r['revision']}'),
-                if (r['reason'] != null) Text('Teacher note: ${r['reason']}'),
+                if (r['reason'] != null) Text('Faculty note: ${r['reason']}'),
                 if (query != null) ...[
                   const SizedBox(height: 12),
                   StatusBadge(query['status']),
                   Text(switch (query['status']) {
                     'open' =>
-                      'Your attendance query is waiting for teacher review.',
+                      'Your attendance query is waiting for faculty review.',
                     'accepted' => 'Your query was accepted and a corrected publication was created.',
                     'rejected' =>
-                      'Your teacher reviewed and declined this query.',
+                      'Your faculty reviewed and declined this query.',
                     _ => 'This query is closed.',
                   }),
                   if (query['resolution_reason'] != null)
-                    Text('Teacher response: ${query['resolution_reason']}'),
+                    Text('Faculty response: ${query['resolution_reason']}'),
                 ] else if (r['status'] == 'absent') ...[
                   const SizedBox(height: 12),
                   OutlinedButton.icon(

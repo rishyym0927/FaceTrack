@@ -136,7 +136,7 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('Teacher response: Corrected after review'), findsOneWidget);
+      expect(find.text('Faculty response: Corrected after review'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
     },
   );

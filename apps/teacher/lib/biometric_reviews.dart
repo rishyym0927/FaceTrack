@@ -103,7 +103,7 @@ class BiometricReviews extends StatelessWidget {
                   onChanged: (v) => setLocal(() => poses = v ?? false),
                 ),
                 const Text(
-                  'Activation replaces any previous compatible active template set. Course membership is unchanged.',
+                  'Activation replaces any previous compatible active template set. Subject membership is unchanged.',
                 ),
               ] else
                 TextFormField(
@@ -156,7 +156,7 @@ class BiometricReviews extends StatelessWidget {
   Widget build(BuildContext context) => PagedList<BiometricAttempt>(
     controller: controller,
     emptyTitle: 'No face enrolments to review',
-    emptyMessage: 'Processed videos from approved students in this class will appear here.',
+    emptyMessage: 'Processed videos from approved students in this subject will appear here.',
     item: (a) => Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -193,7 +193,7 @@ class _TeacherSessionsState extends State<TeacherSessions> {
       PagedList<Json>(
         controller: controller,
         emptyTitle: 'No sessions yet',
-        emptyMessage: 'Create a session to take attendance for this class.',
+        emptyMessage: 'Create a session to take attendance for this subject.',
         item: (s) => Panel(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -704,7 +704,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         TextButton.icon(
           onPressed: () => context.go('/classes/${s['offering_id']}'),
           icon: const Icon(Icons.arrow_back),
-          label: const Text('Back to class'),
+          label: const Text('Back to subject'),
         ),
         PageHeader(
           compact: true,
@@ -819,7 +819,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         if (rows.isEmpty)
           const Panel(
             child: Text(
-              'No students on this roster. Approve class membership before opening a new session.',
+              'No students on this roster. Approve subject membership before opening a new session.',
             ),
           )
         else

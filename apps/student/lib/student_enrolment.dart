@@ -436,7 +436,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
         PageHeader(
           title: 'Face enrolment',
           subtitle:
-              'Record once, then ask your teacher to verify your identity.',
+              'Record once, then ask your faculty to verify your identity.',
           eyebrow: 'STUDENT SPACE',
           icon: Icons.face_retouching_natural_outlined,
           action: OutlinedButton.icon(
@@ -462,7 +462,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                 ),
                 const SizedBox(height: 8),
                 const Text(
-                  'You are ready for classroom recognition. No further recording is needed. Your teacher will review attendance before publishing it.',
+                  'You are ready for classroom recognition. No further recording is needed. Your faculty will review attendance before publishing it.',
                 ),
                 if (!captureVisible) ...[
                   const SizedBox(height: 12),
@@ -475,7 +475,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                 ],
                 if (replacing)
                   const Text(
-                    'Your current enrolment stays active until your teacher approves the replacement.',
+                    'Your current enrolment stays active until your faculty approves the replacement.',
                   ),
               ],
             ),
@@ -548,7 +548,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   const Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
-                      'A teacher of an approved class can review this recording. Review must finish within 24 hours or you will need to record again.',
+                      'A faculty member of an approved subject can review this recording. Review must finish within 24 hours or you will need to record again.',
                     ),
                   ),
               ],
@@ -722,7 +722,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   ),
                   if (pending!.missedGuidance.isNotEmpty)
                     Text(
-                      'Live guidance did not capture: ${pending!.missedGuidance.join(', ')}. Review the video; you can retake it or upload for teacher review.',
+                      'Live guidance did not capture: ${pending!.missedGuidance.join(', ')}. Review the video; you can retake it or upload for faculty review.',
                     ),
                   if (uploadProgress != null) ...[
                     const SizedBox(height: 12),
@@ -853,7 +853,7 @@ class EnrolmentSteps extends StatelessWidget {
     'Record',
     'Upload',
     'Processing',
-    'Teacher review',
+    'Faculty review',
     'Active',
   ];
   @override

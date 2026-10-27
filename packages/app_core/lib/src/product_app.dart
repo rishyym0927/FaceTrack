@@ -259,10 +259,10 @@ class _ProductAppState extends ConsumerState<ProductApp> {
         body: Center(
           child: MessageView(
             title: 'Page unavailable',
-            message: 'Return to your classes to continue.',
+            message: 'Return to your subjects to continue.',
             action: FilledButton(
               onPressed: () => context.go('/classes'),
-              child: const Text('My classes'),
+              child: const Text('My subjects'),
             ),
           ),
         ),
@@ -320,7 +320,7 @@ class ProductShell extends StatelessWidget {
       final tabs = <NavTab>[
         const NavTab(
           '/classes',
-          'Classes',
+          'Subjects',
           Icons.groups_outlined,
           Icons.groups,
         ),
@@ -346,7 +346,7 @@ class ProductShell extends StatelessWidget {
         ),
       ];
       var index = tabs.indexWhere((t) => path == t.path);
-      if (index < 0) index = 0; // class/session detail routes fall under Classes
+      if (index < 0) index = 0; // subject/session detail routes fall under Subjects
       void navigate(int i) => context.go(tabs[i].path);
       return LayoutBuilder(
         builder: (context, c) {
@@ -584,7 +584,7 @@ class AuthFrame extends StatelessWidget {
                   ),
                   const SizedBox(height: 16),
                   const Text(
-                    'A calmer way to manage classes, enrolment and attendance.',
+                    'A calmer way to manage subjects, enrolment and attendance.',
                     style: TextStyle(
                       color: Color(0xffd5e9e2),
                       fontSize: 16,

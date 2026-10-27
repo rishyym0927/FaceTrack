@@ -365,7 +365,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
             ],
           ),
           const Text(
-            'Use one row per weekly period. Match the approved term, course, class, faculty email and room code. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as CS401-A-Mon-09.',
+            'Use one row per weekly period. Match the approved semester term, subject code, section, faculty email and room code. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as BCS201-CSE1-Mon-09.',
           ),
           if (filename != null && selected != null)
             Padding(
@@ -383,7 +383,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
             const Text('Waiting for validation…'),
           if (errors.isNotEmpty) ...[
             const Text(
-              'Check the room code, approved course, class, assigned faculty and term dates. Fix any issue, then choose and upload the CSV again:',
+              'Check the room code, approved subject code, section, assigned faculty and semester dates. Fix any issue, then choose and upload the CSV again:',
             ),
             for (final e in errors.take(8)) Text('• ${e['message']}'),
           ],

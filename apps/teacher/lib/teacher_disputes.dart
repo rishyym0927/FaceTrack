@@ -65,7 +65,7 @@ class _TeacherDisputesState extends State<TeacherDisputes> {
               validator: (value) => (value?.trim().length ?? 0) < 3
                   ? 'Enter a clear response.'
                   : null,
-              decoration: const InputDecoration(labelText: 'Teacher response'),
+              decoration: const InputDecoration(labelText: 'Faculty response'),
             ),
           ],
         ),

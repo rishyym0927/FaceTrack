@@ -105,10 +105,10 @@ void main() {
     h.services.api.dio.httpClientAdapter = _adapter(h.account, posts);
     await _pumpAdmin(tester, h);
     expect(find.text('Administration'), findsOneWidget);
-    expect(find.text('Add term'), findsOneWidget);
-    expect(find.text('Add course'), findsOneWidget);
-    expect(find.text('Add class group'), findsOneWidget);
-    expect(find.text('Add class (offering)'), findsOneWidget);
+    expect(find.text('Add semester term'), findsOneWidget);
+    expect(find.text('Add subject'), findsOneWidget);
+    expect(find.text('Add section'), findsOneWidget);
+    expect(find.text('Allocate subject to a section'), findsOneWidget);
   });
 
   testWidgets('People section reveals a password field for login accounts', (tester) async {
@@ -122,7 +122,7 @@ void main() {
     await _pumpAdmin(tester, h);
     await tester.tap(find.text('People'));
     await tester.pumpAndSettle();
-    expect(find.text('Add teacher'), findsOneWidget);
+    expect(find.text('Add faculty'), findsOneWidget);
     expect(find.text('Temporary password (min 8)'), findsNothing);
     // Toggle the first "create login" switch (teacher form).
     await tester.tap(find.byType(SwitchListTile).first);

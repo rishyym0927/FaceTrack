@@ -44,13 +44,13 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
     await showDialog<bool>(
       context: context,
       builder: (_) => ActionDialog(
-        title: 'Join an attendance class',
+        title: 'Join a subject',
         button: 'Send request',
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const Text(
-              'Ask your teacher for the class join code. Your request needs their approval.',
+              'Ask your faculty for the subject join code. Your request needs their approval.',
             ),
             const SizedBox(height: 20),
             TextFormField(
@@ -85,8 +85,8 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
   Widget build(BuildContext context) => ContentPage(
     children: [
       PageHeader(
-        title: 'Your attendance classes',
-        subtitle: 'Join a class and follow your membership requests.',
+        title: 'Your subjects',
+        subtitle: 'Join a subject and follow your membership requests.',
         eyebrow: 'STUDENT SPACE',
         icon: Icons.school_outlined,
         action: Wrap(
@@ -101,16 +101,16 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
             FilledButton.icon(
               onPressed: join,
               icon: const Icon(Icons.add),
-              label: const Text('Join class'),
+              label: const Text('Join subject'),
             ),
           ],
         ),
       ),
       PagedList(
         controller: controller,
-        emptyTitle: 'No classes yet',
+        emptyTitle: 'No subjects yet',
         emptyMessage:
-            'Enter a join code from your teacher to request membership.',
+            'Enter a join code from your faculty to request membership.',
         item: (Enrollment e) => Panel(
           accent: true,
           child: Column(
@@ -167,14 +167,14 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
               StatusBadge(e.status),
               const SizedBox(height: 12),
               Text(switch (e.status) {
-                'requested' => 'Your teacher needs to approve this request. You do not need to send it again.',
-                'active' => 'Your class membership is approved. Face enrolment is reviewed separately.',
-                'rejected' => 'Your teacher declined this request.',
-                'withdrawn' => 'Your membership in this class has ended.',
+                'requested' => 'Your faculty needs to approve this request. You do not need to send it again.',
+                'active' => 'Your subject membership is approved. Face enrolment is reviewed separately.',
+                'rejected' => 'Your faculty declined this request.',
+                'withdrawn' => 'Your membership in this subject has ended.',
                 _ => 'Refresh to check your membership status.',
               }),
               if (e.reason != null && e.reason!.isNotEmpty)
-                Text('Teacher note: ${e.reason}'),
+                Text('Faculty note: ${e.reason}'),
               if (e.status == 'active')
                 Padding(
                   padding: const EdgeInsets.only(top: 12),
@@ -188,7 +188,7 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
                 const Padding(
                   padding: EdgeInsets.only(top: 12),
                   child: Text(
-                    'Contact your teacher if you need to rejoin this class.',
+                    'Contact your faculty if you need to rejoin this subject.',
                   ),
                 ),
             ],

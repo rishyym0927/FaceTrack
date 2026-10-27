@@ -1,5 +1,27 @@
 typedef Json = Map<String, dynamic>;
 
+/// 1 -> "1st", 2 -> "2nd", 3 -> "3rd", 11 -> "11th".
+String ordinal(int n) {
+  final tens = n % 100;
+  if (tens >= 11 && tens <= 13) return '${n}th';
+  return switch (n % 10) {
+    1 => '${n}st',
+    2 => '${n}nd',
+    3 => '${n}rd',
+    _ => '${n}th',
+  };
+}
+
+String semesterLabel(int semester) => '${ordinal(semester)} Semester';
+
+/// "2026-ODD" -> "Odd Semester 2026"; any other code is shown unchanged.
+String termLabel(String code) {
+  final m = RegExp(r'^(\d{4})-(ODD|EVEN)$', caseSensitive: false).firstMatch(code);
+  if (m == null) return code;
+  final kind = m.group(2)!.toLowerCase();
+  return '${kind[0].toUpperCase()}${kind.substring(1)} Semester ${m.group(1)}';
+}
+
 class Member {
   Member.fromJson(Json j)
     : instituteId = j['institute_id'] as String,
@@ -64,7 +86,8 @@ class Offering {
   final String id, title, courseCode, termCode, branch, section, status;
   final int semester, version;
   String get subtitle =>
-      '$courseCode · $branch · Semester $semester · $section';
+      '$courseCode · $branch · ${semesterLabel(semester)} · Section $section';
+  String get termTitle => termLabel(termCode);
 }
 
 class Enrollment {
@@ -173,10 +196,10 @@ String biometricStatus(String status) => switch (status) {
   'awaiting_upload' => 'Waiting for your video',
   'queued' => 'Waiting for processing',
   'processing' => 'Processing your video',
-  'review_required' => 'Waiting for teacher review',
+  'review_required' => 'Waiting for faculty review',
   'active' => 'Face enrolment active',
   'failed' => 'Recording needs attention',
-  'rejected' => 'Teacher requested a new recording',
+  'rejected' => 'Faculty requested a new recording',
   'cancelled' => 'Enrolment cancelled',
   'expired' => 'Recording expired',
   _ => 'Not enrolled',

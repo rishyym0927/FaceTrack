@@ -180,7 +180,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
               child: StatGrid(
                 children: [
                   StatTile(
-                    label: 'Class average',
+                    label: 'Average attendance',
                     value: avg ?? 0,
                     decimals: 1,
                     suffix: '%',
