@@ -396,4 +396,23 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Approve student?'), findsNothing);
   });
+
+  testWidgets('Pulling a page down runs its refresh, even when it is short', (
+    tester,
+  ) async {
+    var refreshed = 0;
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ContentPage(
+            onRefresh: () async => refreshed++,
+            children: const [Text('Short page')],
+          ),
+        ),
+      ),
+    );
+    await tester.fling(find.text('Short page'), const Offset(0, 400), 1000);
+    await tester.pumpAndSettle();
+    expect(refreshed, 1);
+  });
 }

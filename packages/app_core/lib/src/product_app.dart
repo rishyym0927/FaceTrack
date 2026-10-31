@@ -611,10 +611,21 @@ class ProductShell extends StatelessWidget {
 }
 
 class ContentPage extends StatelessWidget {
-  const ContentPage({super.key, required this.children});
+  const ContentPage({super.key, required this.children, this.onRefresh});
   final List<Widget> children;
+
+  /// Pull down to refresh (touch screens); the page's Refresh button remains.
+  final Future<void> Function()? onRefresh;
   @override
-  Widget build(BuildContext context) => ListView(
+  Widget build(BuildContext context) {
+    final list = _list(context);
+    if (onRefresh == null) return list;
+    return RefreshIndicator(onRefresh: onRefresh!, child: list);
+  }
+
+  Widget _list(BuildContext context) => ListView(
+    // Always scrollable so a short page can still be pulled to refresh.
+    physics: onRefresh == null ? null : const AlwaysScrollableScrollPhysics(),
     padding: EdgeInsets.symmetric(
       horizontal: MediaQuery.sizeOf(context).width < 600 ? 16 : 32,
       vertical: MediaQuery.sizeOf(context).width < 600 ? 20 : 32,

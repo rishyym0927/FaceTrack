@@ -204,10 +204,14 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
       ),
     );
     if (loading && records.isEmpty) {
-      return ContentPage(children: [header, const SkeletonList()]);
+      return ContentPage(
+        onRefresh: load,
+        children: [header, const SkeletonList()],
+      );
     }
     if (error != null && records.isEmpty) {
       return ContentPage(
+        onRefresh: load,
         children: [
           header,
           ErrorView(error!, retry: load),
@@ -216,6 +220,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
     }
     if (records.isEmpty) {
       return ContentPage(
+        onRefresh: load,
         children: [
           header,
           const MessageView(
@@ -228,6 +233,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
     final scoped = filterRecords(records, subject: subject, range: range);
     final listed = filterRecords(scoped, status: status);
     return ContentPage(
+      onRefresh: load,
       children: [
         header,
         if (failed.isNotEmpty)

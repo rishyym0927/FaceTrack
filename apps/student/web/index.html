@@ -17,6 +17,7 @@
   <base href="$FLUTTER_BASE_HREF">
 
   <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="FaceTrack Student attendance app.">
   <meta name="theme-color" content="#176451">
@@ -32,8 +33,54 @@
 
   <title>FaceTrack Student</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    /* Shown while the app downloads; removed on Flutter's first frame. */
+    #splash {
+      position: fixed; inset: 0; z-index: 9999;
+      display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px;
+      background: linear-gradient(135deg, #0d2a2c, #135f50 60%, #23906f);
+      color: #fff; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      transition: opacity .35s ease;
+    }
+    #splash.done { opacity: 0; pointer-events: none; }
+    #splash .mark {
+      width: 64px; height: 64px; border-radius: 20px; background: rgba(255,255,255,.14);
+      display: grid; place-items: center;
+    }
+    #splash .name { font-size: 22px; font-weight: 800; letter-spacing: -.3px; }
+    #splash .bar { width: 160px; height: 4px; border-radius: 4px; background: rgba(255,255,255,.2); overflow: hidden; }
+    #splash .bar::after {
+      content: ""; display: block; width: 40%; height: 100%; border-radius: 4px; background: #fff;
+      animation: slide 1.1s ease-in-out infinite;
+    }
+    #splash .hint { font-size: 13px; color: #cde8de; }
+    @keyframes slide { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+    @media (prefers-reduced-motion: reduce) {
+      #splash { transition: none; }
+      #splash .bar::after { animation: none; width: 100%; opacity: .6; }
+    }
+  </style>
 </head>
 <body>
+  <div id="splash" role="status" aria-live="polite">
+    <div class="mark" aria-hidden="true">
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round">
+        <path d="M4 8V6a2 2 0 0 1 2-2h2M16 4h2a2 2 0 0 1 2 2v2M20 16v2a2 2 0 0 1-2 2h-2M8 20H6a2 2 0 0 1-2-2v-2"/>
+        <circle cx="12" cy="12" r="3"/>
+      </svg>
+    </div>
+    <div class="name">FaceTrack</div>
+    <div class="bar" aria-hidden="true"></div>
+    <div class="hint">Loading…</div>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var s = document.getElementById('splash');
+      if (!s) return;
+      s.classList.add('done');
+      setTimeout(function () { s.remove(); }, 400);
+    });
+  </script>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader

@@ -310,6 +310,26 @@ class _NotificationsPageState extends State<NotificationsPage> {
     widget.refresh();
   }
 
+  /// Starts a forced reload and completes once the list has been replaced.
+  Future<void> _pullRefresh() async {
+    final c = widget.center, done = Completer<void>();
+    var started = false;
+    void watch() {
+      if (c.loading) started = true;
+      if (started && !c.loading && !done.isCompleted) done.complete();
+    }
+
+    c.addListener(watch);
+    widget.refresh();
+    try {
+      await done.future.timeout(const Duration(seconds: 20));
+    } catch (_) {
+      // A slow network still releases the indicator.
+    } finally {
+      c.removeListener(watch);
+    }
+  }
+
   @override
   Widget build(BuildContext context) => ListenableBuilder(
     listenable: widget.center,
@@ -328,6 +348,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
           if (n.tone == NoticeTone.success || n.tone == NoticeTone.info) n,
       ];
       return ContentPage(
+        onRefresh: _pullRefresh,
         children: [
           Wrap(
             spacing: 12,

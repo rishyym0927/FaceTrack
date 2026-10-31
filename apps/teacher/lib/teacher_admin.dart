@@ -557,7 +557,10 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         },
       );
     }
-    return ContentPage(children: [_hero(), const SizedBox(height: 24), body]);
+    return ContentPage(
+      onRefresh: _reload,
+      children: [_hero(), const SizedBox(height: 24), body],
+    );
   }
 
   Widget _hero() {

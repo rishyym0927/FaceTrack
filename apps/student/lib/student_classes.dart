@@ -89,6 +89,7 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
       if (p.instituteId == institute) name = firstName(p.name);
     }
     return ContentPage(
+      onRefresh: () => controller.load(),
       children: [
         HomeHero(
           title: '${greeting()}${name == null ? '' : ', $name'}',

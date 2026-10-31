@@ -10,6 +10,7 @@ import 'biometric_reviews.dart';
 import 'teacher_sessions.dart';
 import 'teacher_dashboard.dart';
 import 'teacher_disputes.dart';
+import 'teacher_notifications.dart';
 
 class TeacherClasses extends ConsumerStatefulWidget {
   const TeacherClasses({super.key});
@@ -182,6 +183,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
       if (t.instituteId == institute) name = firstName(t.name);
     }
     return ContentPage(
+      onRefresh: refreshAll,
       children: [
         HomeHero(
           title: '${greeting()}${name == null ? '' : ', $name'}',
@@ -241,6 +243,49 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   late final PagedController<BiometricAttempt> faces;
   int tab = 3;
   bool loadingCode = false;
+
+  /// Pending work per tab, shown as counts on the tab chips.
+  SubjectWork? work;
+
+  Future<void> _loadWork() async {
+    try {
+      final w = await loadSubjectWork(api, institute, await record);
+      if (mounted) setState(() => work = w);
+    } catch (_) {
+      // Counts are a hint; the tabs still work without them.
+    }
+  }
+
+  int get _toReview =>
+      work?.sessions
+          .where(
+            (s) => const {
+              'closed',
+              'review_required',
+              'no_data',
+            }.contains(s['status']),
+          )
+          .length ??
+      0;
+
+  Widget _tabChip(int index, String label, int count) => ChoiceChip(
+    label: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(label),
+        if (count > 0) ...[
+          const SizedBox(width: 6),
+          Badge(
+            label: Text('$count'),
+            backgroundColor: const Color(0xff9a6a00),
+          ),
+        ],
+      ],
+    ),
+    tooltip: count > 0 ? '$count waiting for you' : null,
+    selected: tab == index,
+    onSelected: (_) => setState(() => tab = index),
+  );
   @override
   void initState() {
     super.initState();
@@ -267,13 +312,19 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     requests.load();
     students.load();
     faces.load();
+    _loadWork();
     watchLifecycle();
   }
 
   Future<void> refresh() async {
     if (!mounted) return;
     setState(() => record = api.offering(institute, widget.id));
-    await Future.wait([requests.load(), students.load(), faces.load()]);
+    await Future.wait([
+      requests.load(),
+      students.load(),
+      faces.load(),
+      _loadWork(),
+    ]);
   }
 
   @override
@@ -463,6 +514,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     builder: (context, snapshot) {
       if (snapshot.hasError) {
         return ContentPage(
+          onRefresh: refresh,
           children: [ErrorView(snapshot.error!, retry: refresh)],
         );
       }
@@ -471,6 +523,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
       }
       final o = snapshot.data!;
       return ContentPage(
+        onRefresh: refresh,
         children: [
           Align(
             alignment: Alignment.centerLeft,
@@ -512,36 +565,12 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                   spacing: 8,
                   runSpacing: 8,
                   children: [
-                    ChoiceChip(
-                      label: const Text('Sessions'),
-                      selected: tab == 3,
-                      onSelected: (_) => setState(() => tab = 3),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Join requests'),
-                      selected: tab == 0,
-                      onSelected: (_) => setState(() => tab = 0),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Face reviews'),
-                      selected: tab == 2,
-                      onSelected: (_) => setState(() => tab = 2),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Students'),
-                      selected: tab == 1,
-                      onSelected: (_) => setState(() => tab = 1),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Attendance queries'),
-                      selected: tab == 4,
-                      onSelected: (_) => setState(() => tab = 4),
-                    ),
-                    ChoiceChip(
-                      label: const Text('Overview'),
-                      selected: tab == 5,
-                      onSelected: (_) => setState(() => tab = 5),
-                    ),
+                    _tabChip(3, 'Sessions', _toReview),
+                    _tabChip(0, 'Join requests', work?.joinRequests ?? 0),
+                    _tabChip(2, 'Face reviews', work?.faceReviews ?? 0),
+                    _tabChip(1, 'Students', 0),
+                    _tabChip(4, 'Attendance queries', work?.openQueries ?? 0),
+                    _tabChip(5, 'Overview', 0),
                   ],
                 ),
                 const SizedBox(height: 12),

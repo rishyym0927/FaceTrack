@@ -156,17 +156,26 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
       builder: (context, box) => box.maxWidth >= 460
           ? Row(
               crossAxisAlignment: CrossAxisAlignment.center,
-              children: [ring, const SizedBox(width: 20), Expanded(child: tiles)],
+              children: [
+                ring,
+                const SizedBox(width: 20),
+                Expanded(child: tiles),
+              ],
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [Center(child: ring), const SizedBox(height: 16), tiles],
+              children: [
+                Center(child: ring),
+                const SizedBox(height: 16),
+                tiles,
+              ],
             ),
     );
   }
 
   @override
   Widget build(BuildContext context) => ContentPage(
+    onRefresh: () => controller.load(),
     children: [
       TextButton.icon(
         onPressed: () => goBack(context, '/classes'),
@@ -254,7 +263,14 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                   }),
                 ],
                 const SizedBox(height: 12),
-                Text('Publication revision ${r['revision']}'),
+                if ((r['revision'] as num? ?? 1) > 1)
+                  const Row(
+                    children: [
+                      Icon(Icons.edit_note, size: 18),
+                      SizedBox(width: 6),
+                      Text('Corrected by faculty'),
+                    ],
+                  ),
                 if (r['reason'] != null) Text('Faculty note: ${r['reason']}'),
                 if (query != null) ...[
                   const SizedBox(height: 12),
