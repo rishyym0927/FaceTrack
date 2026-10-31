@@ -7,9 +7,11 @@ plugins {
 }
 
 // Release signing comes from the git-ignored .local/release/signing/key.properties
+// (or FACETRACK_KEY_PROPERTIES when building from a clean worktree)
 // (see docs/DEPLOY_AZURE.md). Without it, release builds stay unsigned as before.
 val signingProps = Properties().apply {
-    val file = rootProject.file("../../../.local/release/signing/key.properties")
+    val file = System.getenv("FACETRACK_KEY_PROPERTIES")?.let { File(it) }
+        ?: rootProject.file("../../../.local/release/signing/key.properties")
     if (file.exists()) file.inputStream().use { load(it) }
 }
 
