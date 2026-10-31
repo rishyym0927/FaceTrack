@@ -393,7 +393,10 @@ def install(app, engine, settings, principal, storage):
             return page(
                 await many(
                     c,
-                    "SELECT * FROM app.sessions WHERE institute_id=:i AND offering_id=:o AND (CAST(:cur AS uuid) IS NULL OR id>CAST(:cur AS uuid)) ORDER BY id LIMIT :n",
+                    """SELECT * FROM app.sessions WHERE institute_id=:i AND offering_id=:o
+                    AND (CAST(:cur AS uuid) IS NULL OR (starts_at,id)<(SELECT starts_at,id FROM app.sessions
+                      WHERE institute_id=:i AND id=CAST(:cur AS uuid)))
+                    ORDER BY starts_at DESC,id DESC LIMIT :n""",
                     {
                         "i": institute_id,
                         "o": offering_id,
@@ -684,7 +687,7 @@ def install(app, engine, settings, principal, storage):
                 """SELECT p.id,p.revision,p.published_at,p.snapshot_json FROM app.publications p JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
             WHERE p.institute_id=:i AND p.revision=s.attendance_revision AND (CAST(:o AS uuid) IS NULL OR s.offering_id=CAST(:o AS uuid))
             AND EXISTS(SELECT 1 FROM app.session_roster r WHERE r.institute_id=s.institute_id AND r.session_id=s.id AND r.student_id=:student)
-            ORDER BY p.id""",
+            ORDER BY p.published_at DESC,p.id DESC""",
                 {
                     "i": institute_id,
                     "o": str(offering_id) if offering_id else None,
@@ -712,7 +715,11 @@ def install(app, engine, settings, principal, storage):
             present = sum(x["status"] in ("present", "late") for x in items)
             den = sum(x["status"] in ("present", "late", "absent") for x in items)
             pending = sum(x["status"] == "unassessed" for x in items)
-            filtered = [x for x in items if cursor is None or x["id"] > cursor]
+            if cursor is None:
+                filtered = items
+            else:
+                at = next((n for n, x in enumerate(items) if x["id"] == cursor), None)
+                filtered = [] if at is None else items[at + 1 :]
             return {
                 **page(filtered, limit),
                 "summary": {
@@ -867,8 +874,9 @@ def install(app, engine, settings, principal, storage):
                 """SELECT d.*,s.offering_id,s.starts_at FROM app.attendance_disputes d
                 JOIN app.sessions s ON s.institute_id=d.institute_id AND s.id=d.session_id
                 WHERE d.institute_id=:i AND d.student_id=:student
-                AND (CAST(:cur AS uuid) IS NULL OR d.id>CAST(:cur AS uuid))
-                ORDER BY d.id LIMIT :n""",
+                AND (CAST(:cur AS uuid) IS NULL OR (d.created_at,d.id)<(SELECT created_at,id
+                  FROM app.attendance_disputes WHERE institute_id=:i AND id=CAST(:cur AS uuid)))
+                ORDER BY d.created_at DESC,d.id DESC LIMIT :n""",
                 {
                     "i": institute_id,
                     "student": st["id"],
@@ -898,8 +906,9 @@ def install(app, engine, settings, principal, storage):
                 JOIN app.session_roster r ON r.institute_id=d.institute_id
                   AND r.session_id=d.session_id AND r.student_id=d.student_id
                 WHERE d.institute_id=:i AND s.offering_id=:o AND d.status=:status
-                AND (CAST(:cur AS uuid) IS NULL OR d.id>CAST(:cur AS uuid))
-                ORDER BY d.id LIMIT :n""",
+                AND (CAST(:cur AS uuid) IS NULL OR (d.created_at,d.id)<(SELECT created_at,id
+                  FROM app.attendance_disputes WHERE institute_id=:i AND id=CAST(:cur AS uuid)))
+                ORDER BY d.created_at DESC,d.id DESC LIMIT :n""",
                 {
                     "i": institute_id,
                     "o": offering_id,

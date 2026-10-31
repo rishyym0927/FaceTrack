@@ -236,6 +236,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   late final String institute;
   Json? data;
   AppFailure? error;
+
+  /// Record/upload problems, shown inside the capture panel next to the
+  /// button rather than at the top of the page.
+  AppFailure? captureError;
   bool busy = false, ack = false;
   final decisions = <String, String>{};
   final camera = GuidedCamera();
@@ -348,8 +352,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         decisions.clear();
         // Pre-fill only once processing is over, so polling keeps refreshing
         // while a capture is still running.
-        if (const {'closed', 'review_required', 'no_data'}
-                .contains(result['session']['status']) &&
+        if (const {
+              'closed',
+              'review_required',
+              'no_data',
+            }.contains(result['session']['status']) &&
             !_captureIsPending(capture?['status'])) {
           decisions.addAll(
             draftAbsentDecisions((result['items'] as List).cast<Json>()),
@@ -374,24 +381,34 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     }
   }
 
-  Future<void> action(Future<void> Function() fn) async {
+  Future<void> action(
+    Future<void> Function() fn, {
+    bool capturePanel = false,
+  }) async {
     if (busy) return;
     setState(() {
       busy = true;
       error = null;
+      if (capturePanel) captureError = null;
     });
     exitGuard.busy = true;
     try {
       await fn();
     } catch (e) {
       if (mounted) {
-        setState(
-          () => error = e is AppFailure
-              ? e
-              : const AppFailure(
-                  'The action did not finish. Retry without leaving this page.',
-                ),
-        );
+        final failure = e is AppFailure
+            ? e
+            : const AppFailure(
+                'The action did not finish. Retry without leaving this page.',
+              );
+        setState(() {
+          if (capturePanel) {
+            captureError = failure;
+          } else {
+            error = failure;
+          }
+        });
+        if (capturePanel) showMessage(context, failure.message);
       }
     } finally {
       exitGuard.busy = false;
@@ -463,7 +480,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     await load();
   }
 
-  Future<void> record() => action(() async {
+  Future<void> record() => action(capturePanel: true, () async {
     capture = null;
     captureStatusRequest = null;
     captureStatusId = null;
@@ -479,7 +496,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       'classroom',
     ]);
   });
-  Future<void> upload() => action(() async {
+  Future<void> upload() => action(capturePanel: true, () async {
     final file = camera.clip!;
     final bytes = await file.length();
     if (bytes > 26214400) {
@@ -811,19 +828,35 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                     icon: const Icon(Icons.videocam_outlined),
                     label: const Text('Record classroom'),
                   ),
+                if (captureError != null)
+                  CaptureProblem(
+                    failure: captureError!,
+                    clipKept: camera.clip != null,
+                  ),
               ],
             ),
           ),
         if (capture != null)
           FutureBuilder<Json>(
             future: captureStatus(capture!['id'] as String),
-            builder: (c, snapshot) => Text(
-              snapshot.hasData
-                  ? 'Capture: ${captureStatusLabel(snapshot.data!['status'] as String)}'
-                  : snapshot.hasError
-                  ? 'Capture status unavailable. Refresh this session to retry.'
-                  : 'Checking capture status…',
-            ),
+            builder: (c, snapshot) {
+              final quality = snapshot.hasData
+                  ? captureQuality(snapshot.data!)
+                  : null;
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    snapshot.hasData
+                        ? 'Capture: ${captureStatusLabel(snapshot.data!['status'] as String)}'
+                        : snapshot.hasError
+                        ? 'Capture status unavailable. Refresh this session to retry.'
+                        : 'Checking capture status…',
+                  ),
+                  if (quality != null) CaptureQualityNote(quality),
+                ],
+              );
+            },
           ),
         if (rows.isEmpty)
           const Panel(
@@ -917,6 +950,124 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
 bool _captureIsPending(Object? status) =>
     const {'awaiting_upload', 'queued', 'processing'}.contains(status);
+
+/// What processing said about a capture's frames, from `quality_json.counts`.
+class CaptureQuality {
+  const CaptureQuality(this.text, {required this.poor});
+  final String text;
+  final bool poor;
+}
+
+const _retakeTips =
+    'Record again closer (0.5–1 m from each face), with light on faces and no window behind them, holding each face steady for 3–4 seconds.';
+
+/// Null until processing has produced frame counts.
+CaptureQuality? captureQuality(Json capture) {
+  final quality = capture['quality_json'];
+  final counts = quality is Map ? quality['counts'] : null;
+  if (counts is! Map) return null;
+  final sampled = (counts['sampled_frames'] as num?)?.toInt() ?? 0;
+  final faces = (counts['detections'] as num?)?.toInt() ?? 0;
+  final rejected = (counts['quality_rejects'] as num?)?.toInt() ?? 0;
+  if (sampled == 0) return null;
+  final usable = (faces - rejected).clamp(0, faces);
+  if (faces == 0) {
+    return CaptureQuality(
+      'No faces were found in the $sampled frames checked. Point the camera at students\' faces. $_retakeTips',
+      poor: true,
+    );
+  }
+  if (usable * 2 < faces) {
+    return CaptureQuality(
+      'Only $usable of $faces faces found were clear enough to use, so most students stay Unassessed. $_retakeTips',
+      poor: true,
+    );
+  }
+  return CaptureQuality(
+    '$usable of $faces faces found were clear enough to use.',
+    poor: false,
+  );
+}
+
+class CaptureQualityNote extends StatelessWidget {
+  const CaptureQualityNote(this.quality, {super.key});
+  final CaptureQuality quality;
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(top: 8),
+    padding: const EdgeInsets.all(12),
+    decoration: BoxDecoration(
+      color: quality.poor ? const Color(0xfffff1db) : const Color(0xffe3f4ea),
+      borderRadius: BorderRadius.circular(12),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(
+          quality.poor
+              ? Icons.tips_and_updates_outlined
+              : Icons.check_circle_outline,
+          color: quality.poor
+              ? const Color(0xffa15c07)
+              : const Color(0xff1d7a4f),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Text(quality.text)),
+      ],
+    ),
+  );
+}
+
+class CaptureProblem extends StatelessWidget {
+  const CaptureProblem({
+    super.key,
+    required this.failure,
+    required this.clipKept,
+  });
+  final AppFailure failure;
+  final bool clipKept;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Semantics(
+      liveRegion: true,
+      child: Container(
+        margin: const EdgeInsets.only(top: 12),
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: scheme.errorContainer.withValues(alpha: .6),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.error_outline, color: scheme.error),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'The recording was not uploaded',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(failure.message),
+                  const SizedBox(height: 4),
+                  Text(
+                    clipKept
+                        ? 'Your recording is kept. Check the connection and tap Upload again; it resumes safely.'
+                        : 'Record the classroom again to retry.',
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 String captureStatusLabel(String status) => switch (status) {
   'awaiting_upload' => 'waiting for upload',

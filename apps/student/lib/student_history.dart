@@ -224,10 +224,13 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
           // Match by session, not by publication id: an accepted correction
           // supersedes the original Absent publication with a new id, so a
           // publication-id match would drop the query note after resolution.
-          // disputes arrive ordered oldest-first, so the last match is latest.
+          // disputes arrive newest-first, so the first match is the latest.
           Json? query;
           for (final item in disputes) {
-            if (item['session_id'] == r['session_id']) query = item;
+            if (item['session_id'] == r['session_id']) {
+              query = item;
+              break;
+            }
           }
           return Panel(
             child: Column(

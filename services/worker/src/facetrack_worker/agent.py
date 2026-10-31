@@ -7,6 +7,19 @@ import httpx
 from . import config
 from .executor import api, app, clean_abandoned
 
+CREDENTIAL_REJECTED = (
+    "Worker credential rejected or expired. Processing is paused: ask the project owner to reissue it."
+)
+WAITING = "Enrolment agent waiting for local API/broker."
+
+
+def failure_notice(error):
+    """Message and retry delay for a failed API call. A rejected credential
+    must not look like a network problem: it never fixes itself."""
+    if isinstance(error, httpx.HTTPStatusError) and error.response.status_code in (401, 403):
+        return CREDENTIAL_REJECTED, 60
+    return WAITING, 5
+
 
 def main():
     config.validate()
@@ -26,9 +39,10 @@ def main():
                     lease = response.json()
                     app.send_task("facetrack.enroll", args=[lease["id"], lease["lease_epoch"]])
                 time.sleep(2)
-            except (httpx.HTTPError, ConnectionError):
-                print("Enrolment agent waiting for local API/broker.", flush=True)
-                time.sleep(5)
+            except (httpx.HTTPError, ConnectionError) as error:
+                message, delay = failure_notice(error)
+                print(message, flush=True)
+                time.sleep(delay)
             except KeyboardInterrupt:
                 return
 

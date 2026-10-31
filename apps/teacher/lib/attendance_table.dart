@@ -432,8 +432,10 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
     'recognized' => 'Recognized in separate video frames.',
     'not_recognized' =>
       'No corroborated match in a usable capture. Verify before marking Absent.',
-    'template_ineligible' => 'Face template unavailable; assess manually.',
-    'limited_capture' => 'Capture coverage was insufficient; assess manually.',
+    'template_ineligible' =>
+      'No approved face enrolment yet, so the model cannot check this student; assess manually.',
+    'limited_capture' =>
+      'Too few clear frames of this student; record again closer or assess manually.',
     'processing_failed' => 'Processing failed; assess manually.',
     _ => aiStatusLabel(row),
   };

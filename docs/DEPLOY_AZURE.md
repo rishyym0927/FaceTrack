@@ -27,7 +27,7 @@ The VM's agent claims processing jobs from the shared hosted database. Run **eit
 
 ## Updating
 
-From the Mac, after pushing to `main`:
+From the Mac, after pushing to `main` (the script starts the VM if it is deallocated and allows SSH from your current IP first):
 
 ```sh
 deploy/azure/deploy.sh            # ships origin/main, rebuilds containers and both web apps
@@ -48,7 +48,8 @@ docker compose logs --tail 100 api worker agent
 - Containers restart automatically after a reboot.
 - Pause billing: `az vm deallocate -g facetrack-rg -n facetrack-vm`; resume: `az vm start -g facetrack-rg -n facetrack-vm` (the IP and name stay).
 - SSH refused after the operator's IP changes: `az network nsg rule update -g facetrack-rg --nsg-name facetrack-vmNSG -n default-allow-ssh --source-address-prefixes <new-ip>/32`.
-- The worker credential is time-limited. If the agent logs "waiting for local API/broker" continuously while the API is ready, the credential may have expired; the owner reissues it. Do not reseed or reprovision.
+- The worker credential is time-limited. The current one expires on **22 November 2026 (06:23 UTC)**. When it is rejected the agent logs "Worker credential rejected or expired" every minute and processing pauses (uploads still succeed and wait in the queue). The owner reissues it with the provisioning tool and replaces `WORKER_TOKEN` in `services/worker/.env` on the VM, then runs `docker compose up -d worker agent`. That is a deliberate owner action, never part of routine deploys. Do not reseed or reprovision.
+- "Enrolment agent waiting for local API/broker" means the agent cannot reach the API or Redis (network or startup), not a credential problem.
 
 ## Limits to state honestly
 

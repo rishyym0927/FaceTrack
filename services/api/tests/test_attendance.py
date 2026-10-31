@@ -482,3 +482,90 @@ async def test_limited_capture_never_proposes_absence(bio):
     ).json()["items"]
     assert all(x["status"] == "unassessed" for x in rows)
     assert all(x["assessment_code"] == "limited_capture" for x in rows)
+
+
+async def test_session_list_is_newest_first_across_cursor_pages(bio):
+    b = bio
+    base = datetime.now(timezone.utc).replace(microsecond=0)
+    created = []
+    for n, days in enumerate((-3, -1, -5, -2)):
+        start = base + timedelta(days=days)
+        r = await b.client.post(
+            "/v1/sessions",
+            headers=b.headers("teacher", key=f"order-{n}"),
+            json={
+                "offering_id": b.ids["offering"],
+                "starts_at": start.isoformat(),
+                "ends_at": (start + timedelta(hours=1)).isoformat(),
+            },
+        )
+        assert r.status_code == 201, r.text
+        created.append(r.json())
+    expected = [s["id"] for s in sorted(created, key=lambda s: s["starts_at"], reverse=True)]
+    seen, cursor = [], None
+    for _ in range(3):
+        params = {"offering_id": b.ids["offering"], "limit": 2}
+        if cursor:
+            params["cursor"] = cursor
+        r = await b.client.get("/v1/sessions", headers=b.headers("teacher"), params=params)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        seen += [s["id"] for s in body["items"]]
+        cursor = body["next_cursor"]
+        if cursor is None:
+            break
+        assert cursor == body["items"][-1]["id"]
+    assert seen == expected
+
+
+async def test_own_attendance_is_newest_first_across_cursor_pages(bio):
+    b = bio
+    base = datetime.now(timezone.utc)
+    published = []
+    for n in range(3):
+        r = await b.client.post(
+            "/v1/sessions",
+            headers=b.headers("teacher", key=f"own-{n}"),
+            json={
+                "offering_id": b.ids["offering"],
+                "starts_at": (base - timedelta(minutes=n + 1)).isoformat(),
+                "ends_at": (base + timedelta(hours=1)).isoformat(),
+            },
+        )
+        assert r.status_code == 201, r.text
+        s = r.json()
+        sid = s["id"]
+        for step in ("open", "close"):
+            r = await b.client.post(
+                f"/v1/sessions/{sid}/{step}",
+                headers=b.headers("teacher", key=f"{step}-{n}", version=s["version"]),
+            )
+            assert r.status_code == 200, r.text
+            s = r.json()
+        r = await b.client.post(
+            f"/v1/sessions/{sid}/finalize",
+            headers=b.headers("teacher", key=f"pub-{n}", version=s["version"]),
+            json={
+                "decisions": [
+                    {"student_id": b.ids["student1_profile"], "status": "present", "reason": "seen"}
+                ]
+            },
+        )
+        assert r.status_code == 200, r.text
+        published.append(sid)
+    seen, cursor = [], None
+    for _ in range(3):
+        params = {"limit": 1, **({"cursor": cursor} if cursor else {})}
+        r = await b.client.get("/v1/me/attendance", headers=b.headers("student1"), params=params)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        # The summary always covers every published session, not just this page.
+        assert body["summary"]["assessed"] == 3 and len(body["items"]) == 1
+        seen.append(body["items"][0])
+        cursor = body["next_cursor"]
+        if cursor is None:
+            break
+        assert cursor == body["items"][-1]["id"]
+    assert [x["session_id"] for x in seen] == published[::-1]
+    times = [x["published_at"] for x in seen]
+    assert times == sorted(times, reverse=True)
