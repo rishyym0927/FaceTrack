@@ -36,36 +36,76 @@ class TeacherSessions extends StatefulWidget {
     required this.institute,
     required this.offering,
     required this.publishableKey,
+    this.version = 0,
+    this.changed,
   });
   final ApiClient api;
   final String institute, offering, publishableKey;
+
+  /// A change reloads the list (the subject page's refresh).
+  final int version;
+
+  /// Called after sessions were created or imported.
+  final VoidCallback? changed;
   @override
   State<TeacherSessions> createState() => _TeacherSessionsState();
 }
 
+/// Which sessions a filter shows.
+enum SessionGroup { todo, upcoming, published, cancelled }
+
+SessionGroup sessionGroup(Json s) => switch (s['status']) {
+  'scheduled' => SessionGroup.upcoming,
+  'finalized' => SessionGroup.published,
+  'cancelled' => SessionGroup.cancelled,
+  _ => SessionGroup.todo, // open, closed, review_required, no_data
+};
+
 class _TeacherSessionsState extends State<TeacherSessions> {
-  late final PagedController<Json> controller;
+  List<Json>? sessions;
+  Object? error;
+  bool loading = false;
+  SessionGroup? filter;
+  int _generation = 0;
+
   @override
   void initState() {
     super.initState();
-    controller = PagedController(
-      (cursor) async => PageData.fromJson(
-        await widget.api.send(
-          'GET',
-          '/v1/sessions',
-          institute: widget.institute,
-          query: {'offering_id': widget.offering, 'cursor': ?cursor},
-        ),
-        (j) => j,
-      ),
-    );
-    controller.load();
+    load();
   }
 
   @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
+  void didUpdateWidget(TeacherSessions old) {
+    super.didUpdateWidget(old);
+    if (old.version != widget.version) load();
+  }
+
+  Future<void> load() async {
+    final generation = ++_generation;
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      final rows = await fetchAllPages(
+        widget.api,
+        '/v1/sessions',
+        widget.institute,
+        query: {'offering_id': widget.offering},
+        maxPages: 10,
+      );
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        sessions = rows;
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        error = e;
+        loading = false;
+      });
+    }
   }
 
   Future<void> create() async {
@@ -154,73 +194,433 @@ class _TeacherSessionsState extends State<TeacherSessions> {
       ),
     );
     room.dispose();
-    await controller.load();
+    await load();
+    widget.changed?.call();
   }
 
-  @override
-  Widget build(BuildContext context) => Column(
-    crossAxisAlignment: CrossAxisAlignment.stretch,
-    children: [
-      Wrap(
-        spacing: 12,
+  Future<void> importTimetable() async {
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final body = SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          FilledButton.icon(
-            onPressed: create,
-            icon: const Icon(Icons.add),
-            label: const Text('Create session'),
+          Text(
+            'Import timetable',
+            style: Theme.of(context).textTheme.titleLarge,
           ),
-          OutlinedButton(
-            onPressed: () => controller.load(),
-            child: const Text('Refresh sessions'),
+          const SizedBox(height: 4),
+          Text(
+            'Upload the timetable CSV, check the preview, then confirm to create the scheduled sessions.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
-        ],
-      ),
-      const SizedBox(height: 16),
-      ExpansionTile(
-        title: const Text('Import timetable'),
-        subtitle: const Text('Upload a CSV and confirm scheduled sessions.'),
-        children: [
+          const SizedBox(height: 16),
           TeacherTimetable(
             api: widget.api,
             institute: widget.institute,
             offering: widget.offering,
             publishableKey: widget.publishableKey,
-            changed: () => controller.load(),
+            changed: () {
+              load();
+              widget.changed?.call();
+            },
           ),
         ],
       ),
-      const SizedBox(height: 16),
-      PagedList<Json>(
-        controller: controller,
-        emptyTitle: 'No sessions yet',
-        emptyMessage: 'Create a session to take attendance for this subject.',
-        item: (s) => Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    );
+    await showDialog<void>(
+      context: context,
+      builder: (context) => narrow
+          ? Dialog.fullscreen(
+              child: Scaffold(
+                appBar: AppBar(
+                  leading: IconButton(
+                    tooltip: 'Close',
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context),
+                  ),
+                ),
+                body: body,
+              ),
+            )
+          : Dialog(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: 720,
+                  maxHeight: 760,
+                ),
+                child: Stack(
+                  children: [
+                    body,
+                    Positioned(
+                      top: 8,
+                      right: 8,
+                      child: IconButton(
+                        tooltip: 'Close',
+                        icon: const Icon(Icons.close),
+                        onPressed: () => Navigator.pop(context),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+    );
+  }
+
+  static const _groupInfo = {
+    SessionGroup.todo: (
+      'Needs your action',
+      'Open, closed or waiting for your review',
+    ),
+    SessionGroup.upcoming: ('Upcoming', 'Scheduled and not yet opened'),
+    SessionGroup.published: ('Published', 'Attendance students can see'),
+    SessionGroup.cancelled: ('Cancelled', 'Kept for the record'),
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final all = sessions ?? const <Json>[];
+    final groups = {for (final g in SessionGroup.values) g: <Json>[]};
+    for (final s in all) {
+      groups[sessionGroup(s)]!.add(s);
+    }
+    int byStart(Json a, Json b) =>
+        (a['starts_at'] as String).compareTo(b['starts_at'] as String);
+    groups[SessionGroup.todo]!.sort(byStart);
+    groups[SessionGroup.upcoming]!.sort(byStart);
+    groups[SessionGroup.published]!.sort((a, b) => byStart(b, a));
+    groups[SessionGroup.cancelled]!.sort((a, b) => byStart(b, a));
+
+    final Widget list;
+    if (sessions == null && error == null) {
+      list = const SkeletonList();
+    } else if (error != null && sessions == null) {
+      list = ErrorView(error!, retry: load);
+    } else if (all.isEmpty) {
+      list = MessageView(
+        icon: Icons.event_note_outlined,
+        title: 'No sessions yet',
+        message: 'Create a session for your next class, or import the timetable to schedule the whole semester at once.',
+        action: FilledButton.icon(
+          onPressed: create,
+          icon: const Icon(Icons.add),
+          label: const Text('Create session'),
+        ),
+      );
+    } else {
+      final shown = [
+        for (final g in SessionGroup.values)
+          if ((filter == null || filter == g) && groups[g]!.isNotEmpty) g,
+      ];
+      list = Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (shown.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 24),
+              child: Center(child: Text('No sessions in this group.')),
+            ),
+          for (final g in shown) ...[
+            Padding(
+              padding: const EdgeInsets.only(top: 12, bottom: 10),
+              child: Wrap(
+                spacing: 0,
+                runSpacing: 2,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    _groupInfo[g]!.$1,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${groups[g]!.length} · ${_groupInfo[g]!.$2}',
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            for (final (i, s) in groups[g]!.indexed)
+              Reveal(
+                key: ValueKey(s['id']),
+                delayMs: i < 8 ? i * 30 : 0,
+                child: SessionCard(session: s),
+              ),
+          ],
+        ],
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            FilledButton.icon(
+              onPressed: create,
+              icon: const Icon(Icons.add),
+              label: const Text('Create session'),
+            ),
+            OutlinedButton.icon(
+              onPressed: importTimetable,
+              icon: const Icon(Icons.upload_file_outlined),
+              label: const Text('Import timetable'),
+            ),
+            IconButton(
+              tooltip: 'Refresh sessions',
+              onPressed: loading ? null : load,
+              icon: loading
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+        if (all.isNotEmpty) ...[
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
             children: [
-              Text(
-                sessionDate(context, s['starts_at']),
-                style: Theme.of(context).textTheme.titleMedium,
+              ChoiceChip(
+                label: Text('All ${all.length}'),
+                selected: filter == null,
+                onSelected: (_) => setState(() => filter = null),
               ),
-              Text(
-                '${sessionLabel(s['status'])}${s['room_label'] == '' ? '' : ' · ${s['room_label']}'}',
-              ),
-              const SizedBox(height: 12),
-              OutlinedButton(
-                onPressed: () => context.push('/sessions/${s['id']}'),
-                child: Text(switch (s['status']) {
-                  'finalized' => 'View published attendance',
-                  'review_required' || 'no_data' => 'Review attendance',
-                  'open' => 'Continue session',
-                  _ => 'View session',
-                }),
-              ),
+              for (final g in SessionGroup.values)
+                if (groups[g]!.isNotEmpty)
+                  ChoiceChip(
+                    label: Text(
+                      '${switch (g) {
+                        SessionGroup.todo => 'To do',
+                        SessionGroup.upcoming => 'Upcoming',
+                        SessionGroup.published => 'Published',
+                        SessionGroup.cancelled => 'Cancelled',
+                      }} ${groups[g]!.length}',
+                    ),
+                    selected: filter == g,
+                    onSelected: (_) => setState(() => filter = g),
+                  ),
             ],
+          ),
+        ],
+        const SizedBox(height: 8),
+        list,
+      ],
+    );
+  }
+}
+
+/// One session: a calendar tile, time and room, its state and the next step.
+class SessionCard extends StatelessWidget {
+  const SessionCard({super.key, required this.session});
+  final Json session;
+
+  static (Color, IconData) style(String? status) => switch (status) {
+    'scheduled' => (const Color(0xff465650), Icons.event_outlined),
+    'open' => (const Color(0xff1f5fa8), Icons.videocam_outlined),
+    'review_required' => (const Color(0xff9a6a00), Icons.rate_review_outlined),
+    'no_data' => (const Color(0xff9a6a00), Icons.edit_note),
+    'finalized' => (const Color(0xff176451), Icons.verified_outlined),
+    'cancelled' => (const Color(0xff7a7f7d), Icons.event_busy_outlined),
+    _ => (const Color(0xff9a6a00), Icons.lock_clock_outlined), // closed
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final s = session, scheme = Theme.of(context).colorScheme;
+    final l = MaterialLocalizations.of(context);
+    final start = DateTime.parse(s['starts_at'] as String).toLocal();
+    final end = s['ends_at'] is String
+        ? DateTime.parse(s['ends_at'] as String).toLocal()
+        : null;
+    final status = s['status'] as String?;
+    final (color, icon) = style(status);
+    final room = (s['room_label'] as String?) ?? '';
+    final action = switch (status) {
+      'finalized' => 'View attendance',
+      'review_required' || 'no_data' || 'closed' => 'Review attendance',
+      'open' => 'Continue capture',
+      'cancelled' => 'View',
+      _ => 'Open session',
+    };
+    final primary = sessionGroup(s) == SessionGroup.todo;
+    const months = [
+      'JAN',
+      'FEB',
+      'MAR',
+      'APR',
+      'MAY',
+      'JUN',
+      'JUL',
+      'AUG',
+      'SEP',
+      'OCT',
+      'NOV',
+      'DEC',
+    ];
+    void open() => context.push('/sessions/${s['id']}');
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: open,
+          child: Container(
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: primary
+                    ? color.withValues(alpha: .45)
+                    : scheme.outlineVariant,
+              ),
+            ),
+            child: LayoutBuilder(
+              builder: (context, box) {
+                final narrow = box.maxWidth < 460;
+                final button = primary
+                    ? FilledButton(onPressed: open, child: Text(action))
+                    : TextButton(onPressed: open, child: Text(action));
+                final row = Row(
+                  children: [
+                    Container(
+                      width: 58,
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      decoration: BoxDecoration(
+                        color: color.withValues(alpha: .10),
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      child: Column(
+                        children: [
+                          Text(
+                            months[start.month - 1],
+                            style: TextStyle(
+                              fontSize: 11,
+                              fontWeight: FontWeight.w800,
+                              color: color,
+                              letterSpacing: 1,
+                            ),
+                          ),
+                          Text(
+                            '${start.day}',
+                            style: TextStyle(
+                              fontSize: 22,
+                              fontWeight: FontWeight.w800,
+                              color: color,
+                              height: 1.1,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            '${l.formatTimeOfDay(TimeOfDay.fromDateTime(start))}'
+                            '${end == null ? '' : ' – ${l.formatTimeOfDay(TimeOfDay.fromDateTime(end))}'}',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              fontSize: 16,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Wrap(
+                            spacing: 8,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 8,
+                                  vertical: 3,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: color.withValues(alpha: .10),
+                                  borderRadius: BorderRadius.circular(99),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(icon, size: 14, color: color),
+                                    const SizedBox(width: 4),
+                                    Flexible(
+                                      child: Text(
+                                        sessionLabel(status ?? ''),
+                                        overflow: TextOverflow.ellipsis,
+                                        style: TextStyle(
+                                          fontSize: 12,
+                                          fontWeight: FontWeight.w700,
+                                          color: color,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (room.isNotEmpty)
+                                Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      Icons.meeting_room_outlined,
+                                      size: 15,
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      room,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              Text(
+                                l.formatMediumDate(start),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                    if (!narrow) ...[const SizedBox(width: 8), button],
+                  ],
+                );
+                if (!narrow) return row;
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [row, const SizedBox(height: 10), button],
+                );
+              },
+            ),
           ),
         ),
       ),
-    ],
-  );
+    );
+  }
 }
 
 class TeacherSessionDetail extends ConsumerStatefulWidget {
@@ -956,9 +1356,18 @@ class RecordingTips extends StatelessWidget {
   static const tips = [
     (Icons.light_mode_outlined, 'Light on faces, no window behind students.'),
     (Icons.social_distance_outlined, 'Stay 0.5–1 m from each face.'),
-    (Icons.timer_outlined, 'Hold each face steady for 3–4 seconds, then move slowly.'),
-    (Icons.video_library_outlined, 'Each clip is 15 s with audio off. For a bigger class, record 2–3 clips: each adds recognised students.'),
-    (Icons.cloud_upload_outlined, 'Keep this page open until the upload finishes.'),
+    (
+      Icons.timer_outlined,
+      'Hold each face steady for 3–4 seconds, then move slowly.',
+    ),
+    (
+      Icons.video_library_outlined,
+      'Each clip is 15 s with audio off. For a bigger class, record 2–3 clips: each adds recognised students.',
+    ),
+    (
+      Icons.cloud_upload_outlined,
+      'Keep this page open until the upload finishes.',
+    ),
   ];
   @override
   Widget build(BuildContext context) => Padding(
@@ -972,7 +1381,11 @@ class RecordingTips extends StatelessWidget {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
+                Icon(
+                  icon,
+                  size: 18,
+                  color: Theme.of(context).colorScheme.primary,
+                ),
                 const SizedBox(width: 10),
                 Expanded(child: Text(text)),
               ],
@@ -992,7 +1405,9 @@ CaptureQuality? captureCoverage(List<Json> rows) {
       .where((r) => r['assessment_code'] != 'template_ineligible')
       .toList();
   final noFace = assessed.length - eligible.length;
-  final found = eligible.where((r) => r['assessment_code'] == 'recognized').length;
+  final found = eligible
+      .where((r) => r['assessment_code'] == 'recognized')
+      .length;
   final missing = eligible.length - found;
   final parts = <String>[
     if (eligible.isEmpty)
@@ -1001,13 +1416,9 @@ CaptureQuality? captureCoverage(List<Json> rows) {
       'Recognised so far: $found of ${eligible.length} students with face enrolment.',
     if (eligible.isNotEmpty && missing > 0)
       '$missing not seen yet: record another clip covering them.',
-    if (noFace > 0)
-      '$noFace without face enrolment must be marked manually.',
+    if (noFace > 0) '$noFace without face enrolment must be marked manually.',
   ];
-  return CaptureQuality(
-    parts.join(' '),
-    poor: eligible.isEmpty || missing > 0,
-  );
+  return CaptureQuality(parts.join(' '), poor: eligible.isEmpty || missing > 0);
 }
 
 /// What processing said about a capture's frames, from `quality_json.counts`.

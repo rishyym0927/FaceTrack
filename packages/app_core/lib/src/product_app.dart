@@ -58,6 +58,9 @@ Future<void> launchProduct(
   Future<void> Function(AppServices)? configure,
 }) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Pages opened with push (a subject, a session) still show their own URL,
+  // so refresh, bookmarks and sharing land on the same page.
+  GoRouter.optionURLReflectsImperativeAPIs = true;
   if (kIsWeb) _webSemantics ??= SemanticsBinding.instance.ensureSemantics();
   try {
     final services = await AppServices.initialize(config);

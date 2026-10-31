@@ -268,24 +268,50 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
           .length ??
       0;
 
-  Widget _tabChip(int index, String label, int count) => ChoiceChip(
-    label: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Text(label),
-        if (count > 0) ...[
-          const SizedBox(width: 6),
-          Badge(
-            label: Text('$count'),
-            backgroundColor: const Color(0xff9a6a00),
-          ),
-        ],
-      ],
+  /// Bumped on refresh so the sessions tab reloads with the page.
+  int sessionsVersion = 0;
+
+  int _count(int tab) => switch (tab) {
+    3 => _toReview,
+    1 => work?.joinRequests ?? 0,
+    2 => work?.faceReviews ?? 0,
+    4 => work?.openQueries ?? 0,
+    _ => 0,
+  };
+
+  static const _tabs = [
+    (
+      3,
+      'Sessions',
+      Icons.event_note_outlined,
+      'Create a session, capture the classroom and review attendance before publishing.',
     ),
-    tooltip: count > 0 ? '$count waiting for you' : null,
-    selected: tab == index,
-    onSelected: (_) => setState(() => tab = index),
-  );
+    (
+      1,
+      'Students',
+      Icons.groups_outlined,
+      'Approve join requests after confirming each student belongs here; approved students join the next session.',
+    ),
+    (
+      2,
+      'Face reviews',
+      Icons.face_retouching_natural_outlined,
+      'Check each recording before activating face enrolment. Subject membership is approved separately.',
+    ),
+    (
+      4,
+      'Queries',
+      Icons.forum_outlined,
+      'Students question published Absent results here. Accepting one publishes a correction.',
+    ),
+    (
+      5,
+      'Overview',
+      Icons.insights_outlined,
+      'Cumulative attendance across every published class for this subject.',
+    ),
+  ];
+
   @override
   void initState() {
     super.initState();
@@ -319,6 +345,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   Future<void> refresh() async {
     if (!mounted) return;
     setState(() => record = api.offering(institute, widget.id));
+    setState(() => sessionsVersion++);
     await Future.wait([
       requests.load(),
       students.load(),
@@ -519,9 +546,10 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
         );
       }
       if (!snapshot.hasData) {
-        return const Center(child: CircularProgressIndicator());
+        return const ContentPage(children: [SkeletonCard(), SkeletonList()]);
       }
       final o = snapshot.data!;
+      final current = _tabs.firstWhere((t) => t.$1 == tab);
       return ContentPage(
         onRefresh: refresh,
         children: [
@@ -533,127 +561,588 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
               label: const Text('All subjects'),
             ),
           ),
-          PageHeader(
-            compact: true,
-            title: o.title,
-            subtitle: '${o.subtitle} · ${o.termCode}',
-            eyebrow: 'FACULTY WORKSPACE',
-            icon: Icons.space_dashboard_outlined,
-            action: Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                OutlinedButton.icon(
-                  onPressed: refresh,
-                  icon: const Icon(Icons.refresh),
-                  label: const Text('Refresh'),
-                ),
-                FilledButton.icon(
-                  onPressed: loadingCode ? null : code,
-                  icon: const Icon(Icons.key_outlined),
-                  label: const Text('Join code'),
-                ),
-              ],
-            ),
+          _SubjectHero(
+            offering: o,
+            students: students,
+            sessions: work?.sessions.length,
+            toReview: _toReview,
+            loadingCode: loadingCode,
+            onJoinCode: code,
+            onRefresh: refresh,
           ),
-          Panel(
-            padding: 16,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    _tabChip(3, 'Sessions', _toReview),
-                    _tabChip(0, 'Join requests', work?.joinRequests ?? 0),
-                    _tabChip(2, 'Face reviews', work?.faceReviews ?? 0),
-                    _tabChip(1, 'Students', 0),
-                    _tabChip(4, 'Attendance queries', work?.openQueries ?? 0),
-                    _tabChip(5, 'Overview', 0),
-                  ],
+          _AttentionStrip(
+            items: [
+              if (_toReview > 0)
+                (
+                  Icons.rate_review_outlined,
+                  '$_toReview ${_toReview == 1 ? 'session' : 'sessions'} to review',
+                  3,
                 ),
-                const SizedBox(height: 12),
-                Text(
-                  tab == 3
-                      ? 'Create a session, capture the classroom and review attendance before publishing.'
-                      : tab == 2
-                      ? 'Review each recording before activating face enrolment. Subject membership is approved separately.'
-                      : tab == 4
-                      ? 'Review questions about published Absent results. Accepted queries create a corrected publication and report.'
-                      : tab == 5
-                      ? 'Cumulative attendance across every published class for this subject.'
-                      : tab == 0
-                      ? 'Approve requests only after confirming the student belongs in this subject.'
-                      : 'These approved students can be included when a classroom session opens.',
+              if ((work?.joinRequests ?? 0) > 0)
+                (
+                  Icons.person_add_alt,
+                  '${work!.joinRequests} join ${work!.joinRequests == 1 ? 'request' : 'requests'}',
+                  1,
+                ),
+              if ((work?.faceReviews ?? 0) > 0)
+                (
+                  Icons.face_outlined,
+                  '${work!.faceReviews} face ${work!.faceReviews == 1 ? 'review' : 'reviews'}',
+                  2,
+                ),
+              if ((work?.openQueries ?? 0) > 0)
+                (
+                  Icons.forum_outlined,
+                  '${work!.openQueries} open ${work!.openQueries == 1 ? 'query' : 'queries'}',
+                  4,
+                ),
+            ],
+            loaded: work != null,
+            onOpen: (t) => setState(() => tab = t),
+          ),
+          const SizedBox(height: 20),
+          _SubjectTabs(
+            tabs: [for (final t in _tabs) (t.$1, t.$2, t.$3, _count(t.$1))],
+            selected: tab,
+            onSelect: (t) => setState(() => tab = t),
+          ),
+          const SizedBox(height: 12),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(
+                Icons.info_outline,
+                size: 18,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  current.$4,
                   style: TextStyle(
                     color: Theme.of(context).colorScheme.onSurfaceVariant,
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 20),
-          if (tab == 3)
-            TeacherSessions(
-              api: api,
-              institute: institute,
-              offering: widget.id,
-              publishableKey: ref.read(servicesProvider).config.publishableKey,
-            )
-          else if (tab == 2)
-            BiometricReviews(controller: faces, api: api, institute: institute)
-          else if (tab == 4)
-            TeacherDisputes(api: api, institute: institute, offering: widget.id)
-          else if (tab == 5)
-            AttendanceOverview(
-              api: api,
-              institute: institute,
-              offering: widget.id,
-            )
-          else
-            PagedList(
-              controller: tab == 0 ? requests : students,
-              emptyTitle: tab == 0
-                  ? 'No pending requests'
-                  : 'No approved students',
-              emptyMessage: tab == 0
-                  ? 'New student requests will appear here.'
-                  : 'Approve subject requests to build your roster.',
-              item: (Enrollment e) => Panel(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      e.name ?? 'Student',
-                      style: Theme.of(context).textTheme.titleMedium,
-                    ),
-                    const SizedBox(height: 8),
-                    Text('Enrolment number: ${e.number ?? ''}'),
-                    const SizedBox(height: 16),
-                    if (tab == 0)
-                      Wrap(
-                        spacing: 12,
-                        runSpacing: 8,
-                        children: [
-                          FilledButton(
-                            onPressed: () => review(e, true),
-                            child: const Text('Approve'),
-                          ),
-                          OutlinedButton(
-                            onPressed: () => review(e, false),
-                            child: const Text('Decline'),
-                          ),
-                        ],
-                      )
-                    else
-                      const StatusBadge('active'),
-                  ],
-                ),
               ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          AnimatedSwitcher(
+            duration: MediaQuery.disableAnimationsOf(context)
+                ? Duration.zero
+                : const Duration(milliseconds: 220),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            layoutBuilder: (current, previous) => Stack(
+              alignment: Alignment.topCenter,
+              children: [...previous, ?current],
             ),
+            child: KeyedSubtree(key: ValueKey(tab), child: _tabBody()),
+          ),
         ],
       );
     },
   );
+
+  Widget _tabBody() => switch (tab) {
+    3 => TeacherSessions(
+      api: api,
+      institute: institute,
+      offering: widget.id,
+      publishableKey: ref.read(servicesProvider).config.publishableKey,
+      version: sessionsVersion,
+      changed: _loadWork,
+    ),
+    2 => BiometricReviews(controller: faces, api: api, institute: institute),
+    4 => TeacherDisputes(api: api, institute: institute, offering: widget.id),
+    5 => AttendanceOverview(
+      api: api,
+      institute: institute,
+      offering: widget.id,
+    ),
+    _ => _students(),
+  };
+
+  Widget _students() => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      AnimatedBuilder(
+        animation: requests,
+        builder: (context, _) {
+          final pending = requests.items;
+          if (pending.isEmpty) {
+            return requests.loading
+                ? const SizedBox.shrink()
+                : const _InlineNote(
+                    icon: Icons.check_circle_outline,
+                    text: 'No join requests are waiting. Share the join code so students can request to join.',
+                  );
+          }
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              SectionTitle(
+                'Waiting for approval · ${pending.length}${requests.cursor != null ? '+' : ''}',
+              ),
+              for (final e in pending)
+                _PersonRow(
+                  enrollment: e,
+                  highlight: true,
+                  trailing: Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton(
+                        onPressed: () => review(e, false),
+                        child: const Text('Decline'),
+                      ),
+                      FilledButton(
+                        onPressed: () => review(e, true),
+                        child: const Text('Approve'),
+                      ),
+                    ],
+                  ),
+                ),
+              if (requests.cursor != null)
+                TextButton(
+                  onPressed: () => requests.load(reset: false),
+                  child: const Text('Load more requests'),
+                ),
+            ],
+          );
+        },
+      ),
+      const SectionTitle('Enrolled students'),
+      PagedList(
+        controller: students,
+        emptyTitle: 'No approved students',
+        emptyMessage: 'Approve join requests to build your roster.',
+        item: (Enrollment e) =>
+            _PersonRow(enrollment: e, trailing: const StatusBadge('active')),
+      ),
+    ],
+  );
+}
+
+/// The subject's banner: what it is, a few live numbers and its two actions.
+class _SubjectHero extends StatelessWidget {
+  const _SubjectHero({
+    required this.offering,
+    required this.students,
+    required this.sessions,
+    required this.toReview,
+    required this.loadingCode,
+    required this.onJoinCode,
+    required this.onRefresh,
+  });
+  final Offering offering;
+  final PagedController<Enrollment> students;
+  final int? sessions;
+  final int toReview;
+  final bool loadingCode;
+  final VoidCallback onJoinCode;
+  final Future<void> Function() onRefresh;
+
+  @override
+  Widget build(BuildContext context) {
+    final o = offering;
+    Widget chip(IconData icon, String text) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0x26ffffff),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: Colors.white),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+    Widget stat(String value, String label) => Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Text(
+          value,
+          style: const TextStyle(
+            color: Colors.white,
+            fontSize: 24,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        Text(
+          label,
+          style: const TextStyle(color: Color(0xffcde8de), fontSize: 12),
+        ),
+      ],
+    );
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xff0d2a2c), Color(0xff135f50), Color(0xff23906f)],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: 16,
+            runSpacing: 16,
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'FACULTY WORKSPACE',
+                      style: TextStyle(
+                        color: Color(0xffa8e5cf),
+                        fontSize: 12,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.6,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      o.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 28,
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: -.5,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: [
+                        chip(Icons.tag, o.courseCode),
+                        chip(
+                          Icons.groups_2_outlined,
+                          '${o.branch} · ${semesterLabel(o.semester)} · Section ${o.section}',
+                        ),
+                        chip(Icons.date_range_outlined, termLabel(o.termCode)),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              Theme(
+                data: Theme.of(context).copyWith(
+                  filledButtonTheme: FilledButtonThemeData(
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white,
+                      foregroundColor: const Color(0xff135f50),
+                    ),
+                  ),
+                ),
+                child: Wrap(
+                  spacing: 8,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    IconButton(
+                      tooltip: 'Refresh',
+                      color: Colors.white,
+                      onPressed: onRefresh,
+                      icon: const Icon(Icons.refresh),
+                    ),
+                    Tooltip(
+                      message: 'Show or create the code students use to request to join',
+                      child: FilledButton.icon(
+                        onPressed: loadingCode ? null : onJoinCode,
+                        icon: const Icon(Icons.key_outlined),
+                        label: const Text('Join code'),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          AnimatedBuilder(
+            animation: students,
+            builder: (context, _) {
+              final n = students.items.length;
+              return Wrap(
+                spacing: 32,
+                runSpacing: 12,
+                children: [
+                  stat(
+                    students.loading && n == 0
+                        ? '–'
+                        : '$n${students.cursor != null ? '+' : ''}',
+                    'students',
+                  ),
+                  stat(sessions == null ? '–' : '$sessions', 'sessions'),
+                  stat('$toReview', 'to review'),
+                ],
+              );
+            },
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pending work across tabs, each a shortcut to the tab that handles it.
+class _AttentionStrip extends StatelessWidget {
+  const _AttentionStrip({
+    required this.items,
+    required this.loaded,
+    required this.onOpen,
+  });
+  final List<(IconData, String, int)> items;
+  final bool loaded;
+  final ValueChanged<int> onOpen;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final Widget child;
+    if (!loaded) {
+      child = const SizedBox.shrink();
+    } else if (items.isEmpty) {
+      child = const _InlineNote(
+        icon: Icons.check_circle_outline,
+        text: 'All caught up: nothing is waiting for you in this subject.',
+      );
+    } else {
+      child = Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          Text(
+            'Needs you',
+            style: TextStyle(
+              fontWeight: FontWeight.w700,
+              color: scheme.onSurface,
+            ),
+          ),
+          for (final (icon, label, tab) in items)
+            ActionChip(
+              avatar: Icon(icon, size: 18, color: const Color(0xff9a6a00)),
+              label: Text(label),
+              backgroundColor: const Color(0xfffff4dc),
+              side: const BorderSide(color: Color(0xfff0d9a6)),
+              onPressed: () => onOpen(tab),
+            ),
+        ],
+      );
+    }
+    return AnimatedSize(
+      duration: const Duration(milliseconds: 200),
+      alignment: Alignment.topLeft,
+      child: Padding(
+        padding: EdgeInsets.only(top: loaded ? 16 : 0),
+        child: child,
+      ),
+    );
+  }
+}
+
+/// Icon tabs with counts; scrolls sideways on narrow screens.
+class _SubjectTabs extends StatelessWidget {
+  const _SubjectTabs({
+    required this.tabs,
+    required this.selected,
+    required this.onSelect,
+  });
+  final List<(int, String, IconData, int)> tabs;
+  final int selected;
+  final ValueChanged<int> onSelect;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Panel(
+      padding: 6,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Row(
+          children: [
+            for (final (id, label, icon, count) in tabs)
+              Padding(
+                padding: const EdgeInsets.all(2),
+                child: Semantics(
+                  button: true,
+                  selected: id == selected,
+                  label: count > 0 ? '$label, $count waiting' : label,
+                  child: ExcludeSemantics(
+                    child: Material(
+                      color: Colors.transparent,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(14),
+                        onTap: () => onSelect(id),
+                        child: AnimatedContainer(
+                          duration: const Duration(milliseconds: 200),
+                          curve: Curves.easeOutCubic,
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 14,
+                            vertical: 10,
+                          ),
+                          decoration: BoxDecoration(
+                            color: id == selected
+                                ? scheme.primary
+                                : Colors.transparent,
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                icon,
+                                size: 20,
+                                color: id == selected
+                                    ? Colors.white
+                                    : scheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                label,
+                                style: TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                  color: id == selected
+                                      ? Colors.white
+                                      : scheme.onSurface,
+                                ),
+                              ),
+                              if (count > 0) ...[
+                                const SizedBox(width: 8),
+                                Badge(
+                                  label: Text('$count'),
+                                  backgroundColor: const Color(0xff9a6a00),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PersonRow extends StatelessWidget {
+  const _PersonRow({
+    required this.enrollment,
+    required this.trailing,
+    this.highlight = false,
+  });
+  final Enrollment enrollment;
+  final Widget trailing;
+  final bool highlight;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final name = enrollment.name ?? 'Student';
+    final initials = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((p) => p.isNotEmpty)
+        .take(2)
+        .map((p) => p[0].toUpperCase())
+        .join();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: highlight ? const Color(0xfffffaf0) : scheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: highlight ? const Color(0xfff0d9a6) : scheme.outlineVariant,
+        ),
+      ),
+      child: Wrap(
+        alignment: WrapAlignment.spaceBetween,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 12,
+        runSpacing: 10,
+        children: [
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircleAvatar(
+                radius: 20,
+                backgroundColor: scheme.primary.withValues(alpha: .10),
+                child: Text(
+                  initials.isEmpty ? '?' : initials,
+                  style: TextStyle(
+                    fontWeight: FontWeight.w700,
+                    color: scheme.primary,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Flexible(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 360),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      Text(
+                        'Enrolment number: ${enrollment.number ?? '—'}',
+                        style: TextStyle(
+                          color: scheme.onSurfaceVariant,
+                          fontSize: 13,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          trailing,
+        ],
+      ),
+    );
+  }
+}
+
+class _InlineNote extends StatelessWidget {
+  const _InlineNote({required this.icon, required this.text});
+  final IconData icon;
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: const Color(0xff176451)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(text, style: TextStyle(color: scheme.onSurfaceVariant)),
+        ),
+      ],
+    );
+  }
 }
