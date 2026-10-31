@@ -207,7 +207,7 @@ class _TeacherSessionsState extends State<TeacherSessions> {
               ),
               const SizedBox(height: 12),
               OutlinedButton(
-                onPressed: () => context.go('/sessions/${s['id']}'),
+                onPressed: () => context.push('/sessions/${s['id']}'),
                 child: Text(switch (s['status']) {
                   'finalized' => 'View published attendance',
                   'review_required' || 'no_data' => 'Review attendance',
@@ -727,7 +727,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     return ContentPage(
       children: [
         TextButton.icon(
-          onPressed: () => context.go('/classes/${s['offering_id']}'),
+          onPressed: () => goBack(context, '/classes/${s['offering_id']}'),
           icon: const Icon(Icons.arrow_back),
           label: const Text('Back to subject'),
         ),

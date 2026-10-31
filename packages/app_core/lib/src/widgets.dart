@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'api.dart';
+import 'transitions.dart';
 
 ThemeData appTheme() {
   const primary = Color(0xff176451),
@@ -10,6 +11,11 @@ ThemeData appTheme() {
       border = Color(0xffdce7e1),
       canvas = Color(0xfff2f6f4);
   return ThemeData(
+    pageTransitionsTheme: PageTransitionsTheme(
+      builders: {
+        for (final p in TargetPlatform.values) p: const AppPageTransitions(),
+      },
+    ),
     useMaterial3: true,
     colorScheme:
         ColorScheme.fromSeed(

@@ -13,6 +13,7 @@ import 'api.dart';
 import 'config.dart';
 import 'home.dart';
 import 'notifications.dart';
+import 'transitions.dart';
 import 'widgets.dart';
 
 typedef DetailBuilder = Widget Function(BuildContext, String);
@@ -205,19 +206,34 @@ class _ProductAppState extends ConsumerState<ProductApp> {
         return null;
       },
       routes: [
-        GoRoute(path: '/login', builder: (_, _) => const LoginPage()),
+        GoRoute(
+          path: '/login',
+          pageBuilder: (_, s) => fadeThroughPage(s, const LoginPage()),
+        ),
         GoRoute(
           path: '/loading',
-          builder: (_, _) =>
-              const Scaffold(body: Center(child: CircularProgressIndicator())),
+          pageBuilder: (_, s) => fadeThroughPage(
+            s,
+            const Scaffold(body: Center(child: CircularProgressIndicator())),
+          ),
         ),
         GoRoute(
           path: '/connection',
-          builder: (_, _) => const AccountGate(connection: true),
+          pageBuilder: (_, s) =>
+              fadeThroughPage(s, const AccountGate(connection: true)),
         ),
-        GoRoute(path: '/access', builder: (_, _) => const AccountGate()),
-        GoRoute(path: '/claim', builder: (_, _) => const ClaimPage()),
-        GoRoute(path: '/institutes', builder: (_, _) => const InstitutePage()),
+        GoRoute(
+          path: '/access',
+          pageBuilder: (_, s) => fadeThroughPage(s, const AccountGate()),
+        ),
+        GoRoute(
+          path: '/claim',
+          pageBuilder: (_, s) => fadeThroughPage(s, const ClaimPage()),
+        ),
+        GoRoute(
+          path: '/institutes',
+          pageBuilder: (_, s) => fadeThroughPage(s, const InstitutePage()),
+        ),
         ShellRoute(
           builder: (context, state, child) {
             // Navigating is a natural moment to refresh stale notices.
@@ -234,44 +250,79 @@ class _ProductAppState extends ConsumerState<ProductApp> {
             );
           },
           routes: [
+            // A subject's page is nested under the list, so opening one
+            // pushes over the list (kept alive) and back pops with the
+            // reverse slide; the URL stays /classes/:id.
             GoRoute(
               path: '/classes',
-              builder: (c, s) => widget.classesBuilder(c),
+              pageBuilder: (c, s) =>
+                  fadeThroughPage(s, Builder(builder: widget.classesBuilder)),
+              routes: [
+                if (widget.detailBuilder != null)
+                  GoRoute(
+                    path: ':id',
+                    pageBuilder: (c, s) => slidePage(
+                      s,
+                      KeyedSubtree(
+                        key: ValueKey('class:${s.pathParameters['id']}'),
+                        child: widget.detailBuilder!(
+                          c,
+                          s.pathParameters['id']!,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
             ),
             GoRoute(
               path: '/account',
-              builder: (_, _) =>
-                  AccountPage(statsBuilder: widget.accountStatsBuilder),
+              pageBuilder: (_, s) => fadeThroughPage(
+                s,
+                AccountPage(statsBuilder: widget.accountStatsBuilder),
+              ),
             ),
             if (widget.attendanceBuilder != null)
               GoRoute(
                 path: '/attendance',
-                builder: (c, s) => widget.attendanceBuilder!(c),
+                pageBuilder: (c, s) => fadeThroughPage(
+                  s,
+                  Builder(builder: widget.attendanceBuilder!),
+                ),
               ),
             if (notifications != null)
               GoRoute(
                 path: '/notifications',
-                builder: (_, _) => NotificationsPage(
-                  center: notifications!,
-                  refresh: () => refreshNotifications(force: true),
+                pageBuilder: (_, s) => fadeThroughPage(
+                  s,
+                  NotificationsPage(
+                    center: notifications!,
+                    refresh: () => refreshNotifications(force: true),
+                  ),
                 ),
               ),
             if (widget.adminBuilder != null)
               GoRoute(
                 path: '/admin',
-                builder: (c, s) => widget.adminBuilder!(c),
+                pageBuilder: (c, s) =>
+                    fadeThroughPage(s, Builder(builder: widget.adminBuilder!)),
               ),
             if (widget.enrollmentBuilder != null)
               GoRoute(
                 path: '/enrolment',
-                builder: (c, s) => widget.enrollmentBuilder!(c),
+                pageBuilder: (c, s) => fadeThroughPage(
+                  s,
+                  Builder(builder: widget.enrollmentBuilder!),
+                ),
               ),
             if (widget.sessionBuilder != null)
               GoRoute(
                 path: '/sessions/:id',
-                builder: (c, s) => KeyedSubtree(
-                  key: ValueKey('session:${s.pathParameters['id']}'),
-                  child: widget.sessionBuilder!(c, s.pathParameters['id']!),
+                pageBuilder: (c, s) => slidePage(
+                  s,
+                  KeyedSubtree(
+                    key: ValueKey('session:${s.pathParameters['id']}'),
+                    child: widget.sessionBuilder!(c, s.pathParameters['id']!),
+                  ),
                 ),
                 onExit: (context, state) async {
                   final guard = ref.read(sessionExitGuardProvider);
@@ -306,14 +357,6 @@ class _ProductAppState extends ConsumerState<ProductApp> {
                       ) ??
                       false;
                 },
-              ),
-            if (widget.detailBuilder != null)
-              GoRoute(
-                path: '/classes/:id',
-                builder: (c, s) => KeyedSubtree(
-                  key: ValueKey('class:${s.pathParameters['id']}'),
-                  child: widget.detailBuilder!(c, s.pathParameters['id']!),
-                ),
               ),
           ],
         ),

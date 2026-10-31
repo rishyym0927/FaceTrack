@@ -475,7 +475,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
           Align(
             alignment: Alignment.centerLeft,
             child: TextButton.icon(
-              onPressed: () => context.go('/classes'),
+              onPressed: () => goBack(context, '/classes'),
               icon: const Icon(Icons.arrow_back),
               label: const Text('All subjects'),
             ),

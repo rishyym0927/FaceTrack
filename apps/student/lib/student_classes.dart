@@ -136,7 +136,7 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
               _ => null,
             },
             onTap: e.status == 'active'
-                ? () => context.go('/classes/${e.offeringId}')
+                ? () => context.push('/classes/${e.offeringId}')
                 : null,
           ),
         ),

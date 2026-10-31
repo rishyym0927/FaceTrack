@@ -5,3 +5,4 @@ export 'src/widgets.dart';
 export 'src/product_app.dart';
 export 'src/notifications.dart';
 export 'src/home.dart';
+export 'src/transitions.dart';

@@ -425,7 +425,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
                 final low = pct != null && pct < attendanceThreshold;
                 return InkWell(
                   borderRadius: BorderRadius.circular(12),
-                  onTap: () => context.go('/classes/${e.key}'),
+                  onTap: () => context.push('/classes/${e.key}'),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(vertical: 10),
                     child: Column(
@@ -570,7 +570,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         Card(
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
-            onTap: () => context.go('/classes/${r['offering_id']}'),
+            onTap: () => context.push('/classes/${r['offering_id']}'),
             title: Text(
               title(r['offering_id'] as String),
               style: const TextStyle(fontWeight: FontWeight.w600),

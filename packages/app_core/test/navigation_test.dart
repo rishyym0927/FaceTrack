@@ -159,4 +159,115 @@ void main() {
       await tester.runAsync(h.dispose);
     }
   });
+
+  Future<Harness> ready(WidgetTester tester) async {
+    instances = 0;
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    return h;
+  }
+
+  Widget app(Harness h, {bool reducedMotion = false}) => ProviderScope(
+    overrides: [servicesProvider.overrideWithValue(h.services)],
+    child: MediaQuery(
+      data: MediaQueryData(disableAnimations: reducedMotion),
+      child: ProductApp(
+        classesBuilder: (_) => Builder(
+          builder: (context) => Column(
+            children: [
+              const ResourceProbe('list'),
+              TextButton(
+                onPressed: () => context.push('/classes/first'),
+                child: const Text('Open first class'),
+              ),
+            ],
+          ),
+        ),
+        detailBuilder: (_, id) => Builder(
+          builder: (context) => TextButton(
+            onPressed: () => goBack(context, '/classes'),
+            child: Text('Back from $id'),
+          ),
+        ),
+      ),
+    ),
+  );
+
+  testWidgets('Tabs cross-fade: both pages show mid-way, then only the new one', (
+    tester,
+  ) async {
+    final h = await ready(tester);
+    await tester.pumpWidget(app(h));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Account'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.textContaining('list instance'), findsOneWidget);
+    expect(find.text('Sign out'), findsOneWidget);
+    final fades = tester.widgetList<FadeTransition>(
+      find.ancestor(of: find.text('Sign out'), matching: find.byType(FadeTransition)),
+    );
+    expect(fades.any((f) => f.opacity.value < 1), isTrue);
+    await tester.pumpAndSettle();
+    expect(find.textContaining('list instance'), findsNothing);
+    expect(find.text('Sign out'), findsOneWidget);
+  });
+
+  testWidgets('A subject slides over the kept-alive list and back pops to it', (
+    tester,
+  ) async {
+    final h = await ready(tester);
+    await tester.pumpWidget(app(h));
+    await tester.pumpAndSettle();
+    expect(find.text('list instance 1'), findsOneWidget);
+    await tester.tap(find.text('Open first class'));
+    await tester.pumpAndSettle();
+    expect(find.text('Back from first'), findsOneWidget);
+    await tester.tap(find.text('Back from first'));
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 120));
+    // Mid-pop: the detail is still sliding out over the list.
+    expect(find.text('Back from first'), findsOneWidget);
+    await tester.pumpAndSettle();
+    expect(find.text('Back from first'), findsNothing);
+    // Same list state, not a rebuilt page.
+    expect(find.text('list instance 1'), findsOneWidget);
+  });
+
+  testWidgets('With reduced motion pages change in a single frame', (tester) async {
+    final h = await ready(tester);
+    await tester.pumpWidget(app(h, reducedMotion: true));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open first class'));
+    await tester.pump();
+    await tester.pump();
+    final fades = tester.widgetList<FadeTransition>(
+      find.ancestor(of: find.text('Back from first'), matching: find.byType(FadeTransition)),
+    );
+    expect(fades, isEmpty);
+    await tester.pumpAndSettle();
+  });
+
+  testWidgets('goBack falls back when there is nothing to pop', (tester) async {
+    final router = GoRouter(
+      initialLocation: '/b',
+      routes: [
+        GoRoute(path: '/a', builder: (_, _) => const Text('Page A')),
+        GoRoute(
+          path: '/b',
+          builder: (context, _) => TextButton(
+            onPressed: () => goBack(context, '/a'),
+            child: const Text('Back'),
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+    await tester.pumpWidget(MaterialApp.router(routerConfig: router));
+    await tester.tap(find.text('Back'));
+    await tester.pumpAndSettle();
+    expect(find.text('Page A'), findsOneWidget);
+  });
 }
