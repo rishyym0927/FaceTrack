@@ -4,7 +4,7 @@ import base64
 
 import pytest
 
-from facetrack_worker.tabular import COLUMNS, parse_csv, report
+from facetrack_worker.tabular import COLUMNS, attendance_label, parse_csv, report
 
 
 def test_report_preserves_ids_escapes_formulas_and_builds_multipage_pdf():
@@ -54,3 +54,13 @@ def test_csv_parser_enforces_contract_and_size(tmp_path):
     path.write_bytes(b"x" * (1024 * 1024 + 1))
     with pytest.raises(ValueError):
         parse_csv(path)
+
+
+def test_reports_use_three_final_attendance_states():
+    assert [attendance_label(s) for s in ("present", "late", "absent", "excused", "unassessed")] == [
+        "Present",
+        "Present",
+        "Absent",
+        "Unassessed",
+        "Unassessed",
+    ]

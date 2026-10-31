@@ -117,9 +117,18 @@ async def academics(conn, actor, institute, kind, cursor, limit):
         "class-groups": "id,term_id,branch,semester,section,version",
     }
     table = {"courses": "courses", "terms": "terms", "class-groups": "class_groups"}
+    # Sort key and the comparison that selects rows after the cursor row.
+    key, after, order = {
+        "courses": ("code,id", ">", "code,id"),
+        "terms": ("starts_on,id", "<", "starts_on DESC,id DESC"),
+        "class-groups": ("branch,semester,section,id", ">", "branch,semester,section,id"),
+    }[kind]
     rows = await many(
         conn,
-        f"SELECT {columns[kind]} FROM app.{table[kind]} WHERE institute_id=:i AND (CAST(:cursor AS uuid) IS NULL OR id > :cursor) ORDER BY id LIMIT :limit",
+        f"""SELECT {columns[kind]} FROM app.{table[kind]} WHERE institute_id=:i
+        AND (CAST(:cursor AS uuid) IS NULL OR ({key}){after}(SELECT {key} FROM app.{table[kind]}
+          WHERE institute_id=:i AND id=CAST(:cursor AS uuid)))
+        ORDER BY {order} LIMIT :limit""",
         {"i": institute, "cursor": cursor, "limit": limit + 1},
     )
     return page(rows, limit)
@@ -128,7 +137,11 @@ async def academics(conn, actor, institute, kind, cursor, limit):
 async def offering_list(conn, actor, institute, cursor, limit):
     permissions = await roles(conn, actor, institute)
     query = f"""SELECT {OFFERING_FIELDS}
-        FROM app.offerings o {OFFERING_JOINS} WHERE o.institute_id=:i AND (CAST(:cursor AS uuid) IS NULL OR o.id>:cursor) AND (
+        FROM app.offerings o {OFFERING_JOINS} WHERE o.institute_id=:i AND (CAST(:cursor AS uuid) IS NULL
+        OR (c.code,g.section,o.id)>(SELECT c2.code,g2.section,o2.id FROM app.offerings o2
+          JOIN app.courses c2 ON c2.institute_id=o2.institute_id AND c2.id=o2.course_id
+          JOIN app.class_groups g2 ON g2.institute_id=o2.institute_id AND g2.id=o2.class_group_id
+          WHERE o2.institute_id=:i AND o2.id=CAST(:cursor AS uuid))) AND (
         :admin OR EXISTS (SELECT 1 FROM app.offering_teachers ot JOIN app.teachers t
         ON t.institute_id=ot.institute_id AND t.id=ot.teacher_id
         WHERE ot.institute_id=o.institute_id AND ot.offering_id=o.id AND ot.status='active'
@@ -137,7 +150,7 @@ async def offering_list(conn, actor, institute, cursor, limit):
         ON s.institute_id=e.institute_id AND s.id=e.student_id
         WHERE e.institute_id=o.institute_id AND e.offering_id=o.id
         AND e.status IN ('requested','active') AND s.auth_user_id=:a AND s.status='approved'
-        AND :student)) ORDER BY o.id LIMIT :limit"""
+        AND :student)) ORDER BY c.code,g.section,o.id LIMIT :limit"""
     rows = await many(
         conn,
         query,
@@ -385,9 +398,12 @@ async def roster(conn, actor, institute, offering, cursor, limit, status=None):
         """SELECT e.id,e.offering_id,e.student_id,e.status,e.version,
         s.enrollment_number,s.official_name FROM app.course_enrollments e
         JOIN app.students s ON s.institute_id=e.institute_id AND s.id=e.student_id
-        WHERE e.institute_id=:i AND e.offering_id=:o AND (CAST(:cursor AS uuid) IS NULL OR e.id>:cursor)
+        WHERE e.institute_id=:i AND e.offering_id=:o AND (CAST(:cursor AS uuid) IS NULL
+          OR (s.enrollment_number,e.id)>(SELECT s2.enrollment_number,e2.id FROM app.course_enrollments e2
+            JOIN app.students s2 ON s2.institute_id=e2.institute_id AND s2.id=e2.student_id
+            WHERE e2.institute_id=:i AND e2.id=CAST(:cursor AS uuid)))
         AND (CAST(:status AS text) IS NULL OR e.status=:status)
-        ORDER BY e.id LIMIT :limit""",
+        ORDER BY s.enrollment_number,e.id LIMIT :limit""",
         {"i": institute, "o": offering, "cursor": cursor, "limit": limit + 1, "status": status},
     )
     return page(rows, limit)
@@ -487,7 +503,9 @@ async def own_enrollments(conn, actor, institute, cursor, limit):
         JOIN app.offerings o ON o.institute_id=e.institute_id AND o.id=e.offering_id
         {OFFERING_JOINS}
         WHERE e.institute_id=:i AND s.auth_user_id=:a AND s.status='approved'
-        AND (CAST(:cursor AS uuid) IS NULL OR e.id>:cursor) ORDER BY e.id LIMIT :limit""",
+        AND (CAST(:cursor AS uuid) IS NULL OR (e.created_at,e.id)<(SELECT created_at,id
+          FROM app.course_enrollments WHERE institute_id=:i AND id=CAST(:cursor AS uuid)))
+        ORDER BY e.created_at DESC,e.id DESC LIMIT :limit""",
         {"i": institute, "a": actor, "cursor": cursor, "limit": limit + 1},
     )
     return page(rows, limit)

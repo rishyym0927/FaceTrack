@@ -134,15 +134,16 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
       minTileWidth: 124,
       children: [
         StatTile(
-          label: 'Present or late',
+          label: 'Present',
           value: present,
           accent: const Color(0xff176451),
           icon: Icons.check_circle_outline,
         ),
         StatTile(
-          label: 'Assessed',
-          value: assessed,
-          icon: Icons.fact_check_outlined,
+          label: 'Absent',
+          value: assessed - present,
+          accent: const Color(0xffa22f2f),
+          icon: Icons.cancel_outlined,
         ),
         StatTile(
           label: 'Unassessed',
@@ -203,7 +204,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                       _summaryBody(context, summary!),
                       const SizedBox(height: 12),
                       Text(
-                        'Unassessed and excused results are excluded from the percentage.',
+                        'Unassessed classes are excluded from the percentage.',
                         style: TextStyle(
                           fontSize: 12,
                           color: Theme.of(context).colorScheme.onSurfaceVariant,

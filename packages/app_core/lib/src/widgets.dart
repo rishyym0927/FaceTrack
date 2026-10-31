@@ -324,11 +324,8 @@ class StatusBadge extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = switch (status) {
-      'active' || 'ready' || 'present' => const Color(0xff176451),
-      'requested' ||
-      'queued' ||
-      'processing' ||
-      'late' => const Color(0xff805500),
+      'active' || 'ready' || 'present' || 'late' => const Color(0xff176451),
+      'requested' || 'queued' || 'processing' => const Color(0xff805500),
       'rejected' || 'failed' || 'absent' => const Color(0xffa22f2f),
       _ => const Color(0xff465650),
     };
@@ -337,11 +334,8 @@ class StatusBadge extends StatelessWidget {
       'queued' => 'Queued',
       'processing' => 'Processing',
       'failed' => 'Needs attention',
-      'present' => 'Present',
-      'late' => 'Late',
-      'absent' => 'Absent',
-      'excused' => 'Excused',
-      'unassessed' => 'Unassessed',
+      'present' || 'late' || 'absent' || 'excused' || 'unassessed' =>
+        attendanceLabel(status),
       _ => statusLabel(status),
     };
     return Semantics(

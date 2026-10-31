@@ -258,7 +258,7 @@ Rejected/failed attempts show actionable reasons and permit a new attempt. Appro
 
 ### Attendance
 
-Before publication: unassessed or proposed_present. Reviewed decisions: present/absent/late/excused/unassessed.
+Before publication: unassessed or proposed_present. Reviewed decisions: present/absent/unassessed (three final states, enforced by the API). Older publications may hold late or excused; every display and report shows them as Present and Unassessed respectively.
 
 - ML can propose presence; it cannot record absence or overwrite a manual decision.
 - After a usable capture, an eligible student who was not matched is `proposed_absent` ("Not recognized"). On user/client instruction (27 October 2026), the Teacher review pre-fills these rows as a draft **Absent**; the AI column still shows "Not recognized", the teacher can change any row, and nothing is recorded until the teacher saves or publishes.
@@ -268,7 +268,7 @@ Before publication: unassessed or proposed_present. Reviewed decisions: present/
 - Corrections require reason, actor, expected version and a new publication revision.
 - Match only students on the session roster with current consent and compatible templates.
 
-**Percentage policy `session-v1`:** numerator = published present + late; denominator = published present + late + absent. Exclude excused/unassessed/cancelled/unpublished sessions; display pending counts. When denominator is zero, percentage is null. One clip establishes observed presence at capture time, not time spent throughout the class.
+**Percentage policy `session-v1`:** numerator = published present (+ legacy late); denominator = published present (+ legacy late) + absent. Exclude unassessed (+ legacy excused)/cancelled/unpublished sessions; display pending counts. When denominator is zero, percentage is null. One clip establishes observed presence at capture time, not time spent throughout the class.
 
 ## 6. API contracts
 
@@ -665,6 +665,6 @@ Closing creates a draft report job; each immutable publication revision creates 
 
 User-visible wording follows the institute timetable: an offering is a **Subject** (shown as "BCS 201 · CSE · 3rd Semester · Section CSE1"), a class group is a **Section**, a term is a **Semester term** ("2026-ODD" reads "Odd Semester 2026"), and a teacher is **Faculty** in visible text. Routes, API paths, JSON keys, role values (`teacher`) and the timetable CSV columns are unchanged. Theory/Lab and lab batches (A1, B1) are not modelled yet.
 
-The faculty home shows an attendance dashboard computed in the app from `/v1/offerings` and each subject's `/v1/offerings/{id}/attendance-summary`, with bounded concurrency: overall attendance weighted across assessed classes (unassessed and excused never count as absence), semester filter and semester-wise bars, sortable subject-wise statistics, a distribution chart, a below-75% attention list and a semester CSV export. A subject that fails to load is reported without breaking the rest. No new endpoint exists for it.
+The faculty home shows an attendance dashboard computed in the app from `/v1/offerings` and each subject's `/v1/offerings/{id}/attendance-summary`, with bounded concurrency: overall attendance weighted across assessed classes (unassessed never counts as absence), semester filter and semester-wise bars, sortable subject-wise statistics, a distribution chart, a below-75% attention list and a semester CSV export. A subject that fails to load is reported without breaking the rest. No new endpoint exists for it.
 
 The Admin tab is a client over the existing `/v1/admin/*` endpoints: an Overview with a setup checklist (term → subjects → sections → allocations → faculty → assignments → students) that names the next step and jumps to its form, statistics, login-account and by-semester charts, and the institute-wide attendance dashboard; Academic setup, People and Access & assignments sections with plain guidance, institute examples, lists of existing records and searchable directories. Roles are granted by picking a person who has a login, with the raw account ID kept as an advanced option. The first admin is still granted once by the operator in SQL; every admin write is re-checked by an `app.admin_*` database function.

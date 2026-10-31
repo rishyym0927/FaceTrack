@@ -4,6 +4,8 @@ import 'package:flutter/widgets.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 
+import 'student_account.dart';
+import 'student_attendance.dart';
 import 'student_classes.dart';
 import 'student_enrolment.dart';
 import 'student_history.dart';
@@ -15,6 +17,8 @@ void main() => launchProduct(
   classesBuilder: (_) => const StudentClasses(),
   detailBuilder: (_, id) => StudentHistory(offering: id),
   enrollmentBuilder: (_) => const StudentEnrolment(),
+  attendanceBuilder: (_) => const StudentAttendance(),
+  accountStatsBuilder: (_) => const StudentAccountStats(),
   notificationsLoader: studentNotifications,
   configure: (services) async {
     services.clearPrivateMedia = PendingClips.clear;

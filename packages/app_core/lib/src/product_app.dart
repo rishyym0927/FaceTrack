@@ -3,8 +3,10 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/semantics.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:facetrack_models/facetrack_models.dart';
 
 import 'auth.dart';
 import 'api.dart';
@@ -49,6 +51,8 @@ Future<void> launchProduct(
   DetailBuilder? sessionBuilder,
   WidgetBuilder? enrollmentBuilder,
   WidgetBuilder? adminBuilder,
+  WidgetBuilder? attendanceBuilder,
+  WidgetBuilder? accountStatsBuilder,
   NotificationsLoader? notificationsLoader,
   Future<void> Function(AppServices)? configure,
 }) async {
@@ -66,6 +70,8 @@ Future<void> launchProduct(
           sessionBuilder: sessionBuilder,
           enrollmentBuilder: enrollmentBuilder,
           adminBuilder: adminBuilder,
+          attendanceBuilder: attendanceBuilder,
+          accountStatsBuilder: accountStatsBuilder,
           notificationsLoader: notificationsLoader,
         ),
       ),
@@ -102,12 +108,20 @@ class ProductApp extends ConsumerStatefulWidget {
     this.sessionBuilder,
     this.enrollmentBuilder,
     this.adminBuilder,
+    this.attendanceBuilder,
+    this.accountStatsBuilder,
     this.notificationsLoader,
   });
   final WidgetBuilder classesBuilder;
   final DetailBuilder? detailBuilder, sessionBuilder;
   final WidgetBuilder? enrollmentBuilder;
   final WidgetBuilder? adminBuilder;
+
+  /// An all-subjects attendance page, shown as its own tab when present.
+  final WidgetBuilder? attendanceBuilder;
+
+  /// Role-specific statistics shown on the Account page.
+  final WidgetBuilder? accountStatsBuilder;
 
   /// Supplies this app's in-app notices; null shows no bell.
   final NotificationsLoader? notificationsLoader;
@@ -214,6 +228,7 @@ class _ProductAppState extends ConsumerState<ProductApp> {
               ),
               path: state.uri.path,
               hasAdmin: widget.adminBuilder != null,
+              hasAttendance: widget.attendanceBuilder != null,
               notifications: notifications,
               child: child,
             );
@@ -223,7 +238,16 @@ class _ProductAppState extends ConsumerState<ProductApp> {
               path: '/classes',
               builder: (c, s) => widget.classesBuilder(c),
             ),
-            GoRoute(path: '/account', builder: (_, _) => const AccountPage()),
+            GoRoute(
+              path: '/account',
+              builder: (_, _) =>
+                  AccountPage(statsBuilder: widget.accountStatsBuilder),
+            ),
+            if (widget.attendanceBuilder != null)
+              GoRoute(
+                path: '/attendance',
+                builder: (c, s) => widget.attendanceBuilder!(c),
+              ),
             if (notifications != null)
               GoRoute(
                 path: '/notifications',
@@ -341,11 +365,12 @@ class ProductShell extends StatelessWidget {
     required this.path,
     required this.child,
     this.hasAdmin = false,
+    this.hasAttendance = false,
     this.notifications,
   });
   final String path;
   final Widget child;
-  final bool hasAdmin;
+  final bool hasAdmin, hasAttendance;
   final NotificationCenter? notifications;
   @override
   Widget build(BuildContext context) => Consumer(
@@ -370,6 +395,13 @@ class ProductShell extends StatelessWidget {
           Icons.groups_outlined,
           Icons.groups,
         ),
+        if (hasAttendance)
+          const NavTab(
+            '/attendance',
+            'Attendance',
+            Icons.insights_outlined,
+            Icons.insights,
+          ),
         if (student)
           const NavTab(
             '/enrolment',
@@ -1307,69 +1339,288 @@ class InstitutePage extends ConsumerWidget {
   }
 }
 
+String _initials(String name) {
+  final parts = name.trim().split(RegExp(r'\s+')).where((p) => p.isNotEmpty);
+  final letters = parts.take(2).map((p) => p[0].toUpperCase()).join();
+  return letters.isEmpty ? '?' : letters;
+}
+
+String _roleLabel(String role) => switch (role) {
+  'teacher' => 'Faculty',
+  'admin' => 'Admin',
+  'student' => 'Student',
+  _ => role,
+};
+
 class AccountPage extends ConsumerWidget {
-  const AccountPage({super.key});
+  const AccountPage({super.key, this.statsBuilder});
+
+  /// Role-specific statistics from the app (Student or Faculty).
+  final WidgetBuilder? statsBuilder;
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final auth = ref.watch(authProvider), person = auth.person;
-    return ContentPage(
-      children: [
-        const PageHeader(
-          title: 'Your account',
-          subtitle: 'Your institute-approved identity.',
-        ),
-        Panel(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                person?.name ?? 'Account',
-                style: Theme.of(context).textTheme.titleLarge,
-              ),
-              const SizedBox(height: 12),
-              Text(
-                ref.read(servicesProvider).client.auth.currentUser?.email ?? '',
-              ),
-              const SizedBox(height: 12),
-              Text('Institute: ' + auth.instituteName),
-              const SizedBox(height: 12),
-              Text('ID: ' + (person?.number ?? '')),
-              const SizedBox(height: 24),
-              const StatusBadge('active'),
-            ],
+    final scheme = Theme.of(context).colorScheme;
+    final email = ref.read(servicesProvider).client.auth.currentUser?.email;
+    final name = person?.name ?? 'Account';
+    final roles = {
+      for (final m in auth.account?.members ?? const <Member>[])
+        if (m.instituteId == auth.institute && m.status == 'active')
+          _roleLabel(m.role),
+    }.toList()..sort();
+    final center = NotificationScope.of(context);
+    final student = ref.read(servicesProvider).config.role == AppRole.student;
+
+    Widget chip(IconData icon, String text) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0x26ffffff),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 15, color: Colors.white),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
           ),
+        ],
+      ),
+    );
+
+    Widget detail(IconData icon, String label, String value, {Widget? trailing}) =>
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: Icon(icon, color: scheme.primary),
+          title: Text(label, style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 13)),
+          subtitle: SelectableText(
+            value.isEmpty ? '—' : value,
+            style: TextStyle(color: scheme.onSurface, fontSize: 15, fontWeight: FontWeight.w600),
+          ),
+          trailing: trailing,
+        );
+
+    final header = Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xff0d2a2c), Color(0xff135f50), Color(0xff23906f)],
         ),
-        const SizedBox(height: 24),
-        if (auth.memberships.length > 1)
-          OutlinedButton(
-            onPressed: () => showDialog<void>(
-              context: context,
-              builder: (context) => SimpleDialog(
-                title: const Text('Choose institute'),
-                children: [
-                  for (final m in auth.memberships)
-                    SimpleDialogOption(
-                      onPressed: () {
-                        auth.selectInstitute(m.instituteId);
-                        Navigator.pop(context);
-                      },
-                      child: Padding(
-                        padding: const EdgeInsets.all(12),
-                        child: Text(m.instituteName),
-                      ),
-                    ),
-                ],
+      ),
+      child: Wrap(
+        spacing: 20,
+        runSpacing: 16,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        children: [
+          CircleAvatar(
+            radius: 36,
+            backgroundColor: Colors.white,
+            child: Text(
+              _initials(name),
+              style: const TextStyle(
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+                color: Color(0xff135f50),
               ),
             ),
-            child: const Text('Switch institute'),
           ),
-        Align(
-          alignment: Alignment.centerLeft,
-          child: OutlinedButton.icon(
-            onPressed: () => auth.signOut(),
-            icon: const Icon(Icons.logout),
-            label: const Text('Sign out'),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  name,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -.5,
+                  ),
+                ),
+                if (email != null) ...[
+                  const SizedBox(height: 4),
+                  Text(email, style: const TextStyle(color: Color(0xffd5e9e2))),
+                ],
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final r in roles) chip(Icons.badge_outlined, r),
+                    if (auth.instituteName.isNotEmpty)
+                      chip(Icons.account_balance_outlined, auth.instituteName),
+                  ],
+                ),
+              ],
+            ),
           ),
+        ],
+      ),
+    );
+
+    final details = Panel(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text('Profile', style: Theme.of(context).textTheme.titleMedium),
+          const SizedBox(height: 4),
+          detail(
+            Icons.tag,
+            student ? 'Enrolment number' : 'Employee number',
+            person?.number ?? '',
+            trailing: person == null
+                ? null
+                : IconButton(
+                    tooltip: 'Copy',
+                    icon: const Icon(Icons.copy_outlined),
+                    onPressed: () {
+                      Clipboard.setData(ClipboardData(text: person.number));
+                      showMessage(context, 'Copied to clipboard.');
+                    },
+                  ),
+          ),
+          detail(Icons.mail_outline, 'Email', email ?? ''),
+          detail(Icons.account_balance_outlined, 'Institute', auth.instituteName),
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Wrap(
+              spacing: 12,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                Text('Identity', style: TextStyle(color: scheme.onSurfaceVariant)),
+                StatusBadge(person?.status == 'approved' ? 'active' : person?.status ?? 'unknown'),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+
+    final activity = center == null
+        ? null
+        : ListenableBuilder(
+            listenable: center,
+            builder: (context, _) {
+              final recent = [...center.items]
+                ..sort((a, b) => (b.time ?? DateTime(0)).compareTo(a.time ?? DateTime(0)));
+              return Panel(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Recent activity',
+                            style: Theme.of(context).textTheme.titleMedium,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => context.go('/notifications'),
+                          child: const Text('See all'),
+                        ),
+                      ],
+                    ),
+                    if (center.loading && recent.isEmpty)
+                      const LinearProgressIndicator()
+                    else if (recent.isEmpty)
+                      Text(
+                        'No activity yet.',
+                        style: TextStyle(color: scheme.onSurfaceVariant),
+                      )
+                    else
+                      for (final n in recent.take(5))
+                        ListTile(
+                          contentPadding: EdgeInsets.zero,
+                          leading: Icon(n.icon, color: scheme.primary),
+                          title: Text(n.title),
+                          subtitle: n.time == null ? null : Text(noticeAge(n.time!)),
+                          trailing: n.route == null ? null : const Icon(Icons.chevron_right),
+                          onTap: n.route == null
+                              ? null
+                              : () {
+                                  center.markRead(n);
+                                  context.go(n.route!);
+                                },
+                        ),
+                  ],
+                ),
+              );
+            },
+          );
+
+    return ContentPage(
+      children: [
+        header,
+        if (statsBuilder != null) ...[
+          const SizedBox(height: 20),
+          statsBuilder!(context),
+        ],
+        const SizedBox(height: 20),
+        LayoutBuilder(
+          builder: (context, box) => box.maxWidth >= 820 && activity != null
+              ? Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Expanded(child: details),
+                    const SizedBox(width: 20),
+                    Expanded(child: activity),
+                  ],
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    details,
+                    if (activity != null) ...[const SizedBox(height: 20), activity],
+                  ],
+                ),
+        ),
+        const SizedBox(height: 24),
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            if (auth.memberships.length > 1)
+              OutlinedButton.icon(
+                icon: const Icon(Icons.swap_horiz),
+                onPressed: () => showDialog<void>(
+                  context: context,
+                  builder: (context) => SimpleDialog(
+                    title: const Text('Choose institute'),
+                    children: [
+                      for (final m in auth.memberships)
+                        SimpleDialogOption(
+                          onPressed: () {
+                            auth.selectInstitute(m.instituteId);
+                            Navigator.pop(context);
+                          },
+                          child: Padding(
+                            padding: const EdgeInsets.all(12),
+                            child: Text(m.instituteName),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                label: const Text('Switch institute'),
+              ),
+            OutlinedButton.icon(
+              onPressed: () => auth.signOut(),
+              icon: const Icon(Icons.logout),
+              label: const Text('Sign out'),
+            ),
+          ],
         ),
       ],
     );

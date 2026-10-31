@@ -41,7 +41,7 @@ class SessionCreate(Strict):
 
 class Decision(Strict):
     student_id: UUID
-    status: Literal["present", "absent", "late", "excused", "unassessed"]
+    status: Literal["present", "absent", "unassessed"]
     reason: str | None = Field(default=None, max_length=500)
 
 
@@ -684,10 +684,10 @@ def install(app, engine, settings, principal, storage):
             st = await bio.student(c, user.user_id, institute_id)
             rows = await many(
                 c,
-                """SELECT p.id,p.revision,p.published_at,p.snapshot_json FROM app.publications p JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
+                """SELECT p.id,p.revision,p.published_at,p.snapshot_json,s.starts_at AS class_starts_at FROM app.publications p JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
             WHERE p.institute_id=:i AND p.revision=s.attendance_revision AND (CAST(:o AS uuid) IS NULL OR s.offering_id=CAST(:o AS uuid))
             AND EXISTS(SELECT 1 FROM app.session_roster r WHERE r.institute_id=s.institute_id AND r.session_id=s.id AND r.student_id=:student)
-            ORDER BY p.published_at DESC,p.id DESC""",
+            ORDER BY s.starts_at DESC,p.id DESC""",
                 {
                     "i": institute_id,
                     "o": str(offering_id) if offering_id else None,
@@ -714,12 +714,27 @@ def install(app, engine, settings, principal, storage):
                 )
             present = sum(x["status"] in ("present", "late") for x in items)
             den = sum(x["status"] in ("present", "late", "absent") for x in items)
-            pending = sum(x["status"] == "unassessed" for x in items)
-            if cursor is None:
-                filtered = items
-            else:
-                at = next((n for n, x in enumerate(items) if x["id"] == cursor), None)
-                filtered = [] if at is None else items[at + 1 :]
+            # Unassessed includes legacy excused results: neither counts.
+            pending = sum(x["status"] not in ("present", "late", "absent") for x in items)
+            filtered = items
+            if cursor is not None:
+                # Look the cursor up in all publications: a correction replaces the
+                # current one, so it may no longer be in this list.
+                at = await one(
+                    c,
+                    """SELECT s.id AS session_id,s.starts_at FROM app.publications p
+                    JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
+                    WHERE p.institute_id=:i AND p.id=:cur""",
+                    {"i": institute_id, "cur": cursor},
+                )
+                key = at and (at["starts_at"], cursor)
+                filtered = [
+                    x
+                    for x, r in zip(items, rows)
+                    if key
+                    and (r["class_starts_at"], r["id"]) < key
+                    and x["session_id"] != str(at["session_id"])
+                ]
             return {
                 **page(filtered, limit),
                 "summary": {

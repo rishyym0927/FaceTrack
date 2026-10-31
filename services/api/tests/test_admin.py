@@ -232,3 +232,57 @@ async def test_adding_a_login_requires_admin(backend):
         json={"password": "a-strong-password"},
     )
     assert denied.status_code == 403, denied.text
+
+
+async def walk(b, path, label, limit=2, **params):
+    """Follow next_cursor to the end, checking each cursor is the page's last id."""
+    seen, cursor = [], None
+    for _ in range(50):
+        query = {"limit": limit, **params, **({"cursor": cursor} if cursor else {})}
+        r = await b.client.get(path, headers=b.headers(label), params=query)
+        assert r.status_code == 200, r.text
+        body = r.json()
+        seen += body["items"]
+        cursor = body["next_cursor"]
+        if cursor is None:
+            return seen
+        assert cursor == body["items"][-1]["id"]
+    raise AssertionError("cursor never ended")
+
+
+async def test_directories_roster_and_subjects_page_in_a_stable_order(backend):
+    b = backend
+    make_admin(b)
+    institute = UUID(b.ids["institute"])
+    with connect(b.urls["owner"]) as c:
+        for n, name in enumerate(("Zara Iyer", "Asha Rao", "Mohan Das", "Asha Rao")):
+            student = c.execute(
+                "INSERT INTO app.students(institute_id,enrollment_number,official_name,official_email)"
+                " VALUES(%s,%s,%s,%s) RETURNING id",
+                (institute, f"77{9 - n}", name, f"order{n}@example.edu"),
+            ).fetchone()[0]
+            c.execute(
+                "INSERT INTO app.course_enrollments(institute_id,offering_id,student_id)"
+                " VALUES(%s,%s,%s)",
+                (institute, UUID(b.ids["offering"]), student),
+            )
+    students = await walk(b, "/v1/admin/students", "unassigned")
+    assert len(students) == len({s["id"] for s in students}) >= 5
+    assert [s["official_name"] for s in students] == sorted(s["official_name"] for s in students)
+    teachers = await walk(b, "/v1/admin/teachers", "unassigned", limit=1)
+    assert [t["official_name"] for t in teachers] == sorted(t["official_name"] for t in teachers)
+
+    roster = await walk(b, f"/v1/offerings/{b.ids['offering']}/roster", "teacher")
+    numbers = [r["enrollment_number"] for r in roster]
+    assert len(roster) == len({r["id"] for r in roster}) >= 4 and numbers == sorted(numbers)
+
+    body = {"course_id": b.ids["extra_course"], "term_id": b.ids["term"],
+            "class_group_id": b.ids["extra_group"]}
+    assert (await b.client.post("/v1/offerings", headers=b.headers(key="o2"), json=body)).status_code == 201
+    subjects = await walk(b, "/v1/offerings", "unassigned", limit=1)
+    keys = [(s["course_code"], s["section"]) for s in subjects]
+    assert len(subjects) == len({s["id"] for s in subjects}) >= 2 and keys == sorted(keys)
+
+    courses = await walk(b, "/v1/academics/courses", "unassigned", limit=1)
+    codes = [x["code"] for x in courses]
+    assert len(codes) >= 2 and codes == sorted(codes)

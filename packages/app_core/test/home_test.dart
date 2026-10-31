@@ -105,4 +105,69 @@ void main() {
     );
     expect(find.text('All notifications'), findsNothing);
   });
+
+  Future<NotificationCenter> centerWith(
+    WidgetTester tester,
+    List<AppNotice> items,
+  ) async {
+    final center = NotificationCenter((_, _, _) async => NoticeBatch(const []));
+    await tester.runAsync(
+      () => center.reload('student.u.i', () async => NoticeBatch(items)),
+    );
+    return center;
+  }
+
+  Future<void> pumpCard(WidgetTester tester, NotificationCenter center) =>
+      tester.pumpWidget(
+        MaterialApp(
+          home: NotificationScope(
+            notifier: center,
+            child: const Scaffold(body: AttentionCard()),
+          ),
+        ),
+      );
+
+  const update = AppNotice(
+    id: 'pub:1',
+    title: 'Attendance published: Data Structures',
+    body: 'You were marked Present.',
+    tone: NoticeTone.success,
+    icon: Icons.event_available_outlined,
+  );
+
+  testWidgets('An unread update shows on the card, matching the badge', (
+    tester,
+  ) async {
+    final center = await centerWith(tester, [update]);
+    expect(center.unread, 1);
+    await pumpCard(tester, center);
+    expect(find.text('No actions needed · 1 new'), findsOneWidget);
+    expect(find.text(update.title), findsOneWidget);
+    expect(find.text('You are all set'), findsNothing);
+    await tester.tap(find.text('Mark all read'));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pump();
+    expect(center.unread, 0);
+    expect(find.text('You are all set'), findsOneWidget);
+    expect(find.text('Mark all read'), findsNothing);
+  });
+
+  testWidgets('Actions come before updates on the card', (tester) async {
+    final center = await centerWith(tester, [
+      update,
+      const AppNotice(
+        id: 'face:none',
+        title: 'Set up face enrolment',
+        body: 'b',
+        tone: NoticeTone.action,
+        icon: Icons.face_outlined,
+      ),
+    ]);
+    await pumpCard(tester, center);
+    expect(find.text('Needs your attention · 1'), findsOneWidget);
+    expect(
+      tester.getTopLeft(find.text('Set up face enrolment')).dy,
+      lessThan(tester.getTopLeft(find.text(update.title)).dy),
+    );
+  });
 }

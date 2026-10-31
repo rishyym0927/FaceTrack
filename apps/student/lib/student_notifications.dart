@@ -9,14 +9,6 @@ const _recentPublications = 15;
 
 DateTime? _time(Object? v) => v is String ? DateTime.tryParse(v) : null;
 
-String _statusWord(String status) => switch (status) {
-  'present' => 'Present',
-  'late' => 'Late',
-  'absent' => 'Absent',
-  'excused' => 'Excused',
-  _ => 'Unassessed',
-};
-
 /// Notices for a student, built from their own enrolments, face enrolment,
 /// published attendance and attendance queries.
 Future<NoticeBatch> studentNotifications(
@@ -191,7 +183,7 @@ Iterable<AppNotice> attendanceNotices(
       ),
     );
   for (final r in sorted.take(_recentPublications)) {
-    final status = r['status'] as String;
+    final status = finalStatus(r['status'] as String?);
     final subject = titles[r['offering_id']] ?? 'Subject';
     final starts = _time(r['starts_at'])?.toLocal();
     final date = starts == null
@@ -201,12 +193,18 @@ Iterable<AppNotice> attendanceNotices(
       id: 'pub:${r['id']}',
       title: 'Attendance published: $subject$date',
       body:
-          'You were marked ${_statusWord(status)}.'
-          '${status == 'absent' ? ' You can raise a query from History if this is wrong.' : ''}',
-      tone: status == 'absent' ? NoticeTone.warning : NoticeTone.success,
-      icon: status == 'absent'
-          ? Icons.event_busy_outlined
-          : Icons.event_available_outlined,
+          'You were marked ${attendanceLabel(status)}.'
+          '${status == 'absent' ? ' You can raise a query from the subject page if this is wrong.' : ''}',
+      tone: switch (status) {
+        'absent' => NoticeTone.warning,
+        'present' => NoticeTone.success,
+        _ => NoticeTone.info,
+      },
+      icon: switch (status) {
+        'absent' => Icons.event_busy_outlined,
+        'present' => Icons.event_available_outlined,
+        _ => Icons.help_outline,
+      },
       route: '/classes/${r['offering_id']}',
       time: _time(r['published_at']),
     );
@@ -215,10 +213,10 @@ Iterable<AppNotice> attendanceNotices(
   // excused results never count.
   final attended = <String, int>{}, assessed = <String, int>{};
   for (final r in rows) {
-    final o = r['offering_id'] as String, s = r['status'];
-    if (s == 'present' || s == 'late' || s == 'absent') {
+    final o = r['offering_id'] as String, s = finalStatus(r['status']);
+    if (s != 'unassessed') {
       assessed[o] = (assessed[o] ?? 0) + 1;
-      if (s != 'absent') attended[o] = (attended[o] ?? 0) + 1;
+      if (s == 'present') attended[o] = (attended[o] ?? 0) + 1;
     }
   }
   for (final o in assessed.keys) {

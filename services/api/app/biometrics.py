@@ -417,7 +417,9 @@ async def review_list(conn, actor, institute, offering, cursor, limit):
         JOIN app.course_enrollments e ON e.institute_id=a.institute_id AND e.student_id=a.student_id
         WHERE a.institute_id=:i AND e.offering_id=:o AND e.status='active' AND e.effective_from<=now()
         AND (e.effective_until IS NULL OR e.effective_until>now()) AND a.status='review_required'
-        AND (CAST(:c AS uuid) IS NULL OR a.id>CAST(:c AS uuid)) ORDER BY a.id LIMIT :n""",
+        AND (CAST(:c AS uuid) IS NULL OR (a.created_at,a.id)>(SELECT created_at,id
+          FROM app.enrollment_attempts WHERE institute_id=:i AND id=CAST(:c AS uuid)))
+        ORDER BY a.created_at,a.id LIMIT :n""",
         {"i": institute, "o": offering, "c": str(cursor) if cursor else None, "n": limit + 1},
     )
     return page(rows, limit)

@@ -93,7 +93,7 @@ async def test_session_roster_manual_publication_correction_history(bio):
         headers=b.headers("teacher", key="correction", version=current["version"]),
         json={
             "student_id": b.ids["student1_profile"],
-            "status": "excused",
+            "status": "unassessed",
             "reason": "Approved leave",
             "publication_revision": 1,
         },
@@ -149,7 +149,7 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
         headers=b.headers("teacher", key="corr", version=current["version"]),
         json={
             "student_id": b.ids["student1_profile"],
-            "status": "excused",
+            "status": "unassessed",
             "reason": "Approved leave",
             "publication_revision": 1,
         },
@@ -160,8 +160,22 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
             f"/v1/offerings/{offering}/attendance-summary", headers=b.headers("teacher")
         )
     ).json()["students"][0]
-    assert after["excused"] == 1 and after["present"] == 0
+    assert after["unassessed"] == 1 and after["present"] == 0
     assert after["assessed"] == 0 and after["percentage"] is None
+    # Only Present, Absent and Unassessed can be recorded now.
+    current = (await b.client.get(f"/v1/sessions/{sid}", headers=b.headers("teacher"))).json()
+    for legacy in ("late", "excused"):
+        refused = await b.client.post(
+            f"/v1/sessions/{sid}/corrections",
+            headers=b.headers("teacher", key=f"legacy-{legacy}", version=current["version"]),
+            json={
+                "student_id": b.ids["student1_profile"],
+                "status": legacy,
+                "reason": "Legacy status",
+                "publication_revision": 2,
+            },
+        )
+        assert refused.status_code == 422, refused.text
 
 
 async def test_manual_capture_requires_two_active_templates(bio):
@@ -261,7 +275,7 @@ async def test_recognition_roster_encryption_proposals_manual_lock_and_replay(bi
             "decisions": [
                 {
                     "student_id": b.ids["student1_profile"],
-                    "status": "excused",
+                    "status": "absent",
                     "reason": "Approved leave",
                 }
             ]
@@ -300,7 +314,7 @@ async def test_recognition_roster_encryption_proposals_manual_lock_and_replay(bi
         await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
     ).json()["items"]
     byid = {p["student_id"]: p for p in rows}
-    assert byid[b.ids["student1_profile"]]["status"] == "excused"
+    assert byid[b.ids["student1_profile"]]["status"] == "absent"
     assert byid[b.ids["student2_profile"]]["status"] == "proposed_present"
     for label in ("student1", "unassigned", "other_teacher"):
         assert (
@@ -566,6 +580,71 @@ async def test_own_attendance_is_newest_first_across_cursor_pages(bio):
         if cursor is None:
             break
         assert cursor == body["items"][-1]["id"]
-    assert [x["session_id"] for x in seen] == published[::-1]
-    times = [x["published_at"] for x in seen]
-    assert times == sorted(times, reverse=True)
+    # Session n started n+1 minutes ago, so class-date order is creation order.
+    assert [x["session_id"] for x in seen] == published
+    starts = [x["starts_at"] for x in seen]
+    assert starts == sorted(starts, reverse=True)
+
+
+async def test_own_attendance_paging_survives_correction_and_keeps_class_order(bio):
+    b = bio
+    base = datetime.now(timezone.utc)
+    sids = []
+    for n in range(3):
+        r = await b.client.post(
+            "/v1/sessions",
+            headers=b.headers("teacher", key=f"fix-{n}"),
+            json={
+                "offering_id": b.ids["offering"],
+                "starts_at": (base - timedelta(minutes=n + 1)).isoformat(),
+                "ends_at": (base + timedelta(hours=1)).isoformat(),
+            },
+        )
+        s = r.json()
+        for step in ("open", "close"):
+            s = (
+                await b.client.post(
+                    f"/v1/sessions/{s['id']}/{step}",
+                    headers=b.headers("teacher", key=f"fix-{step}-{n}", version=s["version"]),
+                )
+            ).json()
+        r = await b.client.post(
+            f"/v1/sessions/{s['id']}/finalize",
+            headers=b.headers("teacher", key=f"fix-pub-{n}", version=s["version"]),
+            json={
+                "decisions": [
+                    {"student_id": b.ids["student1_profile"], "status": "present", "reason": "seen"}
+                ]
+            },
+        )
+        assert r.status_code == 200, r.text
+        sids.append(s["id"])
+    first = (
+        await b.client.get("/v1/me/attendance", headers=b.headers("student1"), params={"limit": 1})
+    ).json()
+    assert first["items"][0]["session_id"] == sids[0]
+    # Correct the session the cursor points at before loading the next page.
+    current = (await b.client.get(f"/v1/sessions/{sids[0]}", headers=b.headers("teacher"))).json()
+    r = await b.client.post(
+        f"/v1/sessions/{sids[0]}/corrections",
+        headers=b.headers("teacher", key="fix-corr", version=current["version"]),
+        json={
+            "student_id": b.ids["student1_profile"],
+            "status": "absent",
+            "reason": "Approved leave",
+            "publication_revision": 1,
+        },
+    )
+    assert r.status_code == 200, r.text
+    rest = (
+        await b.client.get(
+            "/v1/me/attendance",
+            headers=b.headers("student1"),
+            params={"limit": 5, "cursor": first["next_cursor"]},
+        )
+    ).json()
+    assert [x["session_id"] for x in rest["items"]] == sids[1:]
+    # The corrected session keeps its class-date place instead of jumping to the top.
+    everything = (await b.client.get("/v1/me/attendance", headers=b.headers("student1"))).json()
+    assert [x["session_id"] for x in everything["items"]] == sids
+    assert everything["items"][0]["revision"] == 2

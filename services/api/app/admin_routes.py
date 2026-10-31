@@ -17,7 +17,7 @@ from pydantic import Field, model_validator
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import Strict
-from .security import idempotent, roles
+from .security import idempotent, page, roles
 from .security import remember as remember_effect
 
 
@@ -137,36 +137,38 @@ def install(app, engine, settings, principal, storage, auth):
             return result
 
     @app.get("/v1/admin/teachers")
-    async def list_teachers(user: User, institute_id: Institute, limit: Limit = 200):
+    async def list_teachers(
+        user: User, institute_id: Institute, cursor: UUID | None = None, limit: Limit = 200
+    ):
         async with transaction(engine, user.user_id, institute_id) as conn:
             await require_admin(conn, user.user_id, institute_id)
-            return {
-                "items": [
-                    dict(row)
-                    for row in await many(
-                        conn,
-                        """SELECT id,auth_user_id,employee_number,official_name,official_email,status
-                        FROM app.teachers WHERE institute_id=:i ORDER BY official_name LIMIT :n""",
-                        {"i": institute_id, "n": limit},
-                    )
-                ]
-            }
+            rows = await many(
+                conn,
+                """SELECT id,auth_user_id,employee_number,official_name,official_email,status
+                FROM app.teachers WHERE institute_id=:i AND (CAST(:cur AS uuid) IS NULL
+                  OR (official_name,id)>(SELECT official_name,id FROM app.teachers
+                    WHERE institute_id=:i AND id=CAST(:cur AS uuid)))
+                ORDER BY official_name,id LIMIT :n""",
+                {"i": institute_id, "cur": str(cursor) if cursor else None, "n": limit + 1},
+            )
+            return page(rows, limit)
 
     @app.get("/v1/admin/students")
-    async def list_students(user: User, institute_id: Institute, limit: Limit = 200):
+    async def list_students(
+        user: User, institute_id: Institute, cursor: UUID | None = None, limit: Limit = 200
+    ):
         async with transaction(engine, user.user_id, institute_id) as conn:
             await require_admin(conn, user.user_id, institute_id)
-            return {
-                "items": [
-                    dict(row)
-                    for row in await many(
-                        conn,
-                        """SELECT id,auth_user_id,enrollment_number,official_name,official_email,status
-                        FROM app.students WHERE institute_id=:i ORDER BY official_name LIMIT :n""",
-                        {"i": institute_id, "n": limit},
-                    )
-                ]
-            }
+            rows = await many(
+                conn,
+                """SELECT id,auth_user_id,enrollment_number,official_name,official_email,status
+                FROM app.students WHERE institute_id=:i AND (CAST(:cur AS uuid) IS NULL
+                  OR (official_name,id)>(SELECT official_name,id FROM app.students
+                    WHERE institute_id=:i AND id=CAST(:cur AS uuid)))
+                ORDER BY official_name,id LIMIT :n""",
+                {"i": institute_id, "cur": str(cursor) if cursor else None, "n": limit + 1},
+            )
+            return page(rows, limit)
 
     @app.post("/v1/admin/terms", status_code=201)
     async def create_term(body: TermCreate, request: Request, user: User, institute_id: Institute, key: Key):

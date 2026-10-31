@@ -54,6 +54,17 @@ def safe(value):
     )
 
 
+def attendance_label(status):
+    """Three final states; legacy late/excused show as Present/Unassessed."""
+    return {
+        "present": "Present",
+        "late": "Present",
+        "absent": "Absent",
+        "proposed_present": "Matched (draft)",
+        "proposed_absent": "Not recognized (draft)",
+    }.get(status, "Unassessed")
+
+
 def report(snapshot):
     from pathlib import Path
 
@@ -75,7 +86,7 @@ def report(snapshot):
         {
             "Enrolment number": safe(r["enrollment_number"]),
             "Student": safe(r["official_name"]),
-            "Attendance": r["status"],
+            "Attendance": attendance_label(r["status"]),
             "Teacher note": safe(r.get("reason")),
         }
         for r in snapshot["records"]
@@ -109,7 +120,7 @@ def report(snapshot):
                 for v in [
                     row["enrollment_number"],
                     row["official_name"],
-                    row["status"],
+                    attendance_label(row["status"]),
                     row.get("reason"),
                 ]
             ]
@@ -126,9 +137,11 @@ def report(snapshot):
         )
     )
     total = len(snapshot["records"])
+    labels = [attendance_label(r["status"]) for r in snapshot["records"]]
     counts = {
-        s: sum(r["status"] == s for r in snapshot["records"])
-        for s in ("present", "late", "absent", "excused", "unassessed", "proposed_present")
+        k: labels.count(k)
+        for k in ("Present", "Absent", "Unassessed", "Matched (draft)", "Not recognized (draft)")
+        if k in ("Present", "Absent", "Unassessed") or k in labels
     }
     content = [
         title,

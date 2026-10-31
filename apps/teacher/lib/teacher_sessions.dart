@@ -636,7 +636,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   }
 
   Future<void> correct(Json row) async {
-    String status = row['status'];
+    // Older publications may hold late/excused; offer the folded state.
+    String status = finalStatus(row['status'] as String?);
     final reason = TextEditingController();
     await showDialog<bool>(
       context: context,
@@ -648,13 +649,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             Text(row['official_name']),
             DropdownButtonFormField<String>(
               initialValue: status,
+              decoration: const InputDecoration(labelText: 'Attendance'),
               items: [
-                'present',
-                'absent',
-                'late',
-                'excused',
-                'unassessed',
-              ].map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
+                for (final s in finalStatuses)
+                  DropdownMenuItem(value: s, child: Text(attendanceLabel(s))),
+              ],
               onChanged: (v) => status = v!,
             ),
             TextFormField(

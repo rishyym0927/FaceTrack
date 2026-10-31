@@ -100,6 +100,11 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
               label: const Text('Join subject'),
             ),
             OutlinedButton.icon(
+              onPressed: () => context.go('/attendance'),
+              icon: const Icon(Icons.insights_outlined),
+              label: const Text('Attendance overview'),
+            ),
+            OutlinedButton.icon(
               onPressed: () => controller.load(),
               icon: const Icon(Icons.refresh),
               label: const Text('Refresh'),

@@ -110,7 +110,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     }
 
     final lines = <String>[
-      'Name,Enrolment,Classes conducted,Attended,Absent,Unassessed,Excused,Percentage',
+      'Name,Enrolment,Classes conducted,Present,Absent,Unassessed,Percentage',
     ];
     for (final s in _students) {
       lines.add([
@@ -119,8 +119,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
         esc(s['conducted']),
         esc(s['attended']),
         esc(s['absent']),
-        esc(s['unassessed']),
-        esc(s['excused']),
+        esc(unassessedCount(s)),
         esc(s['percentage'] == null ? '' : '${s['percentage']}'),
       ].join(','));
     }
@@ -325,7 +324,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
       children: [
         h('Student', 0, _nameW),
         h('Enrolment', 1, _enrolW),
-        h('Attended', 2, _numW, right: true),
+        h('Present', 2, _numW, right: true),
         h('Absent', null, _numW, right: true),
         h('Unassessed', null, _numW, right: true),
         h('%', 3, _pctW, right: true),
@@ -351,7 +350,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
         cell(_enrolW, '${s['enrollment_number']}'),
         cell(_numW, '${s['attended']}', right: true),
         cell(_numW, '${s['absent']}', right: true),
-        cell(_numW, '${s['unassessed']}', right: true),
+        cell(_numW, '${unassessedCount(s)}', right: true),
         SizedBox(
           width: _pctW,
           child: Padding(

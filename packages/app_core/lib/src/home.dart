@@ -93,8 +93,10 @@ class HomeHero extends StatelessWidget {
   );
 }
 
-/// Up to three items that need the reader, taken from notifications, with a
-/// link to the full list. Hidden when the app has no notifications.
+/// What the bell is counting, on the home screen: items that need the reader
+/// first, otherwise unread updates, with a link to the full list. Says "all
+/// set" only when nothing needs action and nothing is unread, so it never
+/// contradicts the badge. Hidden when the app has no notifications.
 class AttentionCard extends StatelessWidget {
   const AttentionCard({super.key, this.limit = 3});
   final int limit;
@@ -107,20 +109,33 @@ class AttentionCard extends StatelessWidget {
       for (final n in center.items)
         if (n.tone == NoticeTone.action || n.tone == NoticeTone.warning) n,
     ];
+    final fresh = [
+      for (final n in center.items)
+        if (!urgent.contains(n) && center.isUnread(n)) n,
+    ];
+    final shown = [...urgent, ...fresh].take(limit).toList();
+    final String title;
+    if (urgent.isNotEmpty) {
+      title = 'Needs your attention · ${urgent.length}';
+    } else if (fresh.isNotEmpty) {
+      title = 'No actions needed · ${fresh.length} new';
+    } else {
+      title = 'You are all set';
+    }
     final Widget body;
     if (center.loading && center.items.isEmpty) {
       body = const Padding(
         padding: EdgeInsets.symmetric(vertical: 8),
         child: LinearProgressIndicator(),
       );
-    } else if (urgent.isEmpty) {
+    } else if (shown.isEmpty) {
       body = Row(
         children: [
           const Icon(Icons.check_circle_outline, color: Color(0xff1d7a4f)),
           const SizedBox(width: 10),
           Expanded(
             child: Text(
-              'Nothing needs your attention right now.',
+              'Nothing needs your attention and you have read every update.',
               style: TextStyle(color: scheme.onSurfaceVariant),
             ),
           ),
@@ -129,7 +144,7 @@ class AttentionCard extends StatelessWidget {
     } else {
       body = Column(
         children: [
-          for (final n in urgent.take(limit))
+          for (final n in shown)
             InkWell(
               borderRadius: BorderRadius.circular(12),
               onTap: () {
@@ -142,17 +157,48 @@ class AttentionCard extends StatelessWidget {
                   children: [
                     Icon(
                       n.icon,
-                      color: n.tone == NoticeTone.warning
-                          ? const Color(0xffa15c07)
-                          : scheme.primary,
+                      color: switch (n.tone) {
+                        NoticeTone.warning => const Color(0xffa15c07),
+                        NoticeTone.success => const Color(0xff1d7a4f),
+                        _ => scheme.primary,
+                      },
                     ),
                     const SizedBox(width: 12),
                     Expanded(
-                      child: Text(
-                        n.title,
-                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            n.title,
+                            style: TextStyle(
+                              fontWeight: center.isUnread(n)
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                          if (n.time != null)
+                            Text(
+                              noticeAge(n.time!),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                        ],
                       ),
                     ),
+                    if (center.isUnread(n))
+                      Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        child: Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: scheme.primary,
+                            shape: BoxShape.circle,
+                          ),
+                        ),
+                      ),
                     Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
                   ],
                 ),
@@ -171,15 +217,20 @@ class AttentionCard extends StatelessWidget {
             crossAxisAlignment: WrapCrossAlignment.center,
             spacing: 8,
             children: [
-              Text(
-                urgent.isEmpty
-                    ? 'You are all set'
-                    : 'Needs your attention · ${urgent.length}',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              TextButton(
-                onPressed: () => context.go('/notifications'),
-                child: const Text('All notifications'),
+              Text(title, style: Theme.of(context).textTheme.titleMedium),
+              Wrap(
+                spacing: 4,
+                children: [
+                  if (center.unread > 0)
+                    TextButton(
+                      onPressed: center.markAllRead,
+                      child: const Text('Mark all read'),
+                    ),
+                  TextButton(
+                    onPressed: () => context.go('/notifications'),
+                    child: const Text('All notifications'),
+                  ),
+                ],
               ),
             ],
           ),

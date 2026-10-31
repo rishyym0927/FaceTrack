@@ -9938,6 +9938,23 @@
         ],
         "parameters": [
           {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
             "name": "limit",
             "in": "query",
             "required": false,
@@ -10214,6 +10231,23 @@
           }
         ],
         "parameters": [
+          {
+            "name": "cursor",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
           {
             "name": "limit",
             "in": "query",
@@ -11896,8 +11930,6 @@
             "enum": [
               "present",
               "absent",
-              "late",
-              "excused",
               "unassessed"
             ],
             "title": "Status"
@@ -13509,8 +13541,6 @@
             "enum": [
               "present",
               "absent",
-              "late",
-              "excused",
               "unassessed"
             ],
             "title": "Status"

@@ -42,6 +42,28 @@ class SubjectStats {
       s['percentage'] is num && (s['percentage'] as num) < attendanceThreshold;
 }
 
+/// One subject's attendance summary; a failure is kept on the subject so the
+/// rest of a dashboard still loads.
+Future<SubjectStats> fetchSubjectStats(
+  ApiClient api,
+  String institute,
+  Offering o,
+) async {
+  try {
+    final data = await api.send(
+      'GET',
+      '/v1/offerings/${o.id}/attendance-summary',
+      institute: institute,
+    );
+    return SubjectStats(o, summary: data);
+  } catch (e) {
+    return SubjectStats(
+      o,
+      error: e is AppFailure ? e : const AppFailure('Could not load this subject.'),
+    );
+  }
+}
+
 /// A student's record in one subject, for the attention list and exports.
 class StudentRecord {
   StudentRecord(this.subject, this.data);
@@ -183,7 +205,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         while (true) {
           final i = next++;
           if (i >= offerings.length || generation != _generation) return;
-          results[i] = await _fetch(offerings[i]);
+          results[i] = await fetchSubjectStats(widget.api, widget.institute, offerings[i]);
           if (mounted && generation == _generation) setState(() => _done++);
         }
       }
@@ -204,22 +226,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       }
     } finally {
       if (mounted && generation == _generation) setState(() => _loading = false);
-    }
-  }
-
-  Future<SubjectStats> _fetch(Offering o) async {
-    try {
-      final data = await widget.api.send(
-        'GET',
-        '/v1/offerings/${o.id}/attendance-summary',
-        institute: widget.institute,
-      );
-      return SubjectStats(o, summary: data);
-    } catch (e) {
-      return SubjectStats(
-        o,
-        error: e is AppFailure ? e : const AppFailure('Could not load this subject.'),
-      );
     }
   }
 
@@ -256,7 +262,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     }
 
     final lines = <String>[
-      'Semester,Branch,Section,Subject code,Subject,Enrolment,Name,Classes conducted,Attended,Absent,Unassessed,Excused,Percentage',
+      'Semester,Branch,Section,Subject code,Subject,Enrolment,Name,Classes conducted,Present,Absent,Unassessed,Percentage',
     ];
     for (final s in _sorted(_visible)) {
       if (s.error != null) continue;
@@ -273,8 +279,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           esc(d['conducted']),
           esc(d['attended']),
           esc(d['absent']),
-          esc(d['unassessed']),
-          esc(d['excused']),
+          esc(unassessedCount(d)),
           esc(d['percentage']),
         ].join(','));
       }

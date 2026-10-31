@@ -40,7 +40,7 @@ class AttendanceReviewTable extends StatefulWidget {
   State<AttendanceReviewTable> createState() => _AttendanceReviewTableState();
 }
 
-const _overrideStatuses = ['present', 'absent', 'late', 'excused', 'unassessed'];
+const _overrideStatuses = finalStatuses;
 const _nameW = 200.0, _enrolW = 120.0, _aiW = 150.0, _decW = 280.0;
 
 String aiStatusLabel(Json row) => switch (row['status']) {
@@ -60,9 +60,9 @@ Map<String, String> draftAbsentDecisions(List<Json> rows) => {
     if (row['status'] == 'proposed_absent') row['student_id'] as String: 'absent',
 };
 
-String _statusText(String status) => status == 'unassessed'
-    ? 'Unassessed'
-    : status[0].toUpperCase() + status.substring(1);
+String _statusText(String status) => status.startsWith('proposed_')
+    ? status[0].toUpperCase() + status.substring(1)
+    : attendanceLabel(status);
 
 class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
   final _search = TextEditingController();
@@ -356,11 +356,12 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
   }
 
   Widget _decisionControls(String id, String current) {
-    final isPresent = current == 'present' || current == 'proposed_present';
+    final isPresent = finalStatus(current) == 'present' || current == 'proposed_present';
     final isAbsent = current == 'absent';
     // The ✓/✗ highlight shows the teacher's choice; show a small label only for
-    // the less-common states (late / excused / unassessed) so the row stays compact.
-    final otherLabel = const ['late', 'excused', 'unassessed'].contains(current)
+    // Unassessed (including legacy excused) so the row stays compact.
+    final otherLabel = finalStatus(current) == 'unassessed' &&
+            !current.startsWith('proposed_')
         ? _statusText(current)
         : null;
     IconButton icon(String tip, bool on, IconData onIcon, IconData offIcon,

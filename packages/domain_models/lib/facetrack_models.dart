@@ -164,6 +164,28 @@ String statusLabel(String status) => switch (status) {
   _ => 'Unavailable',
 };
 
+/// The three final attendance states shown everywhere.
+const finalStatuses = ['present', 'absent', 'unassessed'];
+
+/// Folds any stored attendance status into one of [finalStatuses]. Older
+/// publications may hold `late` (shown as Present) or `excused` (shown as
+/// Unassessed, which never counts towards the percentage either way).
+String finalStatus(String? status) => switch (status) {
+  'present' || 'late' => 'present',
+  'absent' => 'absent',
+  _ => 'unassessed',
+};
+
+String attendanceLabel(String? status) => switch (finalStatus(status)) {
+  'present' => 'Present',
+  'absent' => 'Absent',
+  _ => 'Unassessed',
+};
+
+/// Unassessed count of an attendance-summary row, including legacy excused.
+num unassessedCount(Map s) =>
+    ((s['unassessed'] as num?) ?? 0) + ((s['excused'] as num?) ?? 0);
+
 class BiometricAttempt {
   BiometricAttempt.fromJson(Json j)
     : id = j['id'],

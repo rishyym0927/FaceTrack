@@ -131,4 +131,32 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Open fixture session'), findsOneWidget);
   });
+
+  testWidgets('The Attendance tab appears only when the app provides one', (
+    tester,
+  ) async {
+    for (final withTab in [true, false]) {
+      final h = (await tester.runAsync(() => harness()))!;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [servicesProvider.overrideWithValue(h.services)],
+          child: ProductApp(
+            classesBuilder: (_) => const Text('Subjects page'),
+            attendanceBuilder: withTab
+                ? (_) => const Text('Attendance page')
+                : null,
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Attendance'), withTab ? findsOneWidget : findsNothing);
+      if (withTab) {
+        await tester.tap(find.text('Attendance'));
+        await tester.pumpAndSettle();
+        expect(find.text('Attendance page'), findsOneWidget);
+      }
+      await tester.pumpWidget(const SizedBox());
+      await tester.runAsync(h.dispose);
+    }
+  });
 }
