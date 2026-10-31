@@ -75,4 +75,36 @@ void main() {
       },
     );
   }
+
+  test(
+    'Coverage counts recognised students among those with face enrolment',
+    () {
+      Map<String, dynamic> row(String? code) => {'assessment_code': code};
+      expect(captureCoverage([row(null), row(null)]), isNull);
+      final partial = captureCoverage([
+        row('recognized'),
+        row('limited_capture'),
+        row('not_recognized'),
+        row('template_ineligible'),
+      ])!;
+      expect(partial.poor, isTrue);
+      expect(
+        partial.text,
+        'Recognised so far: 1 of 3 students with face enrolment. '
+        '2 not seen yet: record another clip covering them. '
+        '1 without face enrolment must be marked manually.',
+      );
+      final none = captureCoverage([row('template_ineligible')])!;
+      expect(
+        none.text,
+        startsWith('No student on this roster has an approved face enrolment'),
+      );
+      final all = captureCoverage([row('recognized'), row('recognized')])!;
+      expect(all.poor, isFalse);
+      expect(
+        all.text,
+        'Recognised so far: 2 of 2 students with face enrolment.',
+      );
+    },
+  );
 }

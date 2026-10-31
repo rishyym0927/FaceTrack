@@ -796,9 +796,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                   'Classroom capture',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const Text(
-                  'Use good lighting and walk slowly so each face is large and steady for a few seconds. Recording lasts 15 seconds with audio off. For a larger class, record two or three clips, each covering part of the room: every clip adds recognized students. Keep this page open until upload completes.',
-                ),
+                const RecordingTips(),
+                if (captureCoverage(rows) case final coverage?)
+                  CaptureQualityNote(coverage),
                 if (camera.controller != null && camera.clip == null)
                   AspectRatio(
                     aspectRatio: camera.controller!.value.aspectRatio,
@@ -949,6 +949,66 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
 bool _captureIsPending(Object? status) =>
     const {'awaiting_upload', 'queued', 'processing'}.contains(status);
+
+/// Short checklist shown before recording a classroom clip.
+class RecordingTips extends StatelessWidget {
+  const RecordingTips({super.key});
+  static const tips = [
+    (Icons.light_mode_outlined, 'Light on faces, no window behind students.'),
+    (Icons.social_distance_outlined, 'Stay 0.5–1 m from each face.'),
+    (Icons.timer_outlined, 'Hold each face steady for 3–4 seconds, then move slowly.'),
+    (Icons.video_library_outlined, 'Each clip is 15 s with audio off. For a bigger class, record 2–3 clips: each adds recognised students.'),
+    (Icons.cloud_upload_outlined, 'Keep this page open until the upload finishes.'),
+  ];
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.symmetric(vertical: 8),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final (icon, text) in tips)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 6),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(icon, size: 18, color: Theme.of(context).colorScheme.primary),
+                const SizedBox(width: 10),
+                Expanded(child: Text(text)),
+              ],
+            ),
+          ),
+      ],
+    ),
+  );
+}
+
+/// After at least one processed clip: how many students who can be recognised
+/// (they have an approved face enrolment) were found so far.
+CaptureQuality? captureCoverage(List<Json> rows) {
+  final assessed = rows.where((r) => r['assessment_code'] != null).toList();
+  if (assessed.isEmpty) return null;
+  final eligible = assessed
+      .where((r) => r['assessment_code'] != 'template_ineligible')
+      .toList();
+  final noFace = assessed.length - eligible.length;
+  final found = eligible.where((r) => r['assessment_code'] == 'recognized').length;
+  final missing = eligible.length - found;
+  final parts = <String>[
+    if (eligible.isEmpty)
+      'No student on this roster has an approved face enrolment yet, so nobody can be recognised.'
+    else
+      'Recognised so far: $found of ${eligible.length} students with face enrolment.',
+    if (eligible.isNotEmpty && missing > 0)
+      '$missing not seen yet: record another clip covering them.',
+    if (noFace > 0)
+      '$noFace without face enrolment must be marked manually.',
+  ];
+  return CaptureQuality(
+    parts.join(' '),
+    poor: eligible.isEmpty || missing > 0,
+  );
+}
 
 /// What processing said about a capture's frames, from `quality_json.counts`.
 class CaptureQuality {
