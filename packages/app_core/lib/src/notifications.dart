@@ -424,10 +424,10 @@ class _NotificationsPageState extends State<NotificationsPage> {
             _Heading('Needs attention', actions.length),
             for (final n in actions) _NoticeTile(center: c, notice: n),
           ],
-          if (updates.isNotEmpty) ...[
+          for (final (label, group) in groupByDay(updates)) ...[
             const SizedBox(height: 20),
-            _Heading('Updates', updates.length),
-            for (final n in updates) _NoticeTile(center: c, notice: n),
+            _Heading(label, group.length),
+            for (final n in group) _NoticeTile(center: c, notice: n),
           ],
           const SizedBox(height: 20),
           Text(
@@ -438,6 +438,34 @@ class _NotificationsPageState extends State<NotificationsPage> {
       );
     },
   );
+}
+
+/// Updates by when they happened: Today, Yesterday, This week, Earlier;
+/// undated updates (current states) come first as "Current".
+List<(String, List<AppNotice>)> groupByDay(
+  List<AppNotice> items, {
+  DateTime? now,
+}) {
+  final today = DateUtils.dateOnly(now ?? DateTime.now());
+  String label(AppNotice n) {
+    final t = n.time;
+    if (t == null) return 'Current';
+    final days = today.difference(DateUtils.dateOnly(t.toLocal())).inDays;
+    if (days <= 0) return 'Today';
+    if (days == 1) return 'Yesterday';
+    if (days < 7) return 'This week';
+    return 'Earlier';
+  }
+
+  const order = ['Current', 'Today', 'Yesterday', 'This week', 'Earlier'];
+  final groups = <String, List<AppNotice>>{};
+  for (final n in items) {
+    groups.putIfAbsent(label(n), () => []).add(n);
+  }
+  return [
+    for (final k in order)
+      if (groups[k] != null) (k, groups[k]!),
+  ];
 }
 
 class _Heading extends StatelessWidget {
@@ -503,7 +531,7 @@ class _NoticeTile extends StatelessWidget {
       ),
     };
     final route = notice.route;
-    return Padding(
+    final tile = Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(
         color: unread ? Colors.white : scheme.surfaceContainerLowest,
@@ -517,7 +545,8 @@ class _NoticeTile extends StatelessWidget {
         child: InkWell(
           onTap: () {
             center.markRead(notice);
-            if (route != null) context.go(route);
+            // Push, so back returns to the notifications.
+            if (route != null) context.push(route);
           },
           child: Padding(
             padding: const EdgeInsets.all(14),
@@ -599,5 +628,46 @@ class _NoticeTile extends StatelessWidget {
         ),
       ),
     );
+    if (!unread) return tile;
+    // Swipe sideways to mark as read; the notice stays in the list.
+    return Dismissible(
+      key: ValueKey('notice:${notice.id}'),
+      confirmDismiss: (_) async {
+        await center.markRead(notice);
+        return false;
+      },
+      background: _SwipeHint(alignment: Alignment.centerLeft),
+      secondaryBackground: _SwipeHint(alignment: Alignment.centerRight),
+      child: tile,
+    );
   }
+}
+
+class _SwipeHint extends StatelessWidget {
+  const _SwipeHint({required this.alignment});
+  final Alignment alignment;
+  @override
+  Widget build(BuildContext context) => Container(
+    margin: const EdgeInsets.only(bottom: 10),
+    padding: const EdgeInsets.symmetric(horizontal: 20),
+    alignment: alignment,
+    decoration: BoxDecoration(
+      color: const Color(0xffe3f4ea),
+      borderRadius: BorderRadius.circular(16),
+    ),
+    child: const Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(Icons.done, color: Color(0xff1d7a4f)),
+        SizedBox(width: 6),
+        Text(
+          'Mark as read',
+          style: TextStyle(
+            color: Color(0xff1d7a4f),
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    ),
+  );
 }

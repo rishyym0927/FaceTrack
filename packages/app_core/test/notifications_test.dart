@@ -184,4 +184,57 @@ void main() {
     expect(find.byTooltip('Notifications, 1 unread'), findsOneWidget);
     expect(find.text('1'), findsOneWidget);
   });
+
+  test('Updates group by day, with current states first', () {
+    final now = DateTime(2026, 10, 31, 12);
+    AppNotice n(String id, DateTime? t) => AppNotice(
+      id: id,
+      title: id,
+      body: '',
+      tone: NoticeTone.success,
+      icon: Icons.check,
+      time: t,
+    );
+    final groups = groupByDay([
+      n('old', DateTime(2026, 10, 1)),
+      n('today', DateTime(2026, 10, 31, 9)),
+      n('now', null),
+      n('yday', DateTime(2026, 10, 30, 18)),
+      n('week', DateTime(2026, 10, 27)),
+    ], now: now);
+    expect([for (final g in groups) g.$1], ['Current', 'Today', 'Yesterday', 'This week', 'Earlier']);
+  });
+
+  testWidgets('Swiping an unread notice marks it read and keeps it listed', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final center = NotificationCenter((_, _, _) async => NoticeBatch(const []));
+    await tester.runAsync(
+      () => center.reload(
+        'student.u.i',
+        () async => NoticeBatch([
+          AppNotice(
+            id: 'pub:1',
+            title: 'Attendance published',
+            body: 'You were marked Present.',
+            tone: NoticeTone.success,
+            icon: Icons.check,
+            time: DateTime.now(),
+          ),
+        ]),
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: NotificationsPage(center: center, refresh: () {})),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(center.unread, 1);
+    await tester.drag(find.text('Attendance published'), const Offset(-500, 0));
+    await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+    await tester.pumpAndSettle();
+    expect(center.unread, 0);
+    expect(find.text('Attendance published'), findsOneWidget);
+    expect(find.text('Today · 1'), findsOneWidget);
+  });
 }

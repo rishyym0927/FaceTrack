@@ -3,6 +3,8 @@ import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'review_card.dart';
+
 class BiometricReviews extends StatelessWidget {
   const BiometricReviews({
     super.key,
@@ -157,44 +159,92 @@ class BiometricReviews extends StatelessWidget {
     controller: controller,
     emptyTitle: 'No face enrolments to review',
     emptyMessage: 'Processed videos from approved students in this subject will appear here.',
-    item: (a) => Panel(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            a.name ?? 'Student',
-            style: Theme.of(context).textTheme.titleLarge,
+    item: (a) {
+      final l = MaterialLocalizations.of(context);
+      final due = a.expiresAt.toLocal();
+      final urgent = due.difference(DateTime.now()).inHours < 24;
+      final counts = a.quality['counts'] is Map
+          ? a.quality['counts'] as Map
+          : a.quality;
+      return ReviewCard(
+        name: a.name ?? 'Student',
+        number: a.number,
+        chips: [
+          InfoChip(
+            urgent ? Icons.timer_outlined : Icons.event_outlined,
+            'Review by ${l.formatMediumDate(due)}, ${l.formatTimeOfDay(TimeOfDay.fromDateTime(due))}',
+            color: urgent ? const Color(0xffa22f2f) : null,
           ),
-          const SizedBox(height: 8),
-          Text('Enrolment number: ${a.number ?? ''}'),
-          Text(
-            'Review before ${MaterialLocalizations.of(context).formatMediumDate(a.expiresAt.toLocal())} at ${MaterialLocalizations.of(context).formatTimeOfDay(TimeOfDay.fromDateTime(a.expiresAt.toLocal()))}',
+          if (counts['sampled_frames'] is num)
+            InfoChip(
+              Icons.burst_mode_outlined,
+              '${counts['sampled_frames']} frames checked',
+            ),
+          if (counts['detections'] is num)
+            InfoChip(
+              Icons.face_outlined,
+              '${counts['detections']} face observations',
+            ),
+        ],
+        body: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Watch the recording and check:',
+              style: TextStyle(fontWeight: FontWeight.w600),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 6,
+              runSpacing: 6,
+              children: [
+                const InfoChip(
+                  Icons.badge_outlined,
+                  'Identity matches',
+                  color: Color(0xff176451),
+                ),
+                for (final pose in const [
+                  'Front',
+                  'Up',
+                  'Down',
+                  'Left',
+                  'Right',
+                ])
+                  InfoChip(
+                    Icons.check_circle_outline,
+                    pose,
+                    color: const Color(0xff176451),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            Text(
+              qualitySummary(a.quality),
+              style: TextStyle(
+                fontSize: 12.5,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton.tonalIcon(
+            onPressed: () => video(context, a),
+            icon: const Icon(Icons.play_circle_outline),
+            label: const Text('Review recording'),
           ),
-          const SizedBox(height: 8),
-          Text(qualitySummary(a.quality)),
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            children: [
-              OutlinedButton.icon(
-                onPressed: () => video(context, a),
-                icon: const Icon(Icons.play_circle_outline),
-                label: const Text('Review recording'),
-              ),
-              FilledButton(
-                onPressed: () => decide(context, a, true),
-                child: const Text('Approve identity'),
-              ),
-              TextButton(
-                onPressed: () => decide(context, a, false),
-                child: const Text('Request new recording'),
-              ),
-            ],
+          FilledButton.icon(
+            onPressed: () => decide(context, a, true),
+            icon: const Icon(Icons.verified_outlined),
+            label: const Text('Approve identity'),
+          ),
+          TextButton(
+            onPressed: () => decide(context, a, false),
+            child: const Text('Request new recording'),
           ),
         ],
-      ),
-    ),
+      );
+    },
   );
 }
 

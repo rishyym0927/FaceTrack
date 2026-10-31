@@ -453,12 +453,24 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
         EnrolmentSteps(current: step),
         if (state!.active)
           Panel(
+            accent: true,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  'Face enrolment active',
-                  style: Theme.of(context).textTheme.titleLarge,
+                Row(
+                  children: [
+                    const _StateIcon(
+                      icon: Icons.verified_outlined,
+                      color: Color(0xff176451),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        'Face enrolment active',
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 8),
                 const Text(
@@ -514,17 +526,25 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(
-                  state!.active &&
-                          [
-                            'expired',
-                            'cancelled',
-                            'rejected',
-                            'failed',
-                          ].contains(a.status)
-                      ? 'Replacement ${biometricStatus(a.status).toLowerCase()}'
-                      : biometricStatus(a.status),
-                  style: Theme.of(context).textTheme.titleLarge,
+                Row(
+                  children: [
+                    _StateIcon.forStatus(a.status),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        state!.active &&
+                                [
+                                  'expired',
+                                  'cancelled',
+                                  'rejected',
+                                  'failed',
+                                ].contains(a.status)
+                            ? 'Replacement ${biometricStatus(a.status).toLowerCase()}'
+                            : biometricStatus(a.status),
+                        style: Theme.of(context).textTheme.titleLarge,
+                      ),
+                    ),
+                  ],
                 ),
                 if (a.reason != null) ...[
                   const SizedBox(height: 8),
@@ -673,7 +693,9 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                         Text(
                           '${camera.elapsed}s · audio off',
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onSurfaceVariant,
                           ),
                         ),
                       ],
@@ -683,7 +705,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                       value: camera.poses.isEmpty
                           ? 0
                           : camera.guidance!.completed.length /
-                              camera.poses.length,
+                                camera.poses.length,
                       color: const Color(0xff176451),
                       height: 9,
                     ),
@@ -780,22 +802,125 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
               ],
             ),
           ),
-        if (a != null && a.unfinished)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: OutlinedButton(
-              onPressed: busy || camera.recording ? null : cancel,
-              child: const Text('Discard unfinished enrolment'),
+        if ((a != null && a.unfinished) || state!.consentId != null) ...[
+          const SectionTitle('Manage your enrolment'),
+          Panel(
+            padding: 16,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                if (a != null && a.unfinished)
+                  _ManageRow(
+                    icon: Icons.delete_outline,
+                    title: 'Discard this recording',
+                    body: 'Removes the unfinished recording. You can record again at any time.',
+                    action: OutlinedButton(
+                      onPressed: busy || camera.recording ? null : cancel,
+                      child: const Text('Discard unfinished enrolment'),
+                    ),
+                  ),
+                if (a != null && a.unfinished && state!.consentId != null)
+                  const Divider(height: 24),
+                if (state!.consentId != null)
+                  _ManageRow(
+                    icon: Icons.privacy_tip_outlined,
+                    title: 'Withdraw consent',
+                    body:
+                        'Stops face recognition for you and deletes your face data. '
+                        'Your faculty can still mark your attendance manually.',
+                    action: TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context).colorScheme.error,
+                      ),
+                      onPressed: busy || camera.recording ? null : withdraw,
+                      child: const Text('Withdraw face-enrolment consent'),
+                    ),
+                  ),
+              ],
             ),
           ),
-        if (state!.consentId != null)
-          Padding(
-            padding: const EdgeInsets.only(top: 12),
-            child: TextButton(
-              onPressed: busy || camera.recording ? null : withdraw,
-              child: const Text('Withdraw face-enrolment consent'),
+        ],
+      ],
+    );
+  }
+}
+
+class _StateIcon extends StatelessWidget {
+  const _StateIcon({required this.icon, required this.color});
+  final IconData icon;
+  final Color color;
+
+  factory _StateIcon.forStatus(String status) => switch (status) {
+    'review_required' => const _StateIcon(
+      icon: Icons.manage_search,
+      color: Color(0xff1f5fa8),
+    ),
+    'queued' || 'processing' => const _StateIcon(
+      icon: Icons.hourglass_top,
+      color: Color(0xff9a6a00),
+    ),
+    'awaiting_upload' => const _StateIcon(
+      icon: Icons.cloud_upload_outlined,
+      color: Color(0xff9a6a00),
+    ),
+    'expired' ||
+    'rejected' ||
+    'failed' => const _StateIcon(icon: Icons.replay, color: Color(0xffa22f2f)),
+    _ => const _StateIcon(icon: Icons.info_outline, color: Color(0xff465650)),
+  };
+
+  @override
+  Widget build(BuildContext context) => Container(
+    width: 44,
+    height: 44,
+    decoration: BoxDecoration(
+      color: color.withValues(alpha: .12),
+      borderRadius: BorderRadius.circular(14),
+    ),
+    child: Icon(icon, color: color),
+  );
+}
+
+class _ManageRow extends StatelessWidget {
+  const _ManageRow({
+    required this.icon,
+    required this.title,
+    required this.body,
+    required this.action,
+  });
+  final IconData icon;
+  final String title, body;
+  final Widget action;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: scheme.onSurfaceVariant),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(body, style: TextStyle(color: scheme.onSurfaceVariant)),
+                ],
+              ),
             ),
-          ),
+          ],
+        ),
+        Padding(
+          padding: const EdgeInsets.only(left: 36, top: 6),
+          child: action,
+        ),
       ],
     );
   }

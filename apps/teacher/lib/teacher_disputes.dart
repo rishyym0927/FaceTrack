@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'review_card.dart';
+
 class TeacherDisputes extends StatefulWidget {
   const TeacherDisputes({
     super.key,
@@ -106,35 +108,60 @@ class _TeacherDisputesState extends State<TeacherDisputes> {
         'Student queries about published Absent results will appear here.',
     item: (row) {
       final date = DateTime.parse(row['starts_at']).toLocal();
-      return Panel(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${row['official_name']} · ${row['enrollment_number']}',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(MaterialLocalizations.of(context).formatMediumDate(date)),
-            const SizedBox(height: 8),
-            Text('Student reason: ${row['student_reason']}'),
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 12,
-              runSpacing: 8,
-              children: [
-                FilledButton(
-                  onPressed: () => resolve(row, 'accepted'),
-                  child: const Text('Accept and correct'),
+      final l = MaterialLocalizations.of(context);
+      final scheme = Theme.of(context).colorScheme;
+      return ReviewCard(
+        name: '${row['official_name']}',
+        number: row['enrollment_number'] as String?,
+        chips: [
+          InfoChip(
+            Icons.event_outlined,
+            'Class of ${l.formatMediumDate(date)}, ${l.formatTimeOfDay(TimeOfDay.fromDateTime(date))}',
+          ),
+          const InfoChip(
+            Icons.event_busy_outlined,
+            'Published as Absent',
+            color: Color(0xffa22f2f),
+          ),
+        ],
+        body: Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerLowest,
+            borderRadius: BorderRadius.circular(14),
+            border: Border(left: BorderSide(color: scheme.primary, width: 3)),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Student says',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: scheme.primary,
                 ),
-                OutlinedButton(
-                  onPressed: () => resolve(row, 'rejected'),
-                  child: const Text('Reject with reason'),
-                ),
-              ],
-            ),
-          ],
+              ),
+              const SizedBox(height: 4),
+              Text(
+                '${row['student_reason']}',
+                style: const TextStyle(height: 1.45),
+              ),
+            ],
+          ),
         ),
+        actions: [
+          FilledButton.icon(
+            onPressed: () => resolve(row, 'accepted'),
+            icon: const Icon(Icons.check),
+            label: const Text('Accept and correct'),
+          ),
+          OutlinedButton.icon(
+            onPressed: () => resolve(row, 'rejected'),
+            icon: const Icon(Icons.close),
+            label: const Text('Reject with reason'),
+          ),
+        ],
       );
     },
   );

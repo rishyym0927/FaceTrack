@@ -60,7 +60,7 @@ void main() {
       );
       await tester.pumpWidget(app('new'));
       await tester.pumpAndSettle();
-      expect(find.text('Draft · revision 2'), findsOneWidget);
+      expect(find.text('Draft report · version 2'), findsOneWidget);
       old.complete(
         jsonResponse({
           'items': [
@@ -74,7 +74,7 @@ void main() {
         }),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Draft · revision 1'), findsNothing);
+      expect(find.text('Draft report · version 1'), findsNothing);
       expect(calls, 2);
       expect(detailCalls, 0);
       h.services.api.dio.httpClientAdapter = RoutesAdapter(
@@ -84,7 +84,7 @@ void main() {
       );
       await tester.tap(find.text('Refresh reports'));
       await tester.pumpAndSettle();
-      expect(find.text('Draft · revision 2'), findsNothing);
+      expect(find.text('Draft report · version 2'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );
@@ -127,7 +127,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(lists, 1);
     expect(details, 1);
-    expect(find.text('Published · revision 1'), findsOneWidget);
+    expect(find.text('Final report · version 1'), findsOneWidget);
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
     await tester.pump(const Duration(seconds: 9));

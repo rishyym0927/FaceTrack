@@ -226,95 +226,193 @@ class _TeacherReportsState extends State<TeacherReports> {
   }
 
   @override
-  Widget build(BuildContext context) => Panel(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final l = MaterialLocalizations.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Text(
-          'Attendance reports',
-          style: Theme.of(context).textTheme.titleLarge,
-        ),
-        const SizedBox(height: 6),
-        const Text(
-          'Drafts follow closed sessions; final reports use the published attendance revision.',
-        ),
-        TextButton(
-          onPressed: busy || loading ? null : refresh,
-          child: const Text('Refresh reports'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: busy || loading ? null : refresh,
+            child: const Text('Refresh reports'),
+          ),
         ),
         if (error != null)
           Semantics(
             liveRegion: true,
-            child: Text(
-              error!,
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
-            ),
+            child: Text(error!, style: TextStyle(color: scheme.error)),
           ),
         if (loading)
           const LinearProgressIndicator(semanticsLabel: 'Loading reports'),
         if (reports.isEmpty && error == null && !loading)
-          const Text('No reports yet. Close a session or publish attendance.'),
-        for (final report in reports) ...[
-          const Divider(),
-          Text(
-            '${report['kind'] == 'final' ? 'Published' : 'Draft'} · revision ${report['source_version']}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 8),
-          StatusBadge(report['status']),
-          const SizedBox(height: 12),
-          if (report['status'] == 'ready')
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
+          Panel(
+            padding: 18,
+            child: Row(
               children: [
-                OutlinedButton(
-                  onPressed: busy
-                      ? null
-                      : () => download(report['id'], report['kind'], 'csv'),
-                  child: const Text('Download CSV'),
+                Icon(
+                  Icons.description_outlined,
+                  color: scheme.onSurfaceVariant,
                 ),
-                OutlinedButton(
-                  onPressed: busy
-                      ? null
-                      : () => download(report['id'], report['kind'], 'pdf'),
-                  child: const Text('Download PDF'),
-                ),
-                if (report['kind'] == 'final' &&
-                    details[report['id']]?['email_configured'] == true)
-                  OutlinedButton(
-                    onPressed: busy ? null : () => deliver(report['id']),
-                    child: const Text('Email faculty link'),
+                const SizedBox(width: 12),
+                const Expanded(
+                  child: Text(
+                    'No reports yet. Close a session or publish attendance.',
                   ),
+                ),
               ],
             ),
-          if (report['status'] == 'ready' &&
-              report['kind'] == 'final' &&
-              details[report['id']]?['email_configured'] != true)
-            const Text(
-              'Email delivery is not configured. Downloads are available.',
-            ),
-          if (report['status'] == 'failed')
-            OutlinedButton(
-              onPressed: busy
-                  ? null
-                  : () => run(() async {
-                      await widget.api.send(
-                        'POST',
-                        '/v1/reports/${report['id']}/retry',
-                        institute: widget.institute,
-                        mutation: Mutation(),
-                      );
-                    }),
-              child: const Text('Retry report generation'),
-            ),
-          for (final delivery
-              in (details[report['id']]?['deliveries'] as List? ?? []))
-            Text(
-              'Email: ${delivery['status'] == 'sent' ? 'accepted by provider' : delivery['status']}',
-            ),
-        ],
+          ),
+        for (final report in reports)
+          Builder(
+            builder: (context) {
+              final finalReport = report['kind'] == 'final';
+              final ready = report['status'] == 'ready';
+              final created = report['created_at'] is String
+                  ? DateTime.parse(report['created_at'] as String).toLocal()
+                  : null;
+              final detail = details[report['id']];
+              final deliveries = (detail?['deliveries'] as List?) ?? const [];
+              return Container(
+                margin: const EdgeInsets.only(top: 10),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: scheme.surface,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(color: scheme.outlineVariant),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(9),
+                          decoration: BoxDecoration(
+                            color:
+                                (finalReport
+                                        ? const Color(0xff176451)
+                                        : const Color(0xff9a6a00))
+                                    .withValues(alpha: .10),
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Icon(
+                            finalReport
+                                ? Icons.verified_outlined
+                                : Icons.edit_note,
+                            color: finalReport
+                                ? const Color(0xff176451)
+                                : const Color(0xff9a6a00),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '${finalReport ? 'Final report' : 'Draft report'} · version ${report['source_version']}',
+                                style: Theme.of(context).textTheme.titleMedium,
+                              ),
+                              Text(
+                                [
+                                  finalReport
+                                      ? 'From the published attendance'
+                                      : 'Before publishing; may still change',
+                                  if (created != null)
+                                    'created ${l.formatMediumDate(created)}, ${l.formatTimeOfDay(TimeOfDay.fromDateTime(created))}',
+                                ].join(' · '),
+                                style: TextStyle(
+                                  fontSize: 13,
+                                  color: scheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        if (!ready) StatusBadge(report['status']),
+                      ],
+                    ),
+                    if (ready) ...[
+                      const SizedBox(height: 12),
+                      Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.tonalIcon(
+                            onPressed: busy
+                                ? null
+                                : () => download(
+                                    report['id'],
+                                    report['kind'],
+                                    'pdf',
+                                  ),
+                            icon: const Icon(Icons.picture_as_pdf_outlined),
+                            label: const Text('Download PDF'),
+                          ),
+                          OutlinedButton.icon(
+                            onPressed: busy
+                                ? null
+                                : () => download(
+                                    report['id'],
+                                    report['kind'],
+                                    'csv',
+                                  ),
+                            icon: const Icon(Icons.table_chart_outlined),
+                            label: const Text('Download CSV'),
+                          ),
+                          if (finalReport &&
+                              detail?['email_configured'] == true)
+                            OutlinedButton.icon(
+                              onPressed: busy
+                                  ? null
+                                  : () => deliver(report['id']),
+                              icon: const Icon(Icons.mail_outline),
+                              label: const Text('Email faculty link'),
+                            ),
+                        ],
+                      ),
+                    ],
+                    if (report['status'] == 'failed') ...[
+                      const SizedBox(height: 12),
+                      OutlinedButton.icon(
+                        onPressed: busy
+                            ? null
+                            : () => run(() async {
+                                await widget.api.send(
+                                  'POST',
+                                  '/v1/reports/${report['id']}/retry',
+                                  institute: widget.institute,
+                                  mutation: Mutation(),
+                                );
+                              }),
+                        icon: const Icon(Icons.refresh),
+                        label: const Text('Retry report generation'),
+                      ),
+                    ],
+                    for (final delivery in deliveries)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          switch (delivery['status']) {
+                            'sent' => 'Email link accepted for delivery.',
+                            'failed' => 'Email could not be sent. Download the report instead.',
+                            'queued' || 'pending' => 'Email is being sent…',
+                            _ => 'Email: ${delivery['status']}',
+                          },
+                          style: TextStyle(
+                            fontSize: 13,
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              );
+            },
+          ),
       ],
-    ),
-  );
+    );
+  }
 }
