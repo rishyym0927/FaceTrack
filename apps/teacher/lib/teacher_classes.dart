@@ -25,6 +25,26 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   late final PagedController<Offering> controller;
   bool preparing = false;
   int dashboardTick = 0;
+
+  /// Pending work per subject id, for the chips on each subject card.
+  Map<String, SubjectWork> work = {};
+  int _workGeneration = 0;
+
+  /// Same cap as the notification bell: the first 20 subjects.
+  Future<void> _loadWork() async {
+    final generation = ++_workGeneration;
+    final subjects = controller.items.take(20).toList();
+    final results = await pooled(subjects, (o) async {
+      try {
+        return await loadSubjectWork(api, institute, o);
+      } catch (_) {
+        return null;
+      }
+    });
+    if (!mounted || generation != _workGeneration) return;
+    setState(() => work = {for (final w in results.nonNulls) w.offering.id: w});
+  }
+
   @override
   void initState() {
     super.initState();
@@ -33,7 +53,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
     controller = PagedController(
       (cursor) => api.offerings(institute, cursor: cursor),
     );
-    controller.load();
+    controller.load().then((_) => _loadWork());
     watchLifecycle();
   }
 
@@ -45,6 +65,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   Future<void> refreshAll() async {
     if (mounted) setState(() => dashboardTick++);
     await controller.load();
+    await _loadWork();
   }
 
   @override
@@ -214,6 +235,9 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
             subtitle: o.subtitle,
             note: o.termTitle,
             onTap: () => open(o.id),
+            extra: work[o.id] == null
+                ? null
+                : SubjectWorkChips(work: work[o.id]!),
           ),
         ),
         const SizedBox(height: 28),
@@ -1142,6 +1166,97 @@ class _InlineNote extends StatelessWidget {
         Expanded(
           child: Text(text, style: TextStyle(color: scheme.onSurfaceVariant)),
         ),
+      ],
+    );
+  }
+}
+
+/// What a subject needs from its faculty, and its next class, as chips.
+class SubjectWorkChips extends StatelessWidget {
+  const SubjectWorkChips({super.key, required this.work, this.now});
+  final SubjectWork work;
+  final DateTime? now;
+
+  static const _amber = Color(0xff9a6a00), _green = Color(0xff176451);
+
+  @override
+  Widget build(BuildContext context) {
+    final w = work, l = MaterialLocalizations.of(context);
+    final toReview = w.sessions
+        .where(
+          (s) => const {
+            'closed',
+            'review_required',
+            'no_data',
+          }.contains(s['status']),
+        )
+        .length;
+    final at = now ?? DateTime.now();
+    DateTime? next;
+    for (final s in w.sessions) {
+      if (!const {'scheduled', 'open'}.contains(s['status'])) continue;
+      final start = DateTime.parse(s['starts_at'] as String).toLocal();
+      final end = s['ends_at'] is String
+          ? DateTime.parse(s['ends_at'] as String).toLocal()
+          : start;
+      if (end.isBefore(at)) continue;
+      if (next == null || start.isBefore(next)) next = start;
+    }
+    String n(int c, String one, String many) => '$c ${c == 1 ? one : many}';
+    final pending = [
+      if (toReview > 0)
+        (
+          Icons.rate_review_outlined,
+          n(toReview, 'session to review', 'sessions to review'),
+        ),
+      if (w.joinRequests > 0)
+        (
+          Icons.person_add_alt,
+          n(w.joinRequests, 'join request', 'join requests'),
+        ),
+      if (w.faceReviews > 0)
+        (Icons.face_outlined, n(w.faceReviews, 'face review', 'face reviews')),
+      if (w.openQueries > 0)
+        (Icons.forum_outlined, n(w.openQueries, 'open query', 'open queries')),
+    ];
+    Widget chip(IconData icon, String text, Color color) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 4),
+          Flexible(
+            child: Text(
+              text,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    return Wrap(
+      spacing: 6,
+      runSpacing: 6,
+      children: [
+        for (final (icon, text) in pending) chip(icon, text, _amber),
+        if (pending.isEmpty && w.failed.isEmpty)
+          chip(Icons.check_circle_outline, 'All caught up', _green),
+        if (next != null)
+          chip(
+            Icons.event_outlined,
+            'Next class: ${l.formatShortDate(next)} · ${l.formatTimeOfDay(TimeOfDay.fromDateTime(next))}',
+            Theme.of(context).colorScheme.primary,
+          ),
       ],
     );
   }

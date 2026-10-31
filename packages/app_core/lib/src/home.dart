@@ -273,11 +273,15 @@ class SubjectTile extends StatelessWidget {
     this.status,
     this.note,
     this.onTap,
+    this.extra,
   });
   final String title, subtitle;
   final IconData icon;
   final String? status, note;
   final VoidCallback? onTap;
+
+  /// Optional details under the text, e.g. pending-work chips.
+  final Widget? extra;
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
@@ -334,6 +338,17 @@ class SubjectTile extends StatelessWidget {
                       const SizedBox(height: 8),
                       StatusBadge(status!),
                     ],
+                    AnimatedSize(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      alignment: Alignment.topLeft,
+                      child: extra == null
+                          ? const SizedBox(width: double.infinity)
+                          : Padding(
+                              padding: const EdgeInsets.only(top: 10),
+                              child: extra,
+                            ),
+                    ),
                   ],
                 ),
               ),

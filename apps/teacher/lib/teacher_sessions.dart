@@ -635,6 +635,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   late final AppServices services;
   late final String institute;
   Json? data;
+
+  /// The session's subject, for the banner; loaded once.
+  Offering? offering;
   AppFailure? error;
 
   /// Record/upload problems, shown inside the capture panel next to the
@@ -709,6 +712,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     );
   }
 
+  Future<void> _loadOffering(String id) async {
+    try {
+      final o = await services.api.offering(institute, id);
+      if (mounted) setState(() => offering = o);
+    } catch (_) {
+      // The banner falls back to "Attendance session".
+    }
+  }
+
   Future<void> refreshWithConfirmation() async {
     syncExitGuard();
     if (exitGuard.dirty) {
@@ -746,6 +758,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         institute: institute,
       );
       if (!mounted || current != loadGeneration) return;
+      if (offering == null) {
+        _loadOffering(result['session']['offering_id'] as String);
+      }
       setState(() {
         data = result;
         error = null;
@@ -984,8 +999,18 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         context: context,
         builder: (c) => AlertDialog(
           title: const Text('Publish attendance?'),
-          content: const Text(
-            'Students will see these decisions. Corrections create a new publication revision.',
+          content: Builder(
+            builder: (_) {
+              final c = DecisionCounts.of(
+                (data!['items'] as List).cast<Json>(),
+                decisions,
+              );
+              return Text(
+                '${c.present} present, ${c.absent} absent, ${c.unassessed} unassessed.\n\n'
+                'Students will see these results. Any later change is published as a correction.'
+                '${c.unassessed > 0 ? '\n\nUnassessed students make this publication incomplete.' : ''}',
+              );
+            },
           ),
           actions: [
             TextButton(
@@ -1124,25 +1149,25 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       'cancelled',
       'finalized',
     ].contains(s['status']);
-    return ContentPage(
+    final status = s['status'] as String;
+    final captured = captureCoverage(rows) != null;
+    final counts = DecisionCounts.of(rows, decisions);
+    final page = ContentPage(
       children: [
-        TextButton.icon(
-          onPressed: () => goBack(context, '/classes/${s['offering_id']}'),
-          icon: const Icon(Icons.arrow_back),
-          label: const Text('Back to subject'),
-        ),
-        PageHeader(
-          compact: true,
-          title: 'Attendance session',
-          subtitle:
-              '${sessionDate(context, s['starts_at'])} · ${sessionLabel(s['status'])}',
-          eyebrow: 'SESSION WORKSPACE',
-          icon: Icons.videocam_outlined,
-          action: OutlinedButton(
-            onPressed: busy ? null : refreshWithConfirmation,
-            child: const Text('Refresh'),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => goBack(context, '/classes/${s['offering_id']}'),
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('Back to subject'),
           ),
         ),
+        _SessionHero(
+          session: s,
+          offering: offering,
+          onRefresh: busy ? null : refreshWithConfirmation,
+        ),
+        const SizedBox(height: 16),
         if (error != null) ...[
           if (decisions.isNotEmpty)
             const Text(
@@ -1152,42 +1177,50 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             liveRegion: true,
             child: ErrorView(error!, retry: refreshWithConfirmation),
           ),
+          const SizedBox(height: 16),
         ],
         Panel(
           child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              SessionSteps(status: status, captured: captured),
+              const SizedBox(height: 14),
               Text(
-                s['status'] == 'open'
-                    ? 'After the final capture finishes processing, close this session. Then review each student and publish attendance. Saving decisions while open only saves a draft.'
-                    : 'Open to freeze the roster, capture the classroom, then review and publish. Students not recognized start as Absent for you to check; students who could not be assessed stay unassessed.',
+                sessionStepHint(status, captured: captured),
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
-              const SizedBox(height: 12),
-              Wrap(
-                spacing: 12,
-                runSpacing: 8,
-                children: [
-                  if (s['status'] == 'scheduled')
-                    FilledButton(
-                      onPressed: busy ? null : () => transition('open'),
-                      child: const Text('Open session'),
-                    ),
-                  if (s['status'] == 'open')
-                    OutlinedButton(
-                      onPressed: busy ? null : () => transition('close'),
-                      child: const Text('Close session'),
-                    ),
-                  if (['scheduled', 'open'].contains(s['status']))
+              if (['scheduled', 'open'].contains(status)) ...[
+                const SizedBox(height: 12),
+                Wrap(
+                  spacing: 12,
+                  runSpacing: 8,
+                  children: [
+                    if (status == 'scheduled')
+                      FilledButton.icon(
+                        onPressed: busy ? null : () => transition('open'),
+                        icon: const Icon(Icons.play_arrow),
+                        label: const Text('Open session'),
+                      ),
+                    if (status == 'open')
+                      (captured ? FilledButton.icon : OutlinedButton.icon)(
+                        onPressed: busy ? null : () => transition('close'),
+                        icon: const Icon(Icons.lock_outline),
+                        label: const Text('Close session'),
+                      ),
                     TextButton(
                       onPressed: busy ? null : cancel,
                       child: const Text('Cancel session'),
                     ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ],
           ),
         ),
-        if (s['status'] == 'open')
+        const SizedBox(height: 16),
+        if (status == 'open') ...[
           Panel(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1200,32 +1233,65 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 if (captureCoverage(rows) case final coverage?)
                   CaptureQualityNote(coverage),
                 if (camera.controller != null && camera.clip == null)
-                  AspectRatio(
-                    aspectRatio: camera.controller!.value.aspectRatio,
-                    child: camera.controller!.buildPreview(),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(16),
+                    child: AspectRatio(
+                      aspectRatio: camera.controller!.value.aspectRatio,
+                      child: camera.controller!.buildPreview(),
+                    ),
                   ),
                 if (camera.error != null) Text(camera.error!),
                 if (camera.recording)
-                  Text('Recording ${camera.elapsed} / 15 seconds'),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.fiber_manual_record,
+                          color: Color(0xffc62828),
+                          size: 16,
+                        ),
+                        const SizedBox(width: 6),
+                        Text('Recording ${camera.elapsed} / 15 seconds'),
+                      ],
+                    ),
+                  ),
                 if (camera.clip != null) ...[
                   ClipPlayback(file: camera.clip!),
                   if (progress != null)
-                    LinearProgressIndicator(value: progress),
-                  FilledButton(
-                    onPressed: busy ? null : upload,
-                    child: Text(
-                      busy ? 'Uploading…' : 'Upload classroom capture',
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 8),
+                      child: LinearProgressIndicator(value: progress),
                     ),
-                  ),
-                  TextButton(
-                    onPressed: busy ? null : () => camera.discard(),
-                    child: const Text('Retake recording'),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 12,
+                    runSpacing: 8,
+                    children: [
+                      FilledButton.icon(
+                        onPressed: busy ? null : upload,
+                        icon: const Icon(Icons.cloud_upload_outlined),
+                        label: Text(
+                          busy ? 'Uploading…' : 'Upload classroom capture',
+                        ),
+                      ),
+                      TextButton(
+                        onPressed: busy ? null : () => camera.discard(),
+                        child: const Text('Retake recording'),
+                      ),
+                    ],
                   ),
                 ] else if (!camera.recording)
-                  FilledButton.icon(
-                    onPressed: busy ? null : record,
-                    icon: const Icon(Icons.videocam_outlined),
-                    label: const Text('Record classroom'),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: FilledButton.icon(
+                        onPressed: busy ? null : record,
+                        icon: const Icon(Icons.videocam_outlined),
+                        label: const Text('Record classroom'),
+                      ),
+                    ),
                   ),
                 if (captureError != null)
                   CaptureProblem(
@@ -1235,28 +1301,47 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               ],
             ),
           ),
-        if (capture != null)
+          const SizedBox(height: 16),
+        ],
+        if (capture != null) ...[
           FutureBuilder<Json>(
             future: captureStatus(capture!['id'] as String),
             builder: (c, snapshot) {
               final quality = snapshot.hasData
                   ? captureQuality(snapshot.data!)
                   : null;
-              return Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  Text(
-                    snapshot.hasData
-                        ? 'Capture: ${captureStatusLabel(snapshot.data!['status'] as String)}'
-                        : snapshot.hasError
-                        ? 'Capture status unavailable. Refresh this session to retry.'
-                        : 'Checking capture status…',
-                  ),
-                  if (quality != null) CaptureQualityNote(quality),
-                ],
+              final state = snapshot.data?['status'] as String?;
+              return Panel(
+                padding: 16,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        _CaptureStateIcon(
+                          state: snapshot.hasError ? 'error' : state,
+                        ),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Text(
+                            snapshot.hasData
+                                ? 'Capture: ${captureStatusLabel(state!)}'
+                                : snapshot.hasError
+                                ? 'Capture status unavailable. Refresh this session to retry.'
+                                : 'Checking capture status…',
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                        ),
+                      ],
+                    ),
+                    if (quality != null) CaptureQualityNote(quality),
+                  ],
+                ),
               );
             },
           ),
+          const SizedBox(height: 16),
+        ],
         if (rows.isEmpty)
           const Panel(
             child: Text(
@@ -1270,7 +1355,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             editable: editable,
             finalised: finalised,
             busy: busy,
-            sessionLabel: sessionLabel(s['status']),
+            sessionLabel: sessionLabel(status),
             onChanged: (id, status) => setState(() {
               decisions[id] = status;
               syncExitGuard();
@@ -1279,7 +1364,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             onCorrect: correct,
           ),
         if (editable) ...[
-          if (s['status'] != 'open' &&
+          const SizedBox(height: 12),
+          if (status != 'open' &&
               rows.any(
                 (row) =>
                     row['status'] == 'proposed_absent' &&
@@ -1293,7 +1379,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 style: TextStyle(color: Theme.of(context).colorScheme.primary),
               ),
             ),
-          if (hasUnconfirmedProposal && s['status'] != 'open')
+          if (hasUnconfirmedProposal && status != 'open')
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: Text(
@@ -1303,7 +1389,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 ),
               ),
             ),
-          if (s['status'] != 'open')
+          if (status != 'open')
             CheckboxListTile(
               value: ack,
               onChanged: (v) => setState(() => ack = v ?? false),
@@ -1311,30 +1397,33 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 'I understand that any unassessed students make this publication incomplete.',
               ),
             ),
-          Wrap(
-            spacing: 12,
-            children: [
-              OutlinedButton(
-                onPressed: busy ? null : () => save(false),
-                child: const Text('Save draft decisions'),
-              ),
-              if (s['status'] != 'open')
-                FilledButton(
-                  onPressed: busy || hasUnconfirmedProposal
-                      ? null
-                      : () => save(true),
-                  child: const Text('Publish attendance'),
-                ),
-            ],
-          ),
         ],
-        if (finalised)
+        if (finalised) ...[
+          const SizedBox(height: 16),
           Panel(
-            child: Text(
-              'Published revision ${s['attendance_revision']}. Students can view their own attendance.',
+            child: Row(
+              children: [
+                const Icon(Icons.verified_outlined, color: Color(0xff176451)),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    publishedNote(s['attendance_revision'] as int? ?? 1),
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ],
             ),
           ),
-        if (!['scheduled', 'open', 'cancelled'].contains(s['status']))
+        ],
+        if (!['scheduled', 'open', 'cancelled'].contains(status)) ...[
+          const SectionTitle('Reports'),
+          Text(
+            'A draft report follows a closed session; the final report uses the published attendance. Download it as CSV or PDF.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: 12),
           TeacherReports(
             api: services.api,
             institute: institute,
@@ -1342,7 +1431,465 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             supabaseUrl: services.config.supabaseUrl,
             sessionVersion: s['version'] as int,
           ),
+        ],
       ],
+    );
+    if (!editable) return page;
+    return Column(
+      children: [
+        Expanded(child: page),
+        DecisionBar(
+          counts: counts,
+          busy: busy,
+          canPublish: status != 'open' && !hasUnconfirmedProposal,
+          showPublish: status != 'open',
+          onSave: () => save(false),
+          onPublish: () => save(true),
+        ),
+      ],
+    );
+  }
+}
+
+/// Live Present / Absent / Unassessed / to-check counts for a review.
+class DecisionCounts {
+  DecisionCounts(this.present, this.absent, this.unassessed, this.toCheck);
+  factory DecisionCounts.of(List<Json> rows, Map<String, String> decisions) {
+    var p = 0, a = 0, u = 0, t = 0;
+    for (final r in rows) {
+      final v = decisions[r['student_id']] ?? r['status'] as String?;
+      if (v == 'proposed_present' || v == 'proposed_absent') {
+        t++;
+      } else {
+        switch (finalStatus(v)) {
+          case 'present':
+            p++;
+          case 'absent':
+            a++;
+          default:
+            u++;
+        }
+      }
+    }
+    return DecisionCounts(p, a, u, t);
+  }
+  final int present, absent, unassessed, toCheck;
+}
+
+String publishedNote(int revision) {
+  final corrections = revision - 1;
+  return 'Published · students can see their attendance'
+      '${corrections > 0 ? ' · corrected $corrections ${corrections == 1 ? 'time' : 'times'}' : ''}';
+}
+
+/// The one sentence for where the session is in its workflow.
+String sessionStepHint(
+  String status, {
+  required bool captured,
+}) => switch (status) {
+  'scheduled' => 'Open the session at the start of class. This freezes the approved student list.',
+  'open' when !captured => 'Record the classroom. Each clip adds recognised students; you can record more than one.',
+  'open' =>
+    'When the last clip has processed, close the session to review attendance.',
+  'closed' || 'review_required' || 'no_data' => 'Check each student, then publish. Not-recognised students start as Absent for you to confirm.',
+  'finalized' =>
+    'Attendance is published. Use Correct on a row to fix a mistake.',
+  _ => 'This session was cancelled. Nothing was recorded.',
+};
+
+/// Open → Record → Close → Review → Publish, with the current step lit.
+class SessionSteps extends StatelessWidget {
+  const SessionSteps({super.key, required this.status, required this.captured});
+  final String status;
+  final bool captured;
+  static const steps = ['Open', 'Record', 'Close', 'Review', 'Publish'];
+
+  /// Index of the current step; [steps.length] when everything is done.
+  static int current(String status, bool captured) => switch (status) {
+    'scheduled' => 0,
+    'open' => captured ? 2 : 1,
+    'closed' || 'review_required' || 'no_data' => 3,
+    'finalized' => steps.length,
+    _ => -1,
+  };
+
+  @override
+  Widget build(BuildContext context) {
+    final at = current(status, captured);
+    final scheme = Theme.of(context).colorScheme;
+    if (at < 0) {
+      return Row(
+        children: [
+          Icon(Icons.event_busy_outlined, color: scheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          const Text(
+            'Cancelled',
+            style: TextStyle(fontWeight: FontWeight.w700),
+          ),
+        ],
+      );
+    }
+    Widget dot(int i) {
+      final done = i < at, now = i == at;
+      return Semantics(
+        label:
+            '${steps[i]}: ${done
+                ? 'done'
+                : now
+                ? 'current step'
+                : 'to do'}',
+        child: ExcludeSemantics(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 250),
+            width: 30,
+            height: 30,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: done
+                  ? const Color(0xff176451)
+                  : now
+                  ? scheme.primary
+                  : Colors.transparent,
+              border: Border.all(
+                color: done || now ? Colors.transparent : scheme.outlineVariant,
+                width: 2,
+              ),
+            ),
+            child: Center(
+              child: done
+                  ? const Icon(Icons.check, size: 16, color: Colors.white)
+                  : Text(
+                      '${i + 1}',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w800,
+                        color: now ? Colors.white : scheme.onSurfaceVariant,
+                      ),
+                    ),
+            ),
+          ),
+        ),
+      );
+    }
+
+    Text label(int i) => Text(
+      steps[i],
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: i == at ? FontWeight.w800 : FontWeight.w600,
+        color: i <= at ? scheme.onSurface : scheme.onSurfaceVariant,
+      ),
+    );
+    return LayoutBuilder(
+      builder: (context, box) {
+        // Large text needs the compact form sooner.
+        if (box.maxWidth < 420 * MediaQuery.textScalerOf(context).scale(1)) {
+          // Narrow: dots in a row, only the current label spelled out.
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  for (var i = 0; i < steps.length; i++) ...[
+                    dot(i),
+                    if (i < steps.length - 1)
+                      Expanded(
+                        child: Container(
+                          height: 2,
+                          color: i < at
+                              ? const Color(0xff176451)
+                              : scheme.outlineVariant,
+                        ),
+                      ),
+                  ],
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                at >= steps.length
+                    ? 'All steps done'
+                    : 'Step ${at + 1} of ${steps.length}: ${steps[at]}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (var i = 0; i < steps.length; i++) ...[
+              Column(children: [dot(i), const SizedBox(height: 6), label(i)]),
+              if (i < steps.length - 1)
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 14, left: 4, right: 4),
+                    child: Container(
+                      height: 2,
+                      color: i < at
+                          ? const Color(0xff176451)
+                          : scheme.outlineVariant,
+                    ),
+                  ),
+                ),
+            ],
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _CaptureStateIcon extends StatelessWidget {
+  const _CaptureStateIcon({required this.state});
+  final String? state;
+  @override
+  Widget build(BuildContext context) => switch (state) {
+    null => const SizedBox(
+      width: 20,
+      height: 20,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    ),
+    'processing' => const SizedBox(
+      width: 20,
+      height: 20,
+      child: CircularProgressIndicator(strokeWidth: 2),
+    ),
+    'review_required' ||
+    'completed' => const Icon(Icons.check_circle, color: Color(0xff176451)),
+    'failed' ||
+    'expired' ||
+    'error' => const Icon(Icons.error_outline, color: Color(0xffa22f2f)),
+    _ => const Icon(Icons.hourglass_top, color: Color(0xff9a6a00)),
+  };
+}
+
+/// The session banner: subject, when and where, and the state.
+class _SessionHero extends StatelessWidget {
+  const _SessionHero({
+    required this.session,
+    required this.offering,
+    required this.onRefresh,
+  });
+  final Json session;
+  final Offering? offering;
+  final VoidCallback? onRefresh;
+  @override
+  Widget build(BuildContext context) {
+    final s = session, l = MaterialLocalizations.of(context);
+    final start = DateTime.parse(s['starts_at'] as String).toLocal();
+    final end = s['ends_at'] is String
+        ? DateTime.parse(s['ends_at'] as String).toLocal()
+        : null;
+    final room = (s['room_label'] as String?) ?? '';
+    final (color, icon) = SessionCard.style(s['status'] as String?);
+    Widget chip(IconData i, String text) => Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: const Color(0x26ffffff),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(i, size: 15, color: Colors.white),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(color: Colors.white, fontSize: 13),
+            ),
+          ),
+        ],
+      ),
+    );
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xff0d2a2c), Color(0xff135f50), Color(0xff23906f)],
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Expanded(
+                child: Text(
+                  'ATTENDANCE SESSION',
+                  style: TextStyle(
+                    color: Color(0xffa8e5cf),
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    letterSpacing: 1.6,
+                  ),
+                ),
+              ),
+              IconButton(
+                tooltip: 'Refresh',
+                color: Colors.white,
+                onPressed: onRefresh,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
+          Text(
+            offering?.title ?? 'Attendance session',
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -.5,
+            ),
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 5,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(99),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(icon, size: 15, color: color),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        sessionLabel(s['status'] as String? ?? ''),
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          color: color,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              chip(Icons.event_outlined, l.formatMediumDate(start)),
+              chip(
+                Icons.schedule,
+                '${l.formatTimeOfDay(TimeOfDay.fromDateTime(start))}'
+                '${end == null ? '' : ' – ${l.formatTimeOfDay(TimeOfDay.fromDateTime(end))}'}',
+              ),
+              if (room.isNotEmpty) chip(Icons.meeting_room_outlined, room),
+              if (offering != null)
+                chip(Icons.groups_2_outlined, offering!.subtitle),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// Pinned at the bottom while reviewing: live counts and the two actions.
+class DecisionBar extends StatelessWidget {
+  const DecisionBar({
+    super.key,
+    required this.counts,
+    required this.busy,
+    required this.canPublish,
+    required this.showPublish,
+    required this.onSave,
+    required this.onPublish,
+  });
+  final DecisionCounts counts;
+  final bool busy, canPublish, showPublish;
+  final VoidCallback onSave, onPublish;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    Widget count(String label, int n, Color color) => Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 10,
+          height: 10,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            '$label $n',
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ],
+    );
+    return Material(
+      elevation: 8,
+      color: scheme.surface,
+      child: SafeArea(
+        top: false,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 1120),
+              child: Wrap(
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 16,
+                runSpacing: 10,
+                children: [
+                  Semantics(
+                    liveRegion: true,
+                    child: Wrap(
+                      spacing: 14,
+                      runSpacing: 6,
+                      children: [
+                        count(
+                          'Present',
+                          counts.present,
+                          const Color(0xff176451),
+                        ),
+                        count('Absent', counts.absent, const Color(0xffa22f2f)),
+                        count(
+                          'Unassessed',
+                          counts.unassessed,
+                          const Color(0xff9a6a00),
+                        ),
+                        if (counts.toCheck > 0)
+                          count('To check', counts.toCheck, scheme.primary),
+                      ],
+                    ),
+                  ),
+                  Wrap(
+                    spacing: 10,
+                    runSpacing: 8,
+                    children: [
+                      OutlinedButton(
+                        onPressed: busy ? null : onSave,
+                        child: const Text('Save draft decisions'),
+                      ),
+                      if (showPublish)
+                        FilledButton.icon(
+                          onPressed: busy || !canPublish ? null : onPublish,
+                          icon: const Icon(Icons.send_outlined),
+                          label: const Text('Publish attendance'),
+                        ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }
