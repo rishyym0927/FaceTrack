@@ -1,7 +1,16 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Release signing comes from the git-ignored .local/release/signing/key.properties
+// (see docs/DEPLOY_AZURE.md). Without it, release builds stay unsigned as before.
+val signingProps = Properties().apply {
+    val file = rootProject.file("../../../.local/release/signing/key.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
 }
 
 android {
@@ -28,10 +37,20 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (signingProps.containsKey("storeFile")) {
+            create("release") {
+                storeFile = file(signingProps.getProperty("storeFile"))
+                storePassword = signingProps.getProperty("storePassword")
+                keyAlias = signingProps.getProperty("keyAlias")
+                keyPassword = signingProps.getProperty("keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Production signing must be configured before distributing a release.
+            signingConfig = signingConfigs.findByName("release")
         }
     }
 }
