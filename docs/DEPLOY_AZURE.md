@@ -36,6 +36,18 @@ deploy/azure/deploy.sh --web-only # only the web apps
 
 It needs `.local/flutter/production.json` (a copy of `development.json` with `API_BASE_URL` set to the public address). It never ships uncommitted local edits and never touches the server's `.env` or model files. No migration runs on deploy.
 
+## Phone apps (release build)
+
+Release APKs are signed with the key in `.local/release/signing/` (`facetrack-release.jks` and `key.properties`, both git-ignored). **Back up both files somewhere private**: an app signed with a different key cannot update an installed one. From a clean worktree of `origin/main`:
+
+```sh
+export FACETRACK_KEY_PROPERTIES=$PWD/.local/release/signing/key.properties
+# in apps/teacher and apps/student
+../../scripts/flutter build apk --release --split-per-abi --dart-define-from-file=../../.local/flutter/production.json
+```
+
+Most phones use `app-arm64-v8a-release.apk` (about 22 MB Teacher, 34 MB Student). Installing it over an earlier **debug** build fails (different signing key): uninstall the old app first, after any pending upload has finished.
+
 ## Day-to-day
 
 ```sh
