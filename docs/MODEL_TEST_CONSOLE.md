@@ -47,6 +47,18 @@ scripts/console-azure --stop   # later stops the VM console
 
 Keep the first terminal open while testing and use `http://127.0.0.1:8010` on that Mac. Press Ctrl+C to close the tunnel. Use **Delete all test data** on the page after exporting the two aggregate reports; stopping the container alone retains its private volume. The VM's model/profile pin was checked on first start, but its separate 16-file freeze receipt is not provisioned there, so run the receipt check locally before treating ML validation as complete. Do not expose port 8010 or proxy the console through Caddy without adding individual authentication and an approved volunteer-data policy.
 
+### Separate HTTPS client workspaces
+
+For a consenting client in the approved non-commercial academic test, create a separate account from the repository root:
+
+```sh
+scripts/provision-console-client client-02
+```
+
+Use the next unused number through `client-99`. The command builds the FaceTrack console page, creates a private container and data volume, and protects its HTTPS route with a unique password. It refuses to replace an existing client. The URL, username and password are saved only in the ignored, mode-600 `.local/clients/client-02.txt`; send them to that client through an agreed private channel. Never put credentials in Git, chat, or a URL. Each client should use only their own page and press **Delete all test data** after downloading the two reports. The operator must stop/remove unused client containers and volumes after their test is complete; deletion of the web page alone does not remove the private volume.
+
+The page sends recordings to the Azure VM for processing. Uploaded clips are deleted after processing; saved volunteer templates and test results remain in that client's private volume until **Delete all test data** is pressed. This client route is for the approved non-commercial test only. The pinned model's rights for commercial or institute deployment have not been established; obtain permission before sharing it for those uses.
+
 The bundle and model files are private and Git-ignored.
 
 ```sh

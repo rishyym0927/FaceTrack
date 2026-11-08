@@ -218,14 +218,14 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
   Future<void> wipeAll() async {
     final ok = await confirm(
       'Delete all test data?',
-      'This removes every volunteer’s saved face data and all recorded results from this computer. '
+      'This removes every volunteer’s saved face data and all recorded results from this private test workspace. '
           'Export the summary first if you need it.',
       'Delete everything',
     );
     if (ok != true) return;
     await guarded('Deleting…', backend.wipe);
     setState(() => lastResult = null);
-    say('All test data was deleted from this computer.');
+    say('All test data was deleted from this private test workspace.');
     await refresh();
   }
 
@@ -263,9 +263,22 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
                 const Text(
                   'Enrol a few consenting volunteers, record six short clips, and see whether the '
                   'model’s suggestions match what really happened. Videos are deleted straight '
-                  'after checking, and nothing leaves this computer.',
+                  'after checking on the FaceTrack server. Each client has a separate private test workspace.',
                 ),
                 const SizedBox(height: 16),
+                if (ready)
+                  Card(
+                    color: const Color(0xffe5f1eb),
+                    child: ListTile(
+                      leading: const Icon(Icons.fact_check_outlined, color: _green),
+                      title: Text('${people.length} volunteers · ${summary?['done'] ?? 0} of 6 tests complete'),
+                      subtitle: Text(people.length < 2
+                          ? 'Next: add at least two consenting volunteers.'
+                          : (summary?['done'] ?? 0) < 6
+                              ? 'Next: finish the six recordings, then download the report.'
+                              : 'Next: download both reports, then delete the test data.'),
+                    ),
+                  ),
                 if (busy)
                   Card(
                     color: Colors.amber.shade50,
@@ -378,7 +391,7 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
           controller: name,
           maxLength: 40,
           decoration: const InputDecoration(
-            labelText: 'Name or nickname (stays on this computer)',
+            labelText: 'Name or nickname (stays in this private test workspace)',
           ),
         ),
         ListenableBuilder(
@@ -643,7 +656,7 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
         if (data['slowest_clip_processing_ms'] != null)
           Text(
             'Slowest clip took ${((data['slowest_clip_processing_ms'] as num) / 1000).toStringAsFixed(1)} s '
-            'to analyse on this computer.',
+            'to analyse in this private test workspace.',
           ),
         const SizedBox(height: 8),
         Text('${data['disclaimer']}', style: Theme.of(context).textTheme.bodySmall),

@@ -50,7 +50,7 @@ class HttpConsoleBackend implements ConsoleBackend {
 
   static String _defaultBase() {
     const configured = String.fromEnvironment('CONSOLE_API');
-    return configured.isNotEmpty ? configured : Uri.base.origin;
+    return configured.isNotEmpty ? configured : Uri.base.toString();
   }
 
   Map<String, dynamic> _body(Response<dynamic> response) {
@@ -76,19 +76,19 @@ class HttpConsoleBackend implements ConsoleBackend {
   }
 
   @override
-  Future<Map<String, dynamic>> status() => _call(() => _dio.get('/api/status'));
+  Future<Map<String, dynamic>> status() => _call(() => _dio.get('api/status'));
 
   @override
   Future<List<Map<String, dynamic>>> scenarios() async {
-    final data = await _call(() => _dio.get('/api/scenarios'));
+    final data = await _call(() => _dio.get('api/scenarios'));
     return [for (final item in data['scenarios'] as List) Map<String, dynamic>.from(item as Map)];
   }
 
   @override
-  Future<Map<String, dynamic>> summary() => _call(() => _dio.get('/api/summary'));
+  Future<Map<String, dynamic>> summary() => _call(() => _dio.get('api/summary'));
 
   @override
-  Future<Map<String, dynamic>> exportData() => _call(() => _dio.get('/api/export'));
+  Future<Map<String, dynamic>> exportData() => _call(() => _dio.get('api/export'));
 
   Options _video(String extension) => Options(contentType: 'video/$extension');
 
@@ -99,7 +99,7 @@ class HttpConsoleBackend implements ConsoleBackend {
     required String extension,
   }) => _call(
     () => _dio.post(
-      '/api/people/enrol',
+      'api/people/enrol',
       queryParameters: {'label': label, 'consent': '1', 'supervised': '1'},
       data: video,
       options: _video(extension),
@@ -108,7 +108,7 @@ class HttpConsoleBackend implements ConsoleBackend {
 
   @override
   Future<void> removePerson(String id) async {
-    await _call(() => _dio.delete('/api/people/$id'));
+    await _call(() => _dio.delete('api/people/$id'));
   }
 
   @override
@@ -120,7 +120,7 @@ class HttpConsoleBackend implements ConsoleBackend {
     required String extension,
   }) => _call(
     () => _dio.post(
-      '/api/runs',
+      'api/runs',
       queryParameters: {
         'scenario': scenario,
         'present': present.join(','),
@@ -133,6 +133,6 @@ class HttpConsoleBackend implements ConsoleBackend {
 
   @override
   Future<void> wipe() async {
-    await _call(() => _dio.post('/api/wipe', queryParameters: {'confirm': 'DELETE'}));
+    await _call(() => _dio.post('api/wipe', queryParameters: {'confirm': 'DELETE'}));
   }
 }

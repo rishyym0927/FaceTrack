@@ -31,6 +31,8 @@ facetrack.centralindia.cloudapp.azure.com {
 			Referrer-Policy "no-referrer"
 			Permissions-Policy "camera=(self), microphone=(), geolocation=()"
 		}
+		# Each client console has its own authenticated route and private container.
+		import /etc/caddy/model-test-clients/*.caddy
 
 		handle_path /teacher/* {
 			root * /srv/facetrack/teacher

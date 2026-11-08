@@ -1,0 +1,73 @@
+#!/bin/sh
+# Create one isolated, password-protected Azure Model Test Console client.
+set -eu
+CLIENT=${1:-}
+case "$CLIENT" in
+  client-[0-9][0-9]) ;;
+  *) echo 'Usage: scripts/provision-console-client client-01 (01 through 99)' >&2; exit 2 ;;
+esac
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+HOST=${FACETRACK_HOST:-facetrack.centralindia.cloudapp.azure.com}
+KEY=${FACETRACK_SSH_KEY:-$HOME/.ssh/facetrack_azure}
+REMOTE="azureuser@$HOST"
+NUMBER=$(printf '%s' "${CLIENT#client-}" | sed 's/^0//')
+[ -n "$NUMBER" ] || { echo 'Use client-01 through client-99.' >&2; exit 2; }
+PORT=$((8100 + NUMBER))
+URL="https://$HOST/model-test/$CLIENT/"
+PRIVATE="$ROOT/.local/clients"
+CREDS="$PRIVATE/$CLIENT.txt"
+[ ! -e "$CREDS" ] || { echo "Credentials already exist for $CLIENT; refusing to replace them." >&2; exit 1; }
+ssh -i "$KEY" "$REMOTE" "test ! -e /etc/caddy/model-test-clients/$CLIENT.caddy && test ! -e /srv/facetrack/model-test/$CLIENT" || {
+  echo "Server already has $CLIENT; refusing to replace it." >&2; exit 1;
+}
+
+mkdir -p "$PRIVATE"
+chmod 700 "$PRIVATE"
+PASSWORD=$(openssl rand -hex 24)
+HASH=$(printf '%s\n' "$PASSWORD" | ssh -i "$KEY" "$REMOTE" 'caddy hash-password')
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+cat > "$TMP/$CLIENT.caddy" <<EOF
+handle_path /model-test/$CLIENT/* {
+    basic_auth {
+        client $HASH
+    }
+    reverse_proxy 127.0.0.1:$PORT {
+        header_up Host 127.0.0.1:8010
+    }
+}
+EOF
+
+(cd "$ROOT/apps/teacher" && "$ROOT/scripts/flutter" build web -t lib/main_console.dart \
+  --release --no-web-resources-cdn --base-href "/model-test/$CLIENT/" \
+  --output "build/model-test-$CLIENT")
+ssh -i "$KEY" "$REMOTE" "mkdir -p /srv/facetrack/model-test/$CLIENT"
+rsync -az -e "ssh -i '$KEY'" "$ROOT/apps/teacher/build/model-test-$CLIENT/" \
+  "$REMOTE:/srv/facetrack/model-test/$CLIENT/"
+scp -q -i "$KEY" "$TMP/$CLIENT.caddy" "$REMOTE:/tmp/$CLIENT.caddy"
+ssh -i "$KEY" "$REMOTE" "sh -s -- '$CLIENT' '$PORT' '$HOST'" <<'REMOTE_SCRIPT'
+set -eu
+client=$1 port=$2 host=$3
+cd /opt/facetrack
+docker run -d --name "facetrack-test-$client" --restart unless-stopped \
+  --cpus 0.75 --memory 2g -p "127.0.0.1:$port:8010" \
+  -e FACETRACK_CONSOLE_HOST=0.0.0.0 -e FACETRACK_CONSOLE_PORT=8010 \
+  -e "CONSOLE_ORIGINS=https://$host" \
+  -e MANIFEST_PATH=/workspace/.local/spike/models/buffalo_sc/manifest.json \
+  -e PROFILE_PATH=/workspace/.local/spike/profiles/frozen-phase1b-v1.json \
+  -e CONSOLE_WEB_DIR=/workspace/.local/console-web \
+  -e CONSOLE_ROOT=/data/test-console \
+  -v "$PWD/services/worker:/workspace/services/worker:ro" \
+  -v "$PWD/.local/spike:/workspace/.local/spike:ro" \
+  -v "/srv/facetrack/model-test/$client:/workspace/.local/console-web:ro" \
+  -v "facetrack_test_$client:/data" facetrack-console \
+  /opt/venv/bin/python -m facetrack_worker.console >/dev/null
+sudo install -d -m 0755 /etc/caddy/model-test-clients
+sudo install -m 0644 "/tmp/$client.caddy" "/etc/caddy/model-test-clients/$client.caddy"
+sudo caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile >/dev/null
+sudo systemctl reload caddy
+rm "/tmp/$client.caddy"
+REMOTE_SCRIPT
+umask 077
+printf 'URL: %s\nUsername: client\nPassword: %s\n' "$URL" "$PASSWORD" > "$CREDS"
+echo "Created $CLIENT. Private login details: $CREDS"
