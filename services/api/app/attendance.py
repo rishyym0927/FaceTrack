@@ -14,7 +14,7 @@ from . import biometrics as bio
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import Strict
-from .security import audit, expected_version, idempotent, page, teacher_access
+from .security import audit, check_cursor, expected_version, idempotent, page, teacher_access
 from .security import remember as remember_effect
 
 
@@ -309,17 +309,21 @@ async def apply_decisions(conn, actor, institute, identifier, decisions):
             raise APIError(422, "NOT_ON_ROSTER", "A student is not on this session roster.")
 
 
-async def publish(conn, actor, institute, s, reason=None):
+async def can_publish(conn, actor, institute, offering):
     permission = await one(
         conn,
         """SELECT ot.id FROM app.offering_teachers ot JOIN app.teachers t ON t.institute_id=ot.institute_id AND t.id=ot.teacher_id
     WHERE ot.institute_id=:i AND ot.offering_id=:o AND ot.status='active' AND ot.can_finalize AND t.auth_user_id=:a AND t.status='approved'""",
-        {"i": institute, "o": s["offering_id"], "a": actor},
+        {"i": institute, "o": offering, "a": actor},
     )
     if not permission:
         raise APIError(
             403, "PUBLICATION_FORBIDDEN", "This teaching assignment cannot publish attendance."
         )
+
+
+async def publish(conn, actor, institute, s, reason=None):
+    await can_publish(conn, actor, institute, s["offering_id"])
     rows = await attendance(conn, institute, s["id"])
     if any(x["status"] in ("proposed_present", "proposed_absent") for x in rows):
         raise APIError(
@@ -365,6 +369,29 @@ async def publish(conn, actor, institute, s, reason=None):
     return publication
 
 
+async def still_absent(conn, institute, dispute):
+    """Whether the disputing student is still Absent in the current publication.
+
+    Another query on the same session may have been accepted since, publishing a
+    newer revision; that does not change this student's disputed result."""
+    if dispute["attendance_revision"] == dispute["source_revision"]:
+        return True
+    current = await one(
+        conn,
+        "SELECT snapshot_json FROM app.publications WHERE institute_id=:i AND session_id=:s AND revision=:r",
+        {"i": institute, "s": dispute["session_id"], "r": dispute["attendance_revision"]},
+    )
+    mine = current and next(
+        (
+            x
+            for x in current["snapshot_json"]["records"]
+            if x["student_id"] == str(dispute["student_id"])
+        ),
+        None,
+    )
+    return bool(mine) and mine["status"] == "absent"
+
+
 def install(app, engine, settings, principal, storage):
     User = Annotated[object, Depends(principal)]
     Institute = Annotated[UUID, Header(alias="X-Institute-ID")]
@@ -390,6 +417,13 @@ def install(app, engine, settings, principal, storage):
     ):
         async with transaction(engine, user.user_id, institute_id) as c:
             await teacher_access(c, user.user_id, institute_id, offering_id)
+            await check_cursor(
+                c,
+                cursor,
+                """SELECT 1 FROM app.sessions
+                WHERE institute_id=:i AND offering_id=:o AND id=CAST(:cur AS uuid)""",
+                {"i": institute_id, "o": offering_id},
+            )
             return page(
                 await many(
                     c,
@@ -527,6 +561,12 @@ def install(app, engine, settings, principal, storage):
             await c.execute(
                 text(
                     "UPDATE app.jobs j SET state='cancelled' FROM app.captures cap WHERE j.institute_id=:i AND cap.institute_id=j.institute_id AND cap.id=j.capture_id AND cap.session_id=:id AND j.state NOT IN ('succeeded','failed','cancelled')"
+                ),
+                {"i": institute_id, "id": identifier},
+            )
+            await c.execute(
+                text(
+                    "UPDATE app.captures SET status='cancelled',version=version+1 WHERE institute_id=:i AND session_id=:id AND status IN ('awaiting_upload','queued','processing')"
                 ),
                 {"i": institute_id, "id": identifier},
             )
@@ -694,10 +734,16 @@ def install(app, engine, settings, principal, storage):
                     "student": st["id"],
                 },
             )
-            items = []
+            items, kept = [], []
             for r in rows:
                 snapshot = r["snapshot_json"]
-                mine = next(x for x in snapshot["records"] if x["student_id"] == str(st["id"]))
+                mine = next(
+                    (x for x in snapshot["records"] if x["student_id"] == str(st["id"])), None
+                )
+                if mine is None:
+                    # Joined the roster after this revision was published: nothing to show.
+                    continue
+                kept.append(r)
                 items.append(
                     {
                         "id": r["id"],
@@ -724,15 +770,20 @@ def install(app, engine, settings, principal, storage):
                     c,
                     """SELECT s.id AS session_id,s.starts_at FROM app.publications p
                     JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
-                    WHERE p.institute_id=:i AND p.id=:cur""",
-                    {"i": institute_id, "cur": cursor},
+                    WHERE p.institute_id=:i AND p.id=:cur
+                    AND EXISTS(SELECT 1 FROM app.session_roster r WHERE r.institute_id=s.institute_id
+                    AND r.session_id=s.id AND r.student_id=:student)""",
+                    {"i": institute_id, "cur": cursor, "student": st["id"]},
                 )
-                key = at and (at["starts_at"], cursor)
+                if not at:
+                    raise APIError(
+                        422, "INVALID_CURSOR", "The list cursor is not valid. Reload the list."
+                    )
+                key = (at["starts_at"], cursor)
                 filtered = [
                     x
-                    for x, r in zip(items, rows)
-                    if key
-                    and (r["class_starts_at"], r["id"]) < key
+                    for x, r in zip(items, kept)
+                    if (r["class_starts_at"], r["id"]) < key
                     and x["session_id"] != str(at["session_id"])
                 ]
             return {
@@ -777,8 +828,12 @@ def install(app, engine, settings, principal, storage):
                             "student_id": sid,
                             "official_name": rec.get("official_name"),
                             "enrollment_number": rec.get("enrollment_number"),
-                            "present": 0, "late": 0, "absent": 0,
-                            "unassessed": 0, "excused": 0, "conducted": 0,
+                            "present": 0,
+                            "late": 0,
+                            "absent": 0,
+                            "unassessed": 0,
+                            "excused": 0,
+                            "conducted": 0,
                         },
                     )
                     acc["conducted"] += 1
@@ -884,6 +939,13 @@ def install(app, engine, settings, principal, storage):
     ):
         async with transaction(engine, user.user_id, institute_id) as c:
             st = await bio.student(c, user.user_id, institute_id)
+            await check_cursor(
+                c,
+                cursor,
+                """SELECT 1 FROM app.attendance_disputes
+                WHERE institute_id=:i AND student_id=:student AND id=CAST(:cur AS uuid)""",
+                {"i": institute_id, "student": st["id"]},
+            )
             rows = await many(
                 c,
                 """SELECT d.*,s.offering_id,s.starts_at FROM app.attendance_disputes d
@@ -912,6 +974,14 @@ def install(app, engine, settings, principal, storage):
     ):
         async with transaction(engine, user.user_id, institute_id) as c:
             await teacher_access(c, user.user_id, institute_id, offering_id)
+            await check_cursor(
+                c,
+                cursor,
+                """SELECT 1 FROM app.attendance_disputes d JOIN app.sessions s
+                ON s.institute_id=d.institute_id AND s.id=d.session_id
+                WHERE d.institute_id=:i AND s.offering_id=:o AND d.id=CAST(:cur AS uuid)""",
+                {"i": institute_id, "o": offering_id},
+            )
             rows = await many(
                 c,
                 """SELECT d.*,r.name_snapshot AS official_name,
@@ -956,6 +1026,8 @@ def install(app, engine, settings, principal, storage):
             if not row:
                 raise APIError(404, "NOT_FOUND", "Attendance query not found.")
             await teacher_access(c, user.user_id, institute_id, row["offering_id"])
+            # Rejecting is as final as accepting: both need the publishing assignment.
+            await can_publish(c, user.user_id, institute_id, row["offering_id"])
             route = request.url.path
             cached, fp = await idempotent(
                 c,
@@ -971,9 +1043,8 @@ def install(app, engine, settings, principal, storage):
                 raise APIError(409, "VERSION_CONFLICT", "Refresh this attendance query.")
             publication_id = None
             if body.decision == "accepted":
-                if (
-                    row["session_status"] != "finalized"
-                    or row["attendance_revision"] != row["source_revision"]
+                if row["session_status"] != "finalized" or not await still_absent(
+                    c, institute_id, row
                 ):
                     raise APIError(
                         409,
@@ -998,7 +1069,9 @@ def install(app, engine, settings, principal, storage):
                     "SELECT * FROM app.sessions WHERE institute_id=:i AND id=:id",
                     {"i": institute_id, "id": row["session_id"]},
                 )
-                publication_id = (await publish(c, user.user_id, institute_id, s, body.reason))["id"]
+                publication_id = (await publish(c, user.user_id, institute_id, s, body.reason))[
+                    "id"
+                ]
             result = dict(
                 await one(
                     c,

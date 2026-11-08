@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'harness.dart';
+
 AppNotice notice(String id, NoticeTone tone, {DateTime? time, String? route}) =>
     AppNotice(
       id: id,
@@ -236,5 +238,25 @@ void main() {
     expect(center.unread, 0);
     expect(find.text('Attendance published'), findsOneWidget);
     expect(find.text('Today · 1'), findsOneWidget);
+  });
+
+  test('Asking for fresh notices twice in a frame runs one load', () async {
+    SharedPreferences.setMockInitialValues({});
+    final h = await harness();
+    addTearDown(h.dispose);
+    final auth = AuthController(h.services);
+    addTearDown(auth.dispose);
+    for (var i = 0; i < 50 && (auth.loading || auth.institute == null); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    var loads = 0;
+    final center = NotificationCenter((_, _, _) async {
+      loads++;
+      return NoticeBatch(const []);
+    });
+    center.ensureFresh(h.services.api, auth);
+    center.ensureFresh(h.services.api, auth, force: true);
+    await center.inFlight;
+    expect(loads, 1);
   });
 }

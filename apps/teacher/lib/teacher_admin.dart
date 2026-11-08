@@ -121,7 +121,11 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     return all;
   }
 
+  int _reloadGeneration = 0;
+
   Future<void> _reload() async {
+    // A newer reload (pull-to-refresh, after a save) wins over an older one.
+    final generation = ++_reloadGeneration;
     setState(() {
       loading = true;
       loadError = null;
@@ -148,7 +152,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
             ? e.message
             : 'Could not load students.';
       }
-      if (!mounted) return;
+      if (!mounted || generation != _reloadGeneration) return;
       setState(() {
         terms = lists[0] as List<Academic>;
         courses = lists[1] as List<Academic>;
@@ -161,7 +165,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       });
       _maybeStartTour();
     } catch (e) {
-      if (!mounted) return;
+      if (!mounted || generation != _reloadGeneration) return;
       setState(() {
         loading = false;
         loadError = e is AppFailure ? e.message : 'Could not load admin data.';
@@ -169,13 +173,22 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     }
   }
 
-  Future<Json> _post(String path, Json body) => api.send(
-    'POST',
-    path,
-    institute: institute,
-    body: body,
-    mutation: Mutation(),
-  );
+  /// One idempotency key per endpoint: a retry of the same form after a lost
+  /// response reuses it (no duplicate record); renewed after success.
+  final _mutations = <String, Mutation>{};
+
+  Future<Json> _post(String path, Json body) async {
+    final mutation = _mutations.putIfAbsent(path, Mutation.new);
+    final result = await api.send(
+      'POST',
+      path,
+      institute: institute,
+      body: body,
+      mutation: mutation,
+    );
+    mutation.reset();
+    return result;
+  }
 
   /// Runs [action]; on success confirms it, highlights [created] and reloads.
   /// Returns null on success, otherwise the message for the open form.

@@ -1,6 +1,13 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 27 October 2026 (Asia/Kolkata)
+**Reviewed:** 8 November 2026 (Asia/Kolkata)
+
+## 8 November audit and integration checkpoint
+
+- Security review found an admin Auth email-collision path that could reset and link an existing account. The uncommitted fix refuses existing accounts, cleans up newly created accounts after a link failure, and adds a regression test. Biometric review cursors are now scoped to the authorized offering.
+- Faculty attendance sorting now exposes accessible labels and direction. Azure deployment waits for backend readiness before replacing live web assets; Caddy adds basic security headers.
+- Local checks: API 57 passed after security fixes; worker 54 passed; root ML 42 passed, 1 expected xfail; shared Flutter 66 passed, capture 8 passed, Student 19 passed, Teacher 76 passed; teacher analyze, Ruff, shell syntax, diff whitespace, and ML freeze receipt passed. These are local checks, not hosted or physical-device acceptance.
+- Existing uncommitted feature work was preserved. Authenticated web/Android walkthrough, full Azure deployment rehearsal, real recognition scenarios, biometric recovery, and institute gates below remain open.
 
 **Architecture:** [`MASTER_DESIGN.md`](MASTER_DESIGN.md)
 

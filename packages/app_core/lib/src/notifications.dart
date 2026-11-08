@@ -151,10 +151,23 @@ class NotificationCenter extends ChangeNotifier {
     final key = '${auth.services.config.roleName}.$user.$institute';
     final stale =
         loadedAt == null || DateTime.now().difference(loadedAt!) > maxAge;
-    if (key == _key && loading) return;
+    // Calls in the same frame (shell rebuilds, page open) share one load.
+    if (inFlight != null && _inFlightKey == key) return;
     if (key == _key && !stale && !force) return;
-    scheduleMicrotask(() => reload(key, () => loader(api, institute, auth)));
+    late final Future<void> run;
+    run = Future.microtask(
+      () => reload(key, () => loader(api, institute, auth)),
+    ).whenComplete(() {
+      if (identical(inFlight, run)) inFlight = null;
+    });
+    inFlight = run;
+    _inFlightKey = key;
   }
+
+  String? _inFlightKey;
+
+  /// The load in progress, if any; completes when the list is replaced.
+  Future<void>? inFlight;
 
   /// Replaces the notices with [fetch]'s result for the account [key].
   Future<void> reload(String key, Future<NoticeBatch> Function() fetch) async {
@@ -312,21 +325,12 @@ class _NotificationsPageState extends State<NotificationsPage> {
 
   /// Starts a forced reload and completes once the list has been replaced.
   Future<void> _pullRefresh() async {
-    final c = widget.center, done = Completer<void>();
-    var started = false;
-    void watch() {
-      if (c.loading) started = true;
-      if (started && !c.loading && !done.isCompleted) done.complete();
-    }
-
-    c.addListener(watch);
     widget.refresh();
     try {
-      await done.future.timeout(const Duration(seconds: 20));
+      // The refresh, or a load already running, replaces the list.
+      await widget.center.inFlight?.timeout(const Duration(seconds: 20));
     } catch (_) {
       // A slow network still releases the indicator.
-    } finally {
-      c.removeListener(watch);
     }
   }
 

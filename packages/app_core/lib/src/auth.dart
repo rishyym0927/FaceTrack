@@ -106,7 +106,11 @@ class AuthController extends ChangeNotifier {
       _notify();
       return;
     }
-    if (account == null) loading = true;
+    // A reload while an account is already shown (e.g. after a token
+    // refresh) must not replace the page with the connection screen on a
+    // network blip: keep the account and let the next reload try again.
+    final background = account != null;
+    if (!background) loading = true;
     _notify();
     try {
       final value = await services.api.me();
@@ -118,14 +122,17 @@ class AuthController extends ChangeNotifier {
             : null;
     } on AppFailure catch (e) {
       if (_disposed || generation != _generation) return;
-      error = e;
       if (e.status == 401) {
+        error = e;
         await signOut();
         return;
       }
+      if (!background) error = e;
     } catch (_) {
       if (_disposed || generation != _generation) return;
-      error = const AppFailure('Could not load your account. Please retry.');
+      if (!background) {
+        error = const AppFailure('Could not load your account. Please retry.');
+      }
     }
     if (_disposed || generation != _generation) return;
     loading = false;

@@ -6,7 +6,6 @@ import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
 import 'package:facetrack_capture/facetrack_capture.dart';
 
-import 'student_camera_orientation.dart';
 
 PoseFrameAnalyzer createStudentAnalyzer(CameraController camera) =>
     _MlKitAnalyzer(camera);

@@ -483,6 +483,8 @@ class PagedController<T> extends ChangeNotifier {
   bool _retryReset = true;
   Future<void> retry() => load(reset: _retryReset);
   Future<void> load({bool reset = true}) async {
+    // Callers may reach here after an awaited dialog outlived the page.
+    if (_disposed) return;
     if (loading && !reset) return;
     _retryReset = reset;
     final generation = ++_generation;

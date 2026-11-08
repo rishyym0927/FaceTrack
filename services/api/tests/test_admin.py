@@ -4,8 +4,10 @@ from datetime import date, timedelta
 from uuid import UUID, uuid4
 
 import psycopg
+import pytest
 
 from app import admin_routes
+from app.errors import APIError
 from tools.seed import connect
 
 
@@ -16,6 +18,17 @@ def make_admin(b, label="unassigned"):
             "VALUES(%s,%s,'admin','active') ON CONFLICT DO NOTHING",
             (UUID(b.ids["institute"]), UUID(b.users[label]["id"])),
         )
+
+
+async def test_existing_auth_account_is_never_reassigned_or_reset(monkeypatch):
+    """An email collision may belong to another institute or an unrelated user."""
+    async def existing_account(auth, settings, email, password):
+        raise APIError(409, "ACCOUNT_EXISTS", "An account with that email already exists.")
+
+    monkeypatch.setattr(admin_routes, "create_login_account", existing_account)
+    with pytest.raises(APIError) as error:
+        await admin_routes.obtain_login(None, None, None, "person@example.test", "new-password")
+    assert error.value.code == "ACCOUNT_EXISTS"
 
 
 async def test_admin_provisions_full_academic_chain_and_enables_teacher_access(backend):

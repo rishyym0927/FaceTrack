@@ -64,3 +64,18 @@ def test_reports_use_three_final_attendance_states():
         "Unassessed",
         "Unassessed",
     ]
+
+
+def test_report_start_is_shown_in_india_time():
+    from facetrack_worker.tabular import local_start
+
+    assert local_start("2026-10-23T04:30:00+00:00") == "23 Oct 2026, 10:00 IST"
+    assert local_start("2026-10-23T04:30:00Z") == "23 Oct 2026, 10:00 IST"
+    assert local_start("not a date") == "not a date"
+
+
+def test_report_file_cap_matches_api_base64_limit():
+    from facetrack_worker.tabular import MAX_FILE_BYTES
+
+    assert MAX_FILE_BYTES == 637500
+    assert len(base64.b64encode(b"x" * MAX_FILE_BYTES)) == 850000

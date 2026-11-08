@@ -860,6 +860,8 @@ def install(app, engine, settings, principal, storage, auth):
                             "OPENED_SESSION",
                             "An opened session cannot be replaced by this import.",
                         )
+                    # Already materialized and started: still this day's session.
+                    count += 1
                     continue
                 conflict = await one(
                     c,
@@ -1057,9 +1059,12 @@ def install(app, engine, settings, principal, storage, auth):
                 "SELECT auth_user_id,official_email FROM app.teachers WHERE institute_id=:i AND id=:t AND status='approved'",
                 {"i": institute_id, "t": s["teacher_id"]},
             )
+            if r["status"] != "ready" or r["kind"] != "final":
+                raise APIError(
+                    409, "REPORT_UNAVAILABLE", "Only a ready final report can be emailed."
+                )
             if (
-                r["status"] != "ready"
-                or r["kind"] != "final"
+                not faculty_row
                 or faculty_row["auth_user_id"] != user.user_id
                 or faculty_row["official_email"] != email
             ):

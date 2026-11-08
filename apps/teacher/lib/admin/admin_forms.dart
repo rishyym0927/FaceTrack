@@ -763,12 +763,22 @@ class _DirectoryState extends State<_Directory> {
   final _search = TextEditingController();
   _LoginFilter filter = _LoginFilter.all;
 
+  /// People whose login is being created, so a second tap does nothing.
+  final _creating = <Object?>{};
+
   Future<void> _createLogin(Json person) async {
+    if (_creating.contains(person['id'])) return;
     final password = await showDialog<String>(
       context: context,
       builder: (_) => _LoginDialog(person: person),
     );
-    if (password != null) await widget.onCreateLogin(person, password);
+    if (password == null || !mounted) return;
+    setState(() => _creating.add(person['id']));
+    try {
+      await widget.onCreateLogin(person, password);
+    } finally {
+      if (mounted) setState(() => _creating.remove(person['id']));
+    }
   }
 
   @override
@@ -921,8 +931,14 @@ class _DirectoryState extends State<_Directory> {
                       child: Tooltip(
                         message: 'Give this person a login with a temporary password.',
                         child: TextButton(
-                          onPressed: () => _createLogin(p),
-                          child: const Text('Create login'),
+                          onPressed: _creating.contains(p['id'])
+                              ? null
+                              : () => _createLogin(p),
+                          child: Text(
+                            _creating.contains(p['id'])
+                                ? 'Creating…'
+                                : 'Create login',
+                          ),
                         ),
                       ),
                     ),

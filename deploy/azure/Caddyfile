@@ -24,6 +24,13 @@ facetrack.centralindia.cloudapp.azure.com {
 		# Always revalidate the entry files so a new build is picked up on the next load.
 		@entry path */ */index.html */flutter_bootstrap.js */flutter_service_worker.js */version.json
 		header @entry Cache-Control "no-cache"
+		@web path /teacher/* /student/*
+		header @web {
+			X-Content-Type-Options "nosniff"
+			X-Frame-Options "DENY"
+			Referrer-Policy "no-referrer"
+			Permissions-Policy "camera=(self), microphone=(), geolocation=()"
+		}
 
 		handle_path /teacher/* {
 			root * /srv/facetrack/teacher

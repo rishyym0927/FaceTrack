@@ -1,5 +1,6 @@
 """Child-process adapter. No changes to frozen inference or participant data."""
 
+import csv
 import subprocess
 from pathlib import Path
 
@@ -176,8 +177,11 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
         )
     except SpikeError as e:
         pipe.send({"ok": False, "code": e.code, "retryable": False})
-    except ValueError:
+    except (ValueError, csv.Error):
         pipe.send({"ok": False, "code": "INVALID_DOCUMENT", "retryable": False})
+    except subprocess.CalledProcessError:
+        # ffmpeg rejected the upload; the same input fails the same way on retry.
+        pipe.send({"ok": False, "code": "INVALID_MEDIA", "retryable": False})
     except subprocess.TimeoutExpired:
         pipe.send({"ok": False, "code": "PROCESS_TIMEOUT", "retryable": True})
     except Exception:

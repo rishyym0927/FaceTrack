@@ -63,7 +63,7 @@ async def reconcile(conn, worker):
     # All mutations use the same per-student advisory lock as consent/approval.
     candidates = await many(
         conn,
-        "SELECT id,student_id,asset_id,status FROM app.enrollment_attempts WHERE institute_id=:i AND status IN ('awaiting_upload','queued','processing','review_required') ORDER BY id LIMIT 100",
+        "SELECT id,student_id,asset_id,status FROM app.enrollment_attempts WHERE institute_id=:i AND status IN ('awaiting_upload','queued','processing','review_required') ORDER BY student_id,id LIMIT 100",
         {"i": i},
     )
     for a in candidates:

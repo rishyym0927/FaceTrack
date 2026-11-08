@@ -3,7 +3,18 @@
 import base64
 import csv
 import io
+from datetime import datetime, timedelta, timezone
 from xml.sax.saxutils import escape
+
+# The API caps each base64 field at 850,000 characters: 4 * ceil(n / 3) <= 850,000.
+MAX_FILE_BYTES = 850000 // 4 * 3
+
+try:
+    from zoneinfo import ZoneInfo
+
+    KOLKATA = ZoneInfo("Asia/Kolkata")
+except Exception:  # No tz database in the image; India has had no DST since 1945.
+    KOLKATA = timezone(timedelta(hours=5, minutes=30), "IST")
 
 COLUMNS = [
     "entry_key",
@@ -42,6 +53,17 @@ def parse_csv(path):
     if not result:
         raise ValueError("Timetable CSV is empty.")
     return result
+
+
+def local_start(value):
+    """Session start as Asia/Kolkata wall time; unparseable input is shown unchanged."""
+    try:
+        moment = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except ValueError:
+        return str(value)
+    if moment.tzinfo is None:
+        moment = moment.replace(tzinfo=timezone.utc)
+    return moment.astimezone(KOLKATA).strftime("%d %b %Y, %H:%M IST")
 
 
 def safe(value):
@@ -180,7 +202,7 @@ def report(snapshot):
         Spacer(1, 8),
         Paragraph(
             escape(
-                f"Start: {snapshot['starts_at']} | Students: {total} | "
+                f"Start: {local_start(snapshot['starts_at'])} | Students: {total} | "
                 + " · ".join(f"{k}: {v}" for k, v in counts.items())
             ),
             styles["Normal"],
@@ -202,7 +224,7 @@ def report(snapshot):
         bottomMargin=36,
         invariant=1,
     ).build(content, onFirstPage=footer, onLaterPages=footer)
-    if len(csv_bytes) + len(output.getvalue()) > 650000:
+    if max(len(csv_bytes), len(output.getvalue())) > MAX_FILE_BYTES:
         raise ValueError("Report exceeds bounded worker result size.")
     return {
         "csv_base64": base64.b64encode(csv_bytes).decode(),

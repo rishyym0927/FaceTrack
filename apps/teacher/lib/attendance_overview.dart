@@ -301,9 +301,12 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   Widget _headerRow() {
     Widget h(String label, int? col, double w, {bool right = false}) => SizedBox(
       width: w,
-      child: InkWell(
+      child: Semantics(
+        button: col != null,
+        label: col == null ? label : '$label, ${_sortCol == col ? (_asc ? 'sorted ascending' : 'sorted descending') : 'activate to sort'}',
+        child: InkWell(
         onTap: col == null ? null : () => _sort(col),
-        child: Padding(
+        child: ExcludeSemantics(child: Padding(
           padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
           child: Row(
             mainAxisAlignment:
@@ -317,6 +320,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
                 Icon(_asc ? Icons.arrow_upward : Icons.arrow_downward, size: 14),
             ],
           ),
+        )),
         ),
       ),
     );

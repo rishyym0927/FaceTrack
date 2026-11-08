@@ -17,7 +17,7 @@ from pydantic import Field, model_validator
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import Strict
-from .security import idempotent, page, roles
+from .security import check_cursor, idempotent, page, roles
 from .security import remember as remember_effect
 
 
@@ -26,8 +26,8 @@ async def require_admin(conn, actor, institute):
         raise APIError(403, "ADMIN_REQUIRED", "Administrator role is required.")
 
 
-async def create_login_account(auth, settings, email: str, password: str) -> str:
-    """Provision a confirmed Supabase Auth account via the service-role admin API."""
+async def _admin_auth(auth, settings, method, path="", **kwargs):
+    """Call the Supabase Auth admin API with the service-role key."""
     key = settings.supabase_service_role_key.get_secret_value()
     if not key:
         raise APIError(
@@ -36,15 +36,23 @@ async def create_login_account(auth, settings, email: str, password: str) -> str
             "Login-account creation is unavailable: SUPABASE_SERVICE_ROLE_KEY is not configured.",
         )
     try:
-        response = await auth.client.post(
-            settings.supabase_url + "/auth/v1/admin/users",
+        return await auth.client.request(
+            method,
+            settings.supabase_url + "/auth/v1/admin/users" + path,
             headers={"Authorization": "Bearer " + key, "apikey": key},
-            json={"email": email, "password": password, "email_confirm": True},
+            **kwargs,
         )
     except httpx.HTTPError as exc:
         raise APIError(
             503, "AUTH_PROVISION_FAILED", "Could not reach the authentication provider.", retryable=True
         ) from exc
+
+
+async def create_login_account(auth, settings, email: str, password: str) -> str:
+    """Provision a confirmed Supabase Auth account via the service-role admin API."""
+    response = await _admin_auth(
+        auth, settings, "POST", json={"email": email, "password": password, "email_confirm": True}
+    )
     if response.status_code in (200, 201):
         try:
             return str(UUID(response.json()["id"]))
@@ -53,6 +61,30 @@ async def create_login_account(auth, settings, email: str, password: str) -> str
     if response.status_code in (409, 422):
         raise APIError(409, "ACCOUNT_EXISTS", "An account with that email already exists.")
     raise APIError(503, "AUTH_PROVISION_FAILED", "The authentication provider rejected the request.")
+
+
+async def delete_login_account(auth, settings, auth_user_id: str):
+    """Best effort cleanup for an account created by this request."""
+    try:
+        await _admin_auth(auth, settings, "DELETE", "/" + auth_user_id)
+    except APIError:
+        pass
+
+
+async def obtain_login(conn, auth, settings, email: str, password: str) -> tuple[str, bool]:
+    """Create a fresh login only; an existing account needs its owner's recovery flow."""
+    return await create_login_account(auth, settings, email, password), True
+
+
+async def link_login(conn, auth, settings, kind, identity_id, auth_user_id, created):
+    """Link the account and grant its role; remove a just-created account if that fails."""
+    try:
+        await conn.execute(_link_sql(), {"k": kind, "id": str(identity_id), "a": auth_user_id})
+        await conn.execute(_role_sql(), {"a": auth_user_id, "r": kind})
+    except Exception:
+        if created:
+            await delete_login_account(auth, settings, auth_user_id)
+        raise
 
 
 class TermCreate(Strict):
@@ -142,6 +174,12 @@ def install(app, engine, settings, principal, storage, auth):
     ):
         async with transaction(engine, user.user_id, institute_id) as conn:
             await require_admin(conn, user.user_id, institute_id)
+            await check_cursor(
+                conn,
+                cursor,
+                "SELECT 1 FROM app.teachers WHERE institute_id=:i AND id=CAST(:cur AS uuid)",
+                {"i": institute_id},
+            )
             rows = await many(
                 conn,
                 """SELECT id,auth_user_id,employee_number,official_name,official_email,status
@@ -159,6 +197,12 @@ def install(app, engine, settings, principal, storage, auth):
     ):
         async with transaction(engine, user.user_id, institute_id) as conn:
             await require_admin(conn, user.user_id, institute_id)
+            await check_cursor(
+                conn,
+                cursor,
+                "SELECT 1 FROM app.students WHERE institute_id=:i AND id=CAST(:cur AS uuid)",
+                {"i": institute_id},
+            )
             rows = await many(
                 conn,
                 """SELECT id,auth_user_id,enrollment_number,official_name,official_email,status
@@ -243,9 +287,10 @@ def install(app, engine, settings, principal, storage, auth):
                 raise APIError(404, "NOT_FOUND", "Person not found.")
             if row["auth_user_id"]:
                 raise APIError(409, "LOGIN_EXISTS", "This person already has a login account.")
-            auth_user_id = await create_login_account(auth, settings, row["official_email"], body.password)
-            await conn.execute(_link_sql(), {"k": role, "id": str(identity_id), "a": auth_user_id})
-            await conn.execute(_role_sql(), {"a": auth_user_id, "r": role})
+            auth_user_id, created = await obtain_login(
+                conn, auth, settings, row["official_email"], body.password
+            )
+            await link_login(conn, auth, settings, role, identity_id, auth_user_id, created)
             return {"id": str(identity_id), "auth_user_id": auth_user_id, "login_created": True}
 
         return await provision(request, user, institute_id, body, key, call)
@@ -292,24 +337,19 @@ def _identity_call(body, kind, auth, settings):
     number_column = {"teacher": "admin_create_teacher", "student": "admin_create_student"}[kind]
 
     async def call(conn):
-        auth_user_id = None
-        if body.create_login:
-            auth_user_id = await create_login_account(
-                auth, settings, body.official_email.lower(), body.password
-            )
+        # Insert the record first so a duplicate fails before any account exists.
         row = await one(
             conn,
             f"SELECT app.{number_column}(:n,:name,:e) AS id",
             {"n": body.number, "name": body.official_name, "e": body.official_email},
         )
         identity_id = str(row["id"])
-        if auth_user_id:
-            await conn.execute(
-                _link_sql(), {"k": kind, "id": identity_id, "a": auth_user_id}
+        auth_user_id = None
+        if body.create_login:
+            auth_user_id, created = await obtain_login(
+                conn, auth, settings, body.official_email.lower(), body.password
             )
-            await conn.execute(
-                _role_sql(), {"a": auth_user_id, "r": kind}
-            )
+            await link_login(conn, auth, settings, kind, identity_id, auth_user_id, created)
         return {"id": identity_id, "auth_user_id": auth_user_id, "login_created": bool(auth_user_id)}
 
     return call

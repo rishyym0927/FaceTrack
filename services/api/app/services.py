@@ -8,6 +8,7 @@ from .db import many, one
 from .errors import APIError
 from .security import (
     audit,
+    check_cursor,
     code_hash,
     code_quota,
     encrypted_code,
@@ -123,6 +124,12 @@ async def academics(conn, actor, institute, kind, cursor, limit):
         "terms": ("starts_on,id", "<", "starts_on DESC,id DESC"),
         "class-groups": ("branch,semester,section,id", ">", "branch,semester,section,id"),
     }[kind]
+    await check_cursor(
+        conn,
+        cursor,
+        f"SELECT 1 FROM app.{table[kind]} WHERE institute_id=:i AND id=CAST(:cur AS uuid)",
+        {"i": institute},
+    )
     rows = await many(
         conn,
         f"""SELECT {columns[kind]} FROM app.{table[kind]} WHERE institute_id=:i
@@ -136,6 +143,12 @@ async def academics(conn, actor, institute, kind, cursor, limit):
 
 async def offering_list(conn, actor, institute, cursor, limit):
     permissions = await roles(conn, actor, institute)
+    await check_cursor(
+        conn,
+        cursor,
+        "SELECT 1 FROM app.offerings WHERE institute_id=:i AND id=CAST(:cur AS uuid)",
+        {"i": institute},
+    )
     query = f"""SELECT {OFFERING_FIELDS}
         FROM app.offerings o {OFFERING_JOINS} WHERE o.institute_id=:i AND (CAST(:cursor AS uuid) IS NULL
         OR (c.code,g.section,o.id)>(SELECT c2.code,g2.section,o2.id FROM app.offerings o2
@@ -393,6 +406,13 @@ async def request_enrollment(conn, actor, institute, body, key, request_id):
 
 async def roster(conn, actor, institute, offering, cursor, limit, status=None):
     await teacher_access(conn, actor, institute, offering)
+    await check_cursor(
+        conn,
+        cursor,
+        """SELECT 1 FROM app.course_enrollments
+        WHERE institute_id=:i AND offering_id=:o AND id=CAST(:cur AS uuid)""",
+        {"i": institute, "o": offering},
+    )
     rows = await many(
         conn,
         """SELECT e.id,e.offering_id,e.student_id,e.status,e.version,
@@ -495,6 +515,14 @@ async def own_enrollments(conn, actor, institute, cursor, limit):
         ("section", "g.section"),
     ]
     expression = ",".join(f"'{key}',{value}" for key, value in fields)
+    await check_cursor(
+        conn,
+        cursor,
+        """SELECT 1 FROM app.course_enrollments e JOIN app.students s
+        ON s.institute_id=e.institute_id AND s.id=e.student_id
+        WHERE e.institute_id=:i AND s.auth_user_id=:a AND e.id=CAST(:cur AS uuid)""",
+        {"i": institute, "a": actor},
+    )
     rows = await many(
         conn,
         f"""SELECT e.id,e.offering_id,e.student_id,e.status,e.version,e.reason,

@@ -415,4 +415,24 @@ void main() {
     await tester.pumpAndSettle();
     expect(refreshed, 1);
   });
+
+  test('A background account reload that fails keeps the account', () async {
+    final h = await harness();
+    addTearDown(h.dispose);
+    final auth = AuthController(h.services);
+    addTearDown(auth.dispose);
+    for (var i = 0; i < 50 && (auth.loading || auth.account == null); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(auth.account, isNotNull);
+    expect(auth.error, isNull);
+    h.services.api.dio.httpClientAdapter = RoutesAdapter(
+      (r) async => jsonResponse({
+        'error': {'code': 'UNAVAILABLE', 'message': 'Down', 'request_id': 'r', 'retryable': true},
+      }, 503),
+    );
+    await auth.load();
+    expect(auth.account, isNotNull);
+    expect(auth.error, isNull);
+  });
 }

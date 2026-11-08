@@ -748,8 +748,34 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     await load(discardChanges: true);
   }
 
-  Future<void> load({bool discardChanges = false}) async {
-    if (decisions.isNotEmpty && !busy && !discardChanges) return;
+  /// One idempotency key per session action, reused if a retry follows a
+  /// lost response and renewed after success.
+  final _mutations = <String, Mutation>{};
+  Mutation _mutation(String action) =>
+      _mutations.putIfAbsent(action, Mutation.new);
+
+  /// Polls while the session is open or a capture is processing, also after
+  /// a failed or skipped refresh, so the page never stops updating.
+  void _schedulePoll({bool failed = false}) {
+    poll?.cancel();
+    if (!mounted) return;
+    if (data?['session']?['status'] == 'open' ||
+        _captureIsPending(capture?['status'])) {
+      poll = Timer(Duration(seconds: failed ? 15 : 5), () => load());
+    }
+  }
+
+  /// [keepDecisions] re-applies unsaved choices over the fresh rows (after an
+  /// upload or close); a saved draft or [discardChanges] starts clean.
+  Future<void> load({
+    bool discardChanges = false,
+    bool keepDecisions = false,
+  }) async {
+    if (decisions.isNotEmpty && !busy && !discardChanges && !keepDecisions) {
+      _schedulePoll();
+      return;
+    }
+    final kept = keepDecisions ? Map.of(decisions) : const <String, String>{};
     final current = ++loadGeneration;
     try {
       final result = await services.api.send(
@@ -777,14 +803,17 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             draftAbsentDecisions((result['items'] as List).cast<Json>()),
           );
         }
+        final onRoster = {
+          for (final row in (result['items'] as List).cast<Json>())
+            row['student_id'],
+        };
+        kept.forEach((id, status) {
+          if (onRoster.contains(id)) decisions[id] = status;
+        });
         syncExitGuard();
         captureStatusRequest = null;
       });
-      poll?.cancel();
-      if (result['session']['status'] == 'open' ||
-          _captureIsPending(capture?['status'])) {
-        poll = Timer(const Duration(seconds: 5), () => load());
-      }
+      _schedulePoll();
     } catch (e) {
       if (mounted && current == loadGeneration) {
         setState(
@@ -792,6 +821,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               ? e
               : const AppFailure('Could not load this session. Retry.'),
         );
+        _schedulePoll(failed: true);
       }
     }
   }
@@ -818,6 +848,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               );
         setState(() {
           if (capturePanel) {
+            progress = null;
             captureError = failure;
           } else {
             error = failure;
@@ -860,9 +891,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         '/v1/sessions/${widget.id}/$name',
         institute: institute,
         version: data!['session']['version'],
-        mutation: Mutation(),
+        mutation: _mutation(name),
       );
-      await load();
+      _mutation(name).reset();
+      await load(keepDecisions: true);
     });
   }
 
@@ -964,6 +996,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         institute: institute,
       );
       uploader = ResumableUpload();
+      if (!mounted) return;
       setState(() => progress = 0);
       await uploader!.upload(
         file,
@@ -983,15 +1016,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     captureStatusRequest = null;
     await camera.discard();
     await camera.interrupt();
-    progress = null;
     if (mounted) {
+      setState(() => progress = null);
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('Capture queued. Review suggestions after processing.'),
         ),
       );
     }
-    await load();
+    await load(keepDecisions: true);
   });
   Future<void> save(bool publish) async {
     if (publish) {
@@ -1032,7 +1065,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         '/v1/sessions/${widget.id}/${publish ? 'finalize' : 'attendance-review'}',
         institute: institute,
         version: data!['session']['version'],
-        mutation: Mutation(),
+        mutation: _mutation(publish ? 'publish' : 'draft'),
         body: {
           'decisions': decisions.entries
               .map((e) => {'student_id': e.key, 'status': e.value})
@@ -1040,6 +1073,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           'acknowledge_unassessed': ack,
         },
       );
+      _mutation(publish ? 'publish' : 'draft').reset();
       await load();
     });
   }
@@ -1233,12 +1267,28 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 if (captureCoverage(rows) case final coverage?)
                   CaptureQualityNote(coverage),
                 if (camera.controller != null && camera.clip == null)
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(16),
-                    child: AspectRatio(
-                      aspectRatio: camera.controller!.value.aspectRatio,
-                      child: camera.controller!.buildPreview(),
-                    ),
+                  Builder(
+                    builder: (context) {
+                      // Same sensor-orientation handling as the Student
+                      // enrolment camera, so portrait phones show it upright.
+                      final c = camera.controller!;
+                      final turns = cameraQuarterTurns(
+                        c.description,
+                        c.value.deviceOrientation,
+                      );
+                      return ClipRRect(
+                        borderRadius: BorderRadius.circular(16),
+                        child: AspectRatio(
+                          aspectRatio: turns.isOdd
+                              ? 1 / c.value.aspectRatio
+                              : c.value.aspectRatio,
+                          child: RotatedBox(
+                            quarterTurns: turns,
+                            child: c.buildPreview(),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                 if (camera.error != null) Text(camera.error!),
                 if (camera.recording)

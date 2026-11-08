@@ -23,11 +23,13 @@ if command -v az >/dev/null 2>&1; then
     --query "instanceView.statuses[?starts_with(code,'PowerState')].displayStatus" -o tsv 2>/dev/null || true)
   if [ "$STATE" != "VM running" ]; then
     echo "VM is '${STATE:-unknown}'; starting it..."
-    az vm start -g "$RG" -n "$VM" -o none 2>/dev/null
+    az vm start -g "$RG" -n "$VM" -o none ||
+      { echo "Could not start $VM in $RG (run 'az login'?)."; exit 1; }
   fi
-  IP=$(curl -fsS https://api.ipify.org)
+  IP=$(curl -fsS https://api.ipify.org) || { echo "Could not look up this machine's public IP."; exit 1; }
   az network nsg rule update -g "$RG" --nsg-name "$NSG" -n default-allow-ssh \
-    --source-address-prefixes "$IP/32" -o none 2>/dev/null
+    --source-address-prefixes "$IP/32" -o none ||
+    { echo "Could not allow SSH from $IP on $NSG (run 'az login'?)."; exit 1; }
   echo "SSH allowed from $IP"
 else
   echo "Azure CLI not found: assuming the VM is running and SSH allows this IP."
@@ -43,19 +45,27 @@ git -C "$ROOT" fetch -q origin
 REV=$(git -C "$ROOT" rev-parse --short origin/main)
 echo "Deploying origin/main $REV to $HOST"
 
-WT=$(mktemp -d)/facetrack-main
-trap 'git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true' EXIT
+TMP=$(mktemp -d)
+WT="$TMP/facetrack-main"
+trap 'git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true; rm -rf "$TMP"' EXIT
 git -C "$ROOT" worktree add --detach -q "$WT" origin/main
 
 for app in teacher student; do
   (cd "$WT/apps/$app" && "$ROOT/scripts/flutter" pub get --enforce-lockfile >/dev/null &&
     "$ROOT/scripts/flutter" build web --release --base-href "/$app/" --dart-define-from-file="$CFG")
-  rsync -az --delete -e "ssh -i $KEY" "$WT/apps/$app/build/web/" "$REMOTE:/srv/facetrack/$app/"
 done
-[ "${1:-}" = "--web-only" ] && { echo "Web apps updated."; exit 0; }
+if [ "${1:-}" = "--web-only" ]; then
+  for app in teacher student; do
+    rsync -az --delete -e "ssh -i '$KEY'" "$WT/apps/$app/build/web/" "$REMOTE:/srv/facetrack/$app/"
+  done
+  echo "Web apps updated."
+  exit 0
+fi
 
 # Unpack into a fresh folder so files deleted from main do not linger, carry the git-ignored
-# private files (.env, .local/) across, then swap. The previous tree stays until the new one is up.
+# private files (.env, .local/) across, then swap. The containers bind-mount /opt/facetrack, so
+# every service is recreated on the new tree; the previous tree is restored if that fails and is
+# removed only once worker and agent run from the new one.
 ssh_vm 'sudo rm -rf /opt/facetrack.new && sudo install -d -o azureuser -g azureuser /opt/facetrack.new'
 git -C "$ROOT" archive --format=tar origin/main | ssh_vm 'tar -xf - -C /opt/facetrack.new'
 ssh_vm 'set -e
@@ -67,9 +77,29 @@ sudo cp -a facetrack/.local facetrack.new/.local
 sudo rm -rf facetrack.old
 sudo mv facetrack facetrack.old
 sudo mv facetrack.new facetrack
-cd facetrack
-docker compose up -d --build
-sudo rm -rf /opt/facetrack.old
-sleep 5
+running() {
+  for service in worker agent; do
+    [ "$(docker compose ps --status running -q "$service")" ] || return 1
+  done
+}
+rollback() {
+  echo "Deploy failed: restoring the previous tree." >&2
+  cd /opt
+  sudo rm -rf facetrack.failed
+  sudo mv facetrack facetrack.failed || exit 1
+  sudo mv facetrack.old facetrack || exit 1
+  cd facetrack
+  timeout 600 docker compose up -d --build --force-recreate --wait || true
+  exit 1
+}
+cd /opt/facetrack
+# timeout: --wait alone can block forever on a service that never settles.
+timeout 600 docker compose up -d --build --force-recreate --wait || rollback
+running || rollback
+curl -fsS --max-time 10 http://127.0.0.1:8000/health/ready >/dev/null || rollback
+sudo rm -rf /opt/facetrack.old /opt/facetrack.failed
 docker compose ps --format "{{.Service}} {{.State}}"'
+for app in teacher student; do
+  rsync -az --delete -e "ssh -i '$KEY'" "$WT/apps/$app/build/web/" "$REMOTE:/srv/facetrack/$app/"
+done
 curl -fsS "https://$HOST/health/ready" && echo

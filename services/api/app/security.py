@@ -174,6 +174,12 @@ def reveal_code(settings, row):
         raise APIError(503, "CODE_KEY_UNAVAILABLE", "Join code cannot be recovered.") from exc
 
 
+async def check_cursor(conn, cursor, query, params):
+    """Reject a cursor that names no row of this list; `query` selects it by `:cur`."""
+    if cursor is not None and not await one(conn, query, {**params, "cur": cursor}):
+        raise APIError(422, "INVALID_CURSOR", "The list cursor is not valid. Reload the list.")
+
+
 def page(items, limit):
     rows = items[:limit]
     return {

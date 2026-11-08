@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from .db import many, one
 from .errors import APIError
-from .security import audit, idempotent, page, remember, roles, teacher_access
+from .security import audit, check_cursor, idempotent, page, remember, roles, teacher_access
 
 NOTICE_VERSION = "academic-demo-v1"
 NOTICE = (
@@ -409,6 +409,16 @@ async def cancel(conn, actor, institute, identifier, version, request_id):
 
 async def review_list(conn, actor, institute, offering, cursor, limit):
     await teacher_access(conn, actor, institute, offering)
+    await check_cursor(
+        conn,
+        cursor,
+        """SELECT 1 FROM app.enrollment_attempts a
+        JOIN app.course_enrollments e ON e.institute_id=a.institute_id AND e.student_id=a.student_id
+        WHERE a.institute_id=:i AND a.id=CAST(:cur AS uuid) AND a.status='review_required'
+        AND e.offering_id=:o AND e.status='active' AND e.effective_from<=now()
+        AND (e.effective_until IS NULL OR e.effective_until>now())""",
+        {"i": institute, "o": offering},
+    )
     rows = await many(
         conn,
         f"""SELECT {ATTEMPT_FIELDS},s.official_name,s.enrollment_number FROM app.enrollment_attempts a

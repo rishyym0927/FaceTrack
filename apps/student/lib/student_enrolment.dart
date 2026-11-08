@@ -12,7 +12,6 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'student_pose_analyzer_stub.dart'
     if (dart.library.io) 'student_pose_analyzer_io.dart'
     as pose_platform;
-import 'student_camera_orientation.dart';
 
 class StudentEnrolment extends ConsumerStatefulWidget {
   const StudentEnrolment({super.key});

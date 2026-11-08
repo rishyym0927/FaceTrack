@@ -56,14 +56,18 @@ class _TourController {
 
   void end() {
     if (!active) return;
-    _entry!.remove();
+    _entry!
+      ..remove()
+      ..dispose();
     _entry = null;
     onEnd();
   }
 
   /// Removes the overlay without counting the tour as seen (page disposed).
   void dispose() {
-    _entry?.remove();
+    _entry
+      ?..remove()
+      ..dispose();
     _entry = null;
   }
 }
@@ -133,7 +137,17 @@ class _TourOverlayState extends State<_TourOverlay> {
     final hole = rect?.inflate(8);
     final cardWidth = (size.width - 32).clamp(0.0, 380.0);
     final narrow = size.width < 600;
-    Widget card = _TourCard(controller: c, step: step, total: steps.length);
+    // Large text on a short phone: the card scrolls instead of pushing its
+    // buttons off screen.
+    Widget card = ConstrainedBox(
+      constraints: BoxConstraints(
+        maxHeight: (size.height - 32 - MediaQuery.paddingOf(context).vertical)
+            .clamp(120.0, double.infinity),
+      ),
+      child: SingleChildScrollView(
+        child: _TourCard(controller: c, step: step, total: steps.length),
+      ),
+    );
     card = SizedBox(width: narrow ? null : cardWidth, child: card);
 
     final Widget placed;

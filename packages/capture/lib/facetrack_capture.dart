@@ -6,3 +6,4 @@ export 'src/pose_analyzer.dart';
 export 'src/playback.dart';
 export 'src/pending.dart';
 export 'src/upload.dart';
+export 'src/orientation.dart';

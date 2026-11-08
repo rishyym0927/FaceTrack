@@ -229,6 +229,7 @@ class ApiClient {
   Future<List<Academic>> academics(String institute, String kind) async {
     final result = <Academic>[];
     String? cursor;
+    var pages = 0;
     do {
       final data = PageData.fromJson(
         await send(
@@ -241,7 +242,7 @@ class ApiClient {
       );
       result.addAll(data.items);
       cursor = data.nextCursor;
-    } while (cursor != null);
+    } while (cursor != null && ++pages < 25);
     return result;
   }
 

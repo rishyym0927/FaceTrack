@@ -86,19 +86,19 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
             },
         )
 
+    def finalize(request, response):
+        response.headers["X-Request-ID"] = request.state.request_id
+        response.headers["Cache-Control"] = "no-store"
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        response.headers["X-Frame-Options"] = "DENY"
+        response.headers["Referrer-Policy"] = "no-referrer"
+        response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+        return response
+
     @app.middleware("http")
     async def bounded_requests(request, call_next):
         request.state.request_id = str(uuid4())
         start = time.perf_counter()
-
-        def finalize(response):
-            response.headers["X-Request-ID"] = request.state.request_id
-            response.headers["Cache-Control"] = "no-store"
-            response.headers["X-Content-Type-Options"] = "nosniff"
-            response.headers["X-Frame-Options"] = "DENY"
-            response.headers["Referrer-Policy"] = "no-referrer"
-            response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
-            return response
 
         def log(response):
             route = request.scope.get("route")
@@ -122,10 +122,10 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 response = error_response(
                     request, 413, "BODY_TOO_LARGE", "Request body exceeds 1 MiB."
                 )
-                return log(finalize(response))
+                return log(finalize(request, response))
             data.append(chunk)
         request._body = b"".join(data)
-        return log(finalize(await call_next(request)))
+        return log(finalize(request, await call_next(request)))
 
     @app.exception_handler(HTTPException)
     async def http_error(request, error):
@@ -167,7 +167,12 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
 
     @app.exception_handler(Exception)
     async def unexpected_error(request, error):
-        return error_response(request, 500, "INTERNAL_ERROR", "The request could not be completed.")
+        # Starlette sends this from outside the middleware stack, so add its headers here.
+        logger.error(json.dumps({"request_id": request.state.request_id, "status": 500}))
+        return finalize(
+            request,
+            error_response(request, 500, "INTERNAL_ERROR", "The request could not be completed."),
+        )
 
     async def principal(
         credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer)],
