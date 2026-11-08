@@ -1,0 +1,29 @@
+#!/bin/sh
+# Open the private VM Model Test Console through an SSH tunnel.
+set -eu
+HOST=${FACETRACK_HOST:-facetrack.centralindia.cloudapp.azure.com}
+KEY=${FACETRACK_SSH_KEY:-$HOME/.ssh/facetrack_azure}
+REMOTE="azureuser@$HOST"
+
+if [ "${1:-}" = "--stop" ]; then
+  ssh -i "$KEY" "$REMOTE" 'cd /opt/facetrack && docker compose --profile console stop console'
+  exit
+fi
+[ "$#" -eq 0 ] || { echo 'Usage: scripts/console-azure [--stop]' >&2; exit 2; }
+ssh -i "$KEY" "$REMOTE" 'cd /opt/facetrack && docker compose --profile console up -d console >/dev/null'
+ssh -i "$KEY" -o ExitOnForwardFailure=yes -N -L 127.0.0.1:8010:127.0.0.1:8010 "$REMOTE" &
+tunnel=$!
+trap 'kill "$tunnel" 2>/dev/null || true' EXIT INT TERM
+attempt=0
+until curl -fsS --max-time 2 http://127.0.0.1:8010/api/status >/dev/null 2>&1; do
+  attempt=$((attempt + 1))
+  if [ "$attempt" -ge 15 ] || ! kill -0 "$tunnel" 2>/dev/null; then
+    echo 'The private console could not be reached through SSH.' >&2
+    exit 1
+  fi
+  sleep 1
+done
+echo 'Model Test Console: http://127.0.0.1:8010'
+echo 'Keep this terminal open while testing. Press Ctrl+C to close the tunnel.'
+if command -v open >/dev/null 2>&1; then open http://127.0.0.1:8010; fi
+wait "$tunnel"

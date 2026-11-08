@@ -36,6 +36,17 @@ only: no names, face data or videos.
 
 ## Owner setup (once)
 
+### Private Azure console
+
+The console is installed on the demo VM but is **not a public website**. It has no login and holds temporary volunteer test data, so access stays on VM loopback through SSH. On the operator's Mac, run:
+
+```sh
+scripts/console-azure          # starts the console, opens the local page, keeps the tunnel open
+scripts/console-azure --stop   # later stops the VM console
+```
+
+Keep the first terminal open while testing and use `http://127.0.0.1:8010` on that Mac. Press Ctrl+C to close the tunnel. Use **Delete all test data** on the page after exporting the two aggregate reports; stopping the container alone retains its private volume. The VM's model/profile pin was checked on first start, but its separate 16-file freeze receipt is not provisioned there, so run the receipt check locally before treating ML validation as complete. Do not expose port 8010 or proxy the console through Caddy without adding individual authentication and an approved volunteer-data policy.
+
 The bundle and model files are private and Git-ignored.
 
 ```sh
