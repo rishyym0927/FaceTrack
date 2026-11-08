@@ -46,6 +46,20 @@ class AttendanceStats {
   }
 }
 
+String attendanceAdvice(AttendanceStats s) {
+  final pct = s.percentage;
+  if (pct == null) return 'No assessed classes in this view yet.';
+  if (pct < attendanceThreshold) {
+    return 'Below $attendanceThreshold%. Attend the next ${s.toReachThreshold} '
+        'class${s.toReachThreshold == 1 ? '' : 'es'} to get back to $attendanceThreshold%.';
+  }
+  if (s.canMiss == 0) {
+    return 'On track, but missing the next class would take you below $attendanceThreshold%.';
+  }
+  return 'On track. You can miss ${s.canMiss} class${s.canMiss == 1 ? '' : 'es'} '
+      'and stay at or above $attendanceThreshold%.';
+}
+
 enum AttendanceRange { all, month, quarter }
 
 /// The rows left after the subject, range and status filters.
@@ -316,21 +330,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
   Widget _overview(BuildContext context, AttendanceStats s) {
     final scheme = Theme.of(context).colorScheme;
     final pct = s.percentage;
-    final String advice;
-    if (pct == null) {
-      advice = 'No assessed classes in this view yet.';
-    } else if (pct < attendanceThreshold) {
-      advice =
-          'Below $attendanceThreshold%. Attend the next ${s.toReachThreshold} '
-          'class${s.toReachThreshold == 1 ? '' : 'es'} to get back to $attendanceThreshold%.';
-    } else if (s.canMiss == 0) {
-      advice =
-          'Exactly at the limit: missing the next class takes you below $attendanceThreshold%.';
-    } else {
-      advice =
-          'On track. You can miss ${s.canMiss} class${s.canMiss == 1 ? '' : 'es'} '
-          'and stay at or above $attendanceThreshold%.';
-    }
+    final advice = attendanceAdvice(s);
     final ring = PercentRing(value: pct, size: 128, caption: 'attendance');
     final tiles = StatGrid(
       minTileWidth: 120,
@@ -384,10 +384,14 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
           Row(
             children: [
               Icon(
-                pct != null && pct < attendanceThreshold
+                pct == null
+                    ? Icons.remove_circle_outline
+                    : pct < attendanceThreshold
                     ? Icons.trending_down
                     : Icons.trending_up,
-                color: pct != null && pct < attendanceThreshold
+                color: pct == null
+                    ? scheme.onSurfaceVariant
+                    : pct < attendanceThreshold
                     ? _absent
                     : _present,
               ),

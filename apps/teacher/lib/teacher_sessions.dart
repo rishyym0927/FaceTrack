@@ -1266,6 +1266,29 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 const RecordingTips(),
                 if (captureCoverage(rows) case final coverage?)
                   CaptureQualityNote(coverage),
+                if (camera.cameras.length > 1 && camera.clip == null)
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(camera.selectedCamera?.name),
+                    initialValue: camera.selectedCamera?.name,
+                    decoration: const InputDecoration(labelText: 'Camera'),
+                    items: [
+                      for (final device in camera.cameras)
+                        DropdownMenuItem(
+                          value: device.name,
+                          child: Text('${device.lensDirection.name} · ${device.name}'),
+                        ),
+                    ],
+                    onChanged: busy || camera.busy || camera.recording
+                        ? null
+                        : (name) {
+                            for (final device in camera.cameras) {
+                              if (device.name == name) {
+                                camera.selectCamera(device);
+                                break;
+                              }
+                            }
+                          },
+                  ),
                 if (camera.controller != null && camera.clip == null)
                   Builder(
                     builder: (context) {

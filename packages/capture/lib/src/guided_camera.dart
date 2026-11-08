@@ -19,6 +19,8 @@ class GuidedCamera extends ChangeNotifier {
   final bool enrollmentGuidance;
   final PoseFrameAnalyzer Function(CameraController)? analyzerFactory;
   CameraController? controller;
+  List<CameraDescription> cameras = [];
+  CameraDescription? selectedCamera;
   PoseFrameAnalyzer? analyzer;
   PoseGuidance? guidance;
   Timer? timer;
@@ -50,11 +52,13 @@ class GuidedCamera extends ChangeNotifier {
       }
       final cameras = await availableCameras();
       if (cameras.isEmpty) throw StateError('No camera');
+      this.cameras = cameras;
       final front = cameras.where(
         (c) => c.lensDirection == CameraLensDirection.front,
       );
+      selectedCamera ??= front.isEmpty ? cameras.first : front.first;
       next = CameraController(
-        front.isEmpty ? cameras.first : front.first,
+        selectedCamera!,
         ResolutionPreset.high,
         enableAudio: false,
         fps: enrollmentGuidance ? 24 : null,
@@ -77,6 +81,18 @@ class GuidedCamera extends ChangeNotifier {
       if (generation == epoch) busy = false;
       emit();
     }
+  }
+
+  Future<void> selectCamera(CameraDescription choice) async {
+    if (busy || recording || clip != null || !cameras.contains(choice) ||
+        selectedCamera == choice) return;
+    final old = controller;
+    controller = null;
+    ready = false;
+    selectedCamera = choice;
+    epoch++;
+    await old?.dispose();
+    await initialize();
   }
 
   Future<void> start(List<String> order) async {

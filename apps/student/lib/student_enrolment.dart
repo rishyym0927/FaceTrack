@@ -591,6 +591,29 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   ),
                   const SizedBox(height: 16),
                 ],
+                if (camera.cameras.length > 1 && pending == null && camera.clip == null)
+                  DropdownButtonFormField<String>(
+                    key: ValueKey(camera.selectedCamera?.name),
+                    initialValue: camera.selectedCamera?.name,
+                    decoration: const InputDecoration(labelText: 'Camera'),
+                    items: [
+                      for (final device in camera.cameras)
+                        DropdownMenuItem(
+                          value: device.name,
+                          child: Text('${device.lensDirection.name} · ${device.name}'),
+                        ),
+                    ],
+                    onChanged: camera.busy || camera.recording
+                        ? null
+                        : (name) {
+                            for (final device in camera.cameras) {
+                              if (device.name == name) {
+                                camera.selectCamera(device);
+                                break;
+                              }
+                            }
+                          },
+                  ),
                 if (camera.controller != null && pending == null)
                   AspectRatio(
                     aspectRatio:

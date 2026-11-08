@@ -52,6 +52,24 @@ void main() {
     expect(high.canMiss, 2);
   });
 
+  test(
+    'Advice does not call an above-threshold student exactly at the limit',
+    () {
+      final above = AttendanceStats([
+        for (var i = 0; i < 5; i++)
+          record('x', i == 0 ? 'absent' : 'present', now),
+      ]);
+      expect(above.percentage, 80);
+      expect(above.canMiss, 0);
+      expect(attendanceAdvice(above), contains('On track'));
+      expect(attendanceAdvice(above), isNot(contains('Exactly at the limit')));
+      expect(
+        attendanceAdvice(AttendanceStats([])),
+        contains('No assessed classes'),
+      );
+    },
+  );
+
   test('Filters narrow by subject, status and period', () {
     expect(filterRecords(rows, subject: 'dm').length, 2);
     expect(filterRecords(rows, status: 'present').length, 2);

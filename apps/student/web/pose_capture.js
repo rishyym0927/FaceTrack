@@ -34,11 +34,17 @@ window.FaceTrackCapture = {
     const stopButton = document.createElement('button');
     stopButton.textContent = 'Stop and retry';
     stopButton.style.cssText = 'border:1px solid #0b6b57;color:#0b6b57;background:white;border-radius:12px;padding:12px 18px;min-height:48px;font:inherit;cursor:pointer';
-    card.append(title, stage, prompt, hint, circles, status, stopButton);
+    const cameraSelect = document.createElement('select');
+    cameraSelect.setAttribute('aria-label', 'Camera');
+    cameraSelect.style.cssText = 'width:100%;padding:12px;margin:8px 0;border:1px solid #86a59a;border-radius:10px;font:inherit';
+    const startButton = document.createElement('button');
+    startButton.textContent = 'Start recording';
+    startButton.style.cssText = 'background:#0b6b57;color:white;border:0;border-radius:12px;padding:12px 18px;min-height:48px;font:inherit;cursor:pointer;margin-right:8px';
+    card.append(title, stage, prompt, hint, circles, status, cameraSelect, startButton, stopButton);
     root.append(card);
     document.body.append(root);
 
-    let stream, recorder, landmarker, interval, started, resolveStopped;
+    let stream, recorder, landmarker, interval, started, resolveStopped, resolveStart;
     let latest = { allCaptured: false, completed: [], current: order[0], hint: '' };
     let cancelled = false, stopped = false, lastAnalysis = 0;
     const chunks = [];
@@ -68,6 +74,7 @@ window.FaceTrackCapture = {
       if (stopped) return;
       stopped = true;
       cancelled = discard;
+      resolveStart?.();
       if (recorder?.state === 'recording') recorder.stop();
       else resolveStopped();
     };
@@ -81,6 +88,43 @@ window.FaceTrackCapture = {
       });
       video.srcObject = stream;
       await video.play();
+      const devices = (await navigator.mediaDevices.enumerateDevices())
+        .filter(device => device.kind === 'videoinput' && device.deviceId);
+      for (const [index, device] of devices.entries()) {
+        const option = document.createElement('option');
+        option.value = device.deviceId;
+        option.textContent = device.label || `Camera ${index + 1}`;
+        cameraSelect.append(option);
+      }
+      cameraSelect.hidden = devices.length < 2;
+      const activeId = stream.getVideoTracks()[0]?.getSettings().deviceId;
+      if (activeId && devices.some(device => device.deviceId === activeId)) cameraSelect.value = activeId;
+      cameraSelect.onchange = async () => {
+        if (stopped || started) return;
+        startButton.disabled = true;
+        try {
+          const next = await navigator.mediaDevices.getUserMedia({
+            video: { deviceId: { exact: cameraSelect.value }, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false,
+          });
+          if (stopped) { next.getTracks().forEach(track => track.stop()); return; }
+          stream.getTracks().forEach(track => track.stop());
+          stream = next;
+          video.srcObject = next;
+          await video.play();
+        } catch (_) {
+          const stillActive = stream?.getVideoTracks()[0]?.getSettings().deviceId;
+          if (stillActive && devices.some(device => device.deviceId === stillActive)) cameraSelect.value = stillActive;
+          hint.textContent = 'That camera could not open. Choose another camera.';
+        } finally {
+          startButton.disabled = false;
+        }
+      };
+      prompt.textContent = 'Choose a camera, then start recording';
+      await new Promise(resolve => { resolveStart = resolve; startButton.onclick = resolve; });
+      if (stopped) return null;
+      cameraSelect.disabled = true;
+      startButton.remove();
       // Match the video content's ratio so normalized landmarks align with
       // the visible outline instead of the letterboxed stage.
       if (video.videoWidth && video.videoHeight) {
