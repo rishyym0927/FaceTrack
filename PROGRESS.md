@@ -2,6 +2,10 @@
 
 **Reviewed:** 9 November 2026 (Asia/Kolkata)
 
+## 9 November client console report
+
+- User supplied aggregate `.json` and `.txt` reports from the hosted client Model Test Console (generated 08:26 UTC). All six first scored scenarios passed with zero false-presence suggestions, zero misses and the same result across three runs per clip; no rejected recordings were reported. Per-run processing ranged about 4.2–11.2 seconds; whole scenario checks took 19.8–37.8 seconds including repeats and overhead, not upload/UX latency. The report's model pin was healthy but its separate freeze receipt checked 0 files. Final enrolled count was 2, while two scenario records show a roster of 3, consistent with a volunteer being removed after those runs; the aggregate alone cannot establish the sequence or independently verify consent/ground truth. This is controlled console evidence, not the previously tracked independent held-out 1/6 acceptance or classroom accuracy.
+
 ## 8 November audit and integration checkpoint
 
 - **9 November client console review/deployment:** Compared Student web/Android enrolment with the client console. Console now shares the FaceTrack theme, has guided progress and clearer result explanations, lets clients choose an enumerated camera before recording and play back a clip before submission. It retains timed pose prompts; unlike Student enrolment, it does not analyze preview poses live. Backend now isolates concurrent upload temp files, holds the scoring lock until results are stored, and never reuses volunteer IDs while a session's history remains. Teacher Flutter 78 passed and analyze clean; worker 56 passed and Ruff clean. The `client-01` HTTPS page and backend were updated with zero volunteers present; authenticated page/status returned 200, anonymous page 401, model pin healthy and product readiness 200. No real client camera/volunteer acceptance was performed.
