@@ -623,7 +623,7 @@ class ContentPage extends StatelessWidget {
   Widget build(BuildContext context) {
     final list = _list(context);
     if (onRefresh == null) return list;
-    return RefreshIndicator(onRefresh: onRefresh!, child: list);
+    return RefreshIndicator(onRefresh: () => ApiClient.freshReads(onRefresh!), child: list);
   }
 
   Widget _list(BuildContext context) => ListView(

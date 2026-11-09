@@ -481,6 +481,7 @@ class PagedController<T> extends ChangeNotifier {
   bool loading = false, _disposed = false;
   int _generation = 0;
   bool _retryReset = true;
+  bool _loaded = false;
   Future<void> retry() => load(reset: _retryReset);
   Future<void> load({bool reset = true}) async {
     // Callers may reach here after an awaited dialog outlived the page.
@@ -495,7 +496,9 @@ class PagedController<T> extends ChangeNotifier {
     error = null;
     notifyListeners();
     try {
-      final data = await fetch(cursor);
+      final data = await (_loaded && reset
+          ? ApiClient.freshReads(() => fetch(cursor)) : fetch(cursor));
+      _loaded = true;
       if (_disposed || generation != _generation) return;
       items = reset ? data.items : [...items, ...data.items];
       cursor = data.nextCursor;

@@ -148,9 +148,10 @@ List<SemesterGroup> groupBySemester(List<SubjectStats> all) {
 /// computed on the client from each subject's published attendance summary, so
 /// it only ever reflects faculty-published results.
 class TeacherDashboard extends StatefulWidget {
-  const TeacherDashboard({super.key, required this.api, required this.institute});
+  const TeacherDashboard({super.key, required this.api, required this.institute, this.refreshTick = 0});
   final ApiClient api;
   final String institute;
+  final int refreshTick;
   @override
   State<TeacherDashboard> createState() => _TeacherDashboardState();
 }
@@ -174,6 +175,11 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     _load();
   }
 
+  @override
+  void didUpdateWidget(covariant TeacherDashboard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.refreshTick != widget.refreshTick) ApiClient.freshReads(_load);
+  }
   @override
   void dispose() {
     _generation++;
@@ -343,7 +349,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
               ),
               IconButton(
                 tooltip: 'Refresh overview',
-                onPressed: _loading ? null : _load,
+                onPressed: _loading ? null : () => ApiClient.freshReads(_load),
                 icon: const Icon(Icons.refresh),
               ),
             ],

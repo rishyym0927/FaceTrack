@@ -156,7 +156,9 @@ class NotificationCenter extends ChangeNotifier {
     if (key == _key && !stale && !force) return;
     late final Future<void> run;
     run = Future.microtask(
-      () => reload(key, () => loader(api, institute, auth)),
+      () => reload(key, () => force
+          ? ApiClient.freshReads(() => loader(api, institute, auth))
+          : loader(api, institute, auth)),
     ).whenComplete(() {
       if (identical(inFlight, run)) inFlight = null;
     });

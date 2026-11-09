@@ -162,7 +162,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
                     style: Theme.of(context).textTheme.titleLarge),
               ),
               OutlinedButton.icon(
-                onPressed: _loading ? null : _load,
+                onPressed: _loading ? null : () => ApiClient.freshReads(_load),
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('Refresh'),
               ),

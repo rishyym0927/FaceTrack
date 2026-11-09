@@ -26,6 +26,7 @@ facetrack.centralindia.cloudapp.azure.com {
 		header @entry Cache-Control "no-cache"
 		@web path /teacher/* /student/*
 		header @web {
+			Cache-Control "public, max-age=0, must-revalidate"
 			X-Content-Type-Options "nosniff"
 			X-Frame-Options "DENY"
 			Referrer-Policy "no-referrer"

@@ -241,10 +241,15 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
           ),
         ),
         const SizedBox(height: 28),
-        TeacherDashboard(
-          key: ValueKey(dashboardTick),
-          api: api,
-          institute: institute,
+        ListenableBuilder(
+          listenable: controller,
+          builder: (context, _) => controller.loading && controller.items.isEmpty
+              ? const SizedBox.shrink()
+              : TeacherDashboard(
+                  refreshTick: dashboardTick,
+                  api: api,
+                  institute: institute,
+                ),
         ),
       ],
     );

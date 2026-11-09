@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:collection';
 
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -32,8 +34,9 @@ class Mutation {
 }
 
 class ApiClient {
-  ApiClient(this.auth, String baseUrl)
-    : dio = Dio(
+  ApiClient(this.auth, String baseUrl, {DateTime Function()? clock})
+    : _clock = clock ?? DateTime.now,
+      dio = Dio(
         BaseOptions(
           baseUrl: baseUrl,
           connectTimeout: const Duration(seconds: 10),
@@ -41,11 +44,116 @@ class ApiClient {
           headers: {'Content-Type': 'application/json'},
         ),
       );
+  final DateTime Function() _clock;
   final SupabaseClient auth;
   final Dio dio;
+  final _reads = LinkedHashMap<String, ({DateTime at, Json data})>();
+  final _pending = <String, Future<Json>>{};
+  int _readEpoch = 0;
+  static final _freshZone = Object();
+  static Future<T> freshReads<T>(Future<T> Function() action) =>
+      runZoned(action, zoneValues: {_freshZone: true});
+  void invalidateReads() {
+    _readEpoch++;
+    _reads.clear();
+    _pending.clear();
+  }
+
+  bool _cacheable(String path) =>
+      path == '/v1/offerings' ||
+      path == '/v1/me/enrollments' ||
+      RegExp(r'^/v1/academics/(courses|terms|class-groups)$').hasMatch(path) ||
+      RegExp(r'^/v1/offerings/[^/]+/attendance-summary$').hasMatch(path);
+  String _readKey(String actor, String? institute, String path, Json? query) {
+    Object? canonical(Object? value) {
+      if (value is Map) {
+        final keys = value.keys.map((k) => k.toString()).toList()..sort();
+        return {for (final k in keys) k: canonical(value[k])};
+      }
+      if (value is List) return value.map(canonical).toList();
+      return value;
+    }
+
+    return jsonEncode([actor, institute, path, canonical(query ?? {})]);
+  }
+
+  Json _copy(Json data) => jsonDecode(jsonEncode(data)) as Json;
+  Future<Json> send(
+    String method,
+    String path, {
+    String? institute,
+    Json? body,
+    Json? query,
+    Mutation? mutation,
+    int? version,
+    bool forceRefresh = false,
+  }) async {
+    final actor = auth.auth.currentUser?.id;
+    if (actor == null)
+      throw const AppFailure('Please sign in again.', status: 401);
+    Future<Json> request() => _sendNetwork(
+      method,
+      path,
+      institute: institute,
+      body: body,
+      query: query,
+      mutation: mutation,
+      version: version,
+    );
+    if (method != 'GET') {
+      invalidateReads();
+      try {
+        return await request();
+      } finally {
+        invalidateReads();
+      }
+    }
+    final cacheable = _cacheable(path);
+    final share =
+        cacheable ||
+        RegExp(
+          r'^/v1/offerings/[^/]+/(roster|biometric-enrollments|attendance-disputes)$',
+        ).hasMatch(path) ||
+        path == '/v1/sessions';
+    if (!share) return request();
+    final fresh = forceRefresh || Zone.current[_freshZone] == true;
+    final key = _readKey(actor, institute, path, query);
+    if (!fresh && !(auth.auth.currentSession?.isExpired ?? true)) {
+      final entry = _reads[key];
+      if (entry != null &&
+          _clock().difference(entry.at) < const Duration(seconds: 30)) {
+        return _copy(entry.data);
+      }
+      final pending = _pending[key];
+      if (pending != null) return _copy(await pending);
+    }
+    _reads.remove(key);
+    final epoch = _readEpoch;
+    late final Future<Json> future;
+    future = request()
+        .then((data) {
+          if (cacheable &&
+              epoch == _readEpoch &&
+              auth.auth.currentUser?.id == actor &&
+              identical(_pending[key], future)) {
+            _reads[key] = (at: _clock(), data: _copy(data));
+            while (_reads.length > 100) {
+              _reads.remove(_reads.keys.first);
+            }
+          }
+          return data;
+        })
+        .whenComplete(() {
+          if (identical(_pending[key], future)) _pending.remove(key);
+        });
+    _pending[key] = future;
+    return _copy(await future);
+  }
+
   CancelToken _cancel = CancelToken();
   Future<void>? _refreshing;
   void clear() {
+    invalidateReads();
     _cancel.cancel('Account changed');
     _cancel = CancelToken();
   }
@@ -75,7 +183,7 @@ class ApiClient {
     }
   }
 
-  Future<Json> send(
+  Future<Json> _sendNetwork(
     String method,
     String path, {
     String? institute,

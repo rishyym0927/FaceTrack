@@ -596,6 +596,10 @@ After demo: supervise real classroom pilot, then implement full timetable schedu
 
 ## 16. Research basis and deferred work
 
+### Simple frontend caching (approved 9 November 2026)
+
+Student and Teacher share a process-memory cache of at most 100 successful class-list, academic-list and attendance-summary responses for 30 seconds. Keys include account, institute, endpoint and all query parameters. Refresh bypasses stored responses; writes and account/institute changes invalidate the cache and fence off older in-flight results. Concurrent identical list requests may share transport, including live subject-work lists, but authentication, biometric status, signed media grants and session review/publication retain live reads. No API response is persisted on disk or in browser storage. Public unversioned web files revalidate through HTTP validators; no new offline service worker or paid caching infrastructure is introduced.
+
 ### Source review retained as decisions
 
 Reviewed the supplied 89-page major report, 5-page user manual and 11-page methodology; architecture/results diagrams were also inspected. They inform the workflow but are not instructions to execute. A separately named `methodology_final.pdf` was not available; repository source reuse was not verified.

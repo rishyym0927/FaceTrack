@@ -2,6 +2,11 @@
 
 **Reviewed:** 9 November 2026 (Asia/Kolkata)
 
+## Simple frontend caching — 9 November
+
+- Implemented the approved 30-second, 100-entry memory cache for class/academic lists and attendance summaries. Account/institute/query keys, duplicate request sharing, explicit refresh bypass, write/account invalidation and late-result fencing are covered by six focused cache tests. Live biometric/media/session operations remain uncached. Faculty dashboard keeps its existing content on refresh and starts after the subject list's first load; overlapping subject-work requests share transport.
+- Verification so far: shared Flutter suite 70 passed before two additional cache tests (all six focused cache tests then passed), Student 20 passed, Teacher 78 passed; analysis clean. Caddy now explicitly requires public static-file revalidation while API no-store is unchanged. Before deployment, anonymous full JS transfers were Student 3,229,268 bytes / 1.299 s and Teacher 3,636,412 bytes / 1.240 s in one local HTTP sample each; these are file transfers, not signed-in screen timings. Phone was disconnected, so device navigation timing and installation remain pending. Release build/deployment verification follows.
+
 ## 9 November Android release install
 
 - The user uninstalled the old development-signed Student and Teacher apps. New arm64 release APKs were built with the public Azure production config and the existing private release key, then installed on the connected Samsung SM-M356B. Both packages report versionCode 2001, launch to running processes, and the HTTPS API readiness endpoint returned 200. The USB connection briefly dropped during the first install but reconnected; both final packages are present. Release APKs are at `apps/student/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` and `apps/teacher/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`. USB debugging is not needed for normal use or direct APK installation; login, camera capture and end-to-end attendance still require user acceptance on the phone.
