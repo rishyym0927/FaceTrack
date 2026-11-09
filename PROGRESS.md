@@ -2,6 +2,10 @@
 
 **Reviewed:** 9 November 2026 (Asia/Kolkata)
 
+## 9 November Android release install
+
+- The user uninstalled the old development-signed Student and Teacher apps. New arm64 release APKs were built with the public Azure production config and the existing private release key, then installed on the connected Samsung SM-M356B. Both packages report versionCode 2001, launch to running processes, and the HTTPS API readiness endpoint returned 200. The USB connection briefly dropped during the first install but reconnected; both final packages are present. Release APKs are at `apps/student/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` and `apps/teacher/build/app/outputs/flutter-apk/app-arm64-v8a-release.apk`. USB debugging is not needed for normal use or direct APK installation; login, camera capture and end-to-end attendance still require user acceptance on the phone.
+
 ## 9 November client console report
 
 - User supplied aggregate `.json` and `.txt` reports from the hosted client Model Test Console (generated 08:26 UTC). All six first scored scenarios passed with zero false-presence suggestions, zero misses and the same result across three runs per clip; no rejected recordings were reported. Per-run processing ranged about 4.2–11.2 seconds; whole scenario checks took 19.8–37.8 seconds including repeats and overhead, not upload/UX latency. The report's model pin was healthy but its separate freeze receipt checked 0 files. Final enrolled count was 2, while two scenario records show a roster of 3, consistent with a volunteer being removed after those runs; the aggregate alone cannot establish the sequence or independently verify consent/ground truth. This is controlled console evidence, not the previously tracked independent held-out 1/6 acceptance or classroom accuracy.
