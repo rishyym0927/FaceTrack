@@ -96,6 +96,8 @@ def test_removed_volunteer_deletes_template_and_ids_are_not_reused(service, tmp_
     assert not (service.engine / "templates" / f"{first}.enc").exists()
     assert [p["id"] for p in service.list_people()] == [second]
     assert enrol(service, tmp_path, "Meera") == ["p03"]
+    service.remove_person("p03")
+    assert enrol(service, tmp_path, "Nina") == ["p04"]
 
 
 @pytest.mark.parametrize("scenario,present,stranger,ok", [
@@ -229,6 +231,35 @@ def test_wipe_removes_volunteers_and_results(service, tmp_path):
     service.wipe()
     assert service.list_people() == [] and service.summary()["done"] == 0
     assert not list((service.engine).glob("**/*.enc"))
+    assert enrol(service, tmp_path, "Fresh") == ["p01"]
+
+
+def test_run_keeps_wipe_blocked_until_result_is_saved(service, tmp_path):
+    enrol(service, tmp_path, "A", "B")
+    entered = threading.Event()
+    release = threading.Event()
+    original = service._cli
+
+    def delayed(*args, **kwargs):
+        if args[0] == "recognize":
+            entered.set()
+            assert release.wait(5)
+        return original(*args, **kwargs)
+
+    service._cli = delayed
+    completed = []
+    thread = threading.Thread(
+        target=lambda: completed.append(service.run("no_face", [], False, clip(tmp_path)))
+    )
+    thread.start()
+    assert entered.wait(5)
+    with pytest.raises(ConsoleError) as error:
+        service.wipe()
+    assert error.value.code == "BUSY"
+    release.set()
+    thread.join(5)
+    assert not thread.is_alive() and len(completed) == 1
+    assert service.summary()["done"] == 1
 
 
 # ---- HTTP layer ---------------------------------------------------------------------------
@@ -278,11 +309,28 @@ def test_http_mutations_need_the_custom_header_and_clips_are_deleted(server, ser
     assert call(server, "POST", url, b"abc", {**marker, "Content-Type": "text/plain"})[0] == 415
     status, body, _ = call(server, "POST", url, b"abc", marker)
     assert status == 200 and json.loads(body)["id"] == "p01"
-    assert not [p for p in service.media.iterdir() if p.is_file()]
+    assert not list(service.media.iterdir())
     status, body, _ = call(server, "POST", "/api/people/enrol?label=B", b"abc", marker)
     assert status == 400 and json.loads(body)["error"]["code"] == "CONSENT_REQUIRED"
-    assert not [p for p in service.media.iterdir() if p.is_file()]
+    assert not list(service.media.iterdir())
     assert call(server, "POST", "/api/wipe", None, {**marker, "Content-Length": "0"})[0] == 400
+
+
+def test_each_upload_uses_an_isolated_temporary_directory(server, service, monkeypatch):
+    observed = []
+    original = service._prepare_video
+
+    def inspect(path, *, enrollment):
+        observed.append(path.parent)
+        assert path.parent.parent == service.media
+        return original(path, enrollment=enrollment)
+
+    monkeypatch.setattr(service, "_prepare_video", inspect)
+    marker = {"X-FaceTrack-Console": "1", "Content-Type": "video/webm"}
+    url = "/api/people/enrol?label=Asha&consent=1&supervised=1"
+    assert call(server, "POST", url, b"abc", marker)[0] == 200
+    assert call(server, "POST", url.replace("Asha", "Ravi"), b"abc", marker)[0] == 200
+    assert len(set(observed)) == 2 and not list(service.media.iterdir())
 
 
 def test_http_rejects_oversized_uploads_before_reading(server):

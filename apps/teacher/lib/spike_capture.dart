@@ -15,21 +15,47 @@ abstract class CameraGateway {
   Widget preview();
 }
 
-class PluginCameraGateway implements CameraGateway {
+/// Optional device selection; synthetic capture fixtures need not implement it.
+abstract class SelectableCameraGateway {
+  List<CameraDescription> get cameras;
+  CameraDescription? get selectedCamera;
+  Future<void> selectCamera(CameraDescription choice);
+}
+
+class PluginCameraGateway implements CameraGateway, SelectableCameraGateway {
   CameraController? _controller;
+  List<CameraDescription> _cameras = [];
+  CameraDescription? _selectedCamera;
+  @override
+  List<CameraDescription> get cameras => List.unmodifiable(_cameras);
+  @override
+  CameraDescription? get selectedCamera => _selectedCamera;
   @override
   Future<void> initialize() async {
     final cameras = await availableCameras();
     if (cameras.isEmpty) {
       throw CameraException('NoCamera', 'No camera is available.');
     }
+    _cameras = cameras;
+    final front = cameras.where((device) => device.lensDirection == CameraLensDirection.front);
+    _selectedCamera = cameras.contains(_selectedCamera)
+        ? _selectedCamera
+        : (front.isEmpty ? cameras.first : front.first);
     final next = CameraController(
-      cameras.first,
+      _selectedCamera!,
       ResolutionPreset.high,
       enableAudio: false,
     );
     _controller = next;
     await next.initialize();
+  }
+
+  @override
+  Future<void> selectCamera(CameraDescription choice) async {
+    if (!_cameras.contains(choice) || choice == _selectedCamera) return;
+    await release();
+    _selectedCamera = choice;
+    await initialize();
   }
 
   @override
@@ -50,6 +76,12 @@ class CaptureSession extends ChangeNotifier {
   CaptureSession(this.gateway, {DateTime Function()? clock})
     : clock = clock ?? DateTime.now;
   final CameraGateway gateway;
+  List<CameraDescription> get cameras => gateway is SelectableCameraGateway
+      ? (gateway as SelectableCameraGateway).cameras
+      : const [];
+  CameraDescription? get selectedCamera => gateway is SelectableCameraGateway
+      ? (gateway as SelectableCameraGateway).selectedCamera
+      : null;
   final DateTime Function() clock;
   bool ready = false, busy = false, recording = false, consent = false;
   bool _disposed = false;
@@ -82,6 +114,27 @@ class CaptureSession extends ChangeNotifier {
     }
     mode = value;
     emit();
+  }
+
+  Future<void> selectCamera(CameraDescription choice) async {
+    if (!ready || busy || recording || gateway is! SelectableCameraGateway) return;
+    busy = true;
+    error = null;
+    final epoch = ++_epoch;
+    emit();
+    try {
+      await (gateway as SelectableCameraGateway).selectCamera(choice);
+      if (_disposed || epoch != _epoch) return;
+      ready = true;
+    } catch (_) {
+      if (epoch == _epoch) {
+        ready = false;
+        error = 'That camera could not open. Choose another camera or try again.';
+      }
+    } finally {
+      if (epoch == _epoch) busy = false;
+      emit();
+    }
   }
 
   Future<void> initialize() async {

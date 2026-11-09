@@ -17,7 +17,9 @@ Client step-by-step (Windows): [CLIENT_MODEL_TEST_STEPS.md](CLIENT_MODEL_TEST_ST
 3. Do the **six recordings** (10 seconds each): everyone enrolled present, one enrolled person absent,
    only a stranger, enrolled person plus a stranger, different positions/distances, and an empty scene.
    For each, tick who is really visible, record, then press *Check this recording*.
-4. Read the **Results**, press *Download report + summary* (two files: a readable `.txt` report and a `.json` data file; ask the client to send you both), and press *Delete all test data* when finished.
+4. Play back each clip before submitting it; re-record if the wrong camera or people are visible. Read the **Results**, press *Download report + summary* (two files: a readable `.txt` report and a `.json` data file; ask the client to send you both), and press *Delete all test data* when finished.
+
+The page lists built-in and external cameras reported by the device before recording; camera switching is disabled during a clip. Its head-turn prompts are timed guidance, not live pose verification. The Student product enrolment app has additional local preview analysis that this small model test page does not provide.
 
 Each clip is deleted from the computer immediately after checking. Both downloaded files contain counts
 only: no names, face data or videos.

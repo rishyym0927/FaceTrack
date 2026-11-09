@@ -3,9 +3,11 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
+import 'package:facetrack_core/facetrack_core.dart';
 import 'package:flutter/material.dart';
 
 import 'console_api.dart';
+import 'spike_app.dart' show ClipPlayback;
 import 'spike_capture.dart';
 
 const _green = Color(0xff176451);
@@ -19,11 +21,7 @@ class ModelTestConsoleApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'FaceTrack · Model test',
     debugShowCheckedModeBanner: false,
-    theme: ThemeData(
-      useMaterial3: true,
-      colorScheme: ColorScheme.fromSeed(seedColor: _green),
-      scaffoldBackgroundColor: const Color(0xfff4f6f3),
-    ),
+    theme: appTheme(),
     home: ModelTestConsole(backend: backend, session: session),
   );
 }
@@ -245,38 +243,39 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
   Widget build(BuildContext context) {
     final integrity = status?['integrity'] as Map<String, dynamic>?;
     final ready = integrity?['ok'] == true;
+    final done = (summary?['done'] as num?)?.toInt() ?? 0;
+    final total = (summary?['total'] as num?)?.toInt() ?? 6;
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 920),
+            constraints: const BoxConstraints(maxWidth: 1040),
             child: ListView(
-              padding: const EdgeInsets.all(20),
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
               children: [
-                const Text(
-                  'FACETRACK / MODEL TEST',
-                  style: TextStyle(letterSpacing: 2, fontWeight: FontWeight.bold, color: _green),
-                ),
-                const SizedBox(height: 8),
-                Text('Check the face model yourself', style: Theme.of(context).textTheme.headlineMedium),
-                const SizedBox(height: 6),
-                const Text(
-                  'Enrol a few consenting volunteers, record six short clips, and see whether the '
-                  'model’s suggestions match what really happened. Videos are deleted straight '
-                  'after checking on the FaceTrack server. Each client has a separate private test workspace.',
-                ),
+                _intro(context, ready: ready, done: done, total: total),
                 const SizedBox(height: 16),
                 if (ready)
                   Card(
                     color: const Color(0xffe5f1eb),
-                    child: ListTile(
-                      leading: const Icon(Icons.fact_check_outlined, color: _green),
-                      title: Text('${people.length} volunteers · ${summary?['done'] ?? 0} of 6 tests complete'),
-                      subtitle: Text(people.length < 2
-                          ? 'Next: add at least two consenting volunteers.'
-                          : (summary?['done'] ?? 0) < 6
-                              ? 'Next: finish the six recordings, then download the report.'
-                              : 'Next: download both reports, then delete the test data.'),
+                    child: Padding(
+                      padding: const EdgeInsets.all(18),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Your progress', style: Theme.of(context).textTheme.titleMedium),
+                          const SizedBox(height: 10),
+                          LinearProgressIndicator(value: total == 0 ? 0 : done / total, minHeight: 8),
+                          const SizedBox(height: 10),
+                          Text('${people.length} volunteers enrolled · $done of $total tests complete'),
+                          const SizedBox(height: 4),
+                          Text(people.length < 2
+                              ? 'Next: register at least two consenting volunteers.'
+                              : done < total
+                                  ? 'Next: record each remaining test, then download the report.'
+                                  : 'Next: download both reports, then delete the test data.'),
+                        ],
+                      ),
                     ),
                   ),
                 if (busy)
@@ -346,6 +345,75 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
       ),
     );
   }
+
+  Widget _intro(BuildContext context, {required bool ready, required int done, required int total}) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(24),
+        gradient: const LinearGradient(
+          colors: [Color(0xff113f35), Color(0xff176451)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('FACETRACK  /  MODEL TEST',
+              style: TextStyle(color: Color(0xffc9ebdc), letterSpacing: 1.8, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
+          Text('See how the face model performs',
+              style: theme.textTheme.headlineMedium?.copyWith(color: Colors.white)),
+          const SizedBox(height: 8),
+          const Text(
+            'Register consenting volunteers, try six short recordings, and compare the model’s '
+            'suggestions with who was really there.',
+            style: TextStyle(color: Colors.white, height: 1.45),
+          ),
+          const SizedBox(height: 18),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _step('1', 'Check setup', ready),
+              _step('2', 'Register faces', people.length >= 2),
+              _step('3', 'Try six tests', done >= total),
+              _step('4', 'See results', done >= total),
+            ],
+          ),
+          const SizedBox(height: 18),
+          const Text(
+            'Recordings are sent to your private FaceTrack workspace on Azure for processing and deleted '
+            'after each check. Saved test faces remain here until you delete the test data.',
+            style: TextStyle(color: Color(0xffd4eadd), fontSize: 13, height: 1.35),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _step(String number, String label, bool complete) => Container(
+    padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
+    decoration: BoxDecoration(
+      color: Colors.white.withValues(alpha: complete ? .21 : .1),
+      borderRadius: BorderRadius.circular(20),
+      border: Border.all(color: Colors.white.withValues(alpha: .28)),
+    ),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(complete ? Icons.check_circle : Icons.circle_outlined, size: 16, color: Colors.white),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text('$number. $label',
+              softWrap: true,
+              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+        ),
+      ],
+    ),
+  );
 
   Widget section(String title, Widget child) => Card(
     margin: const EdgeInsets.only(bottom: 16),
@@ -610,8 +678,8 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             const SizedBox(height: 8),
-            Text('You said was in view: ${names('expected').isEmpty ? 'nobody enrolled' : names('expected')}'),
-            Text('Model suggested present: ${suggested.isEmpty ? 'nobody' : suggested}'),
+            Text('Actually in view: ${names('expected').isEmpty ? 'nobody enrolled' : names('expected')}'),
+            Text('Model suggestion: ${suggested.isEmpty ? 'nobody' : suggested}'),
             if ((row['false_presence'] as List).isNotEmpty)
               Text(
                 'Wrongly suggested (was not there): ${names('false_presence')}',
@@ -624,11 +692,22 @@ class _ModelTestConsoleState extends State<ModelTestConsole> {
                   ? 'Three separate runs gave the same answer.'
                   : 'The three separate runs gave DIFFERENT answers: treat this as unreliable.',
             ),
-            const SizedBox(height: 4),
-            Text(
-              'Faces found: ${row['detections']} · poor-quality faces skipped: ${row['quality_rejects']} · '
-              'stranger faces ignored: ${row['unknown_observations']}',
-              style: Theme.of(context).textTheme.bodySmall,
+            const SizedBox(height: 8),
+            const Text('This is a model suggestion for this recording. It does not mark attendance.'),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              title: const Text('Recording details'),
+              children: [
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    'Faces found: ${row['detections']} · unclear faces skipped: ${row['quality_rejects']} · '
+                    'unknown face observations: ${row['unknown_observations']}',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ),
+              ],
             ),
           ],
         ),
@@ -700,6 +779,34 @@ class RecorderPanel extends StatelessWidget {
         children: [
           Text(hint),
           const SizedBox(height: 8),
+          if (session.ready && mine && session.cameras.length > 1) ...[
+            DropdownButtonFormField<String>(
+              key: ValueKey('${mode}_${session.selectedCamera?.name}'),
+              initialValue: session.selectedCamera?.name,
+              decoration: const InputDecoration(
+                labelText: 'Camera',
+                helperText: 'Choose a built-in or external camera before recording.',
+              ),
+              items: [
+                for (final device in session.cameras)
+                  DropdownMenuItem(
+                    value: device.name,
+                    child: Text('${device.lensDirection.name} · ${device.name}'),
+                  ),
+              ],
+              onChanged: session.busy || session.recording
+                  ? null
+                  : (name) {
+                      for (final device in session.cameras) {
+                        if (device.name == name) {
+                          unawaited(session.selectCamera(device));
+                          break;
+                        }
+                      }
+                    },
+            ),
+            const SizedBox(height: 12),
+          ],
           if (session.ready && mine)
             AspectRatio(
               aspectRatio: 16 / 9,
@@ -728,11 +835,13 @@ class RecorderPanel extends StatelessWidget {
             ),
           if (session.error != null && mine)
             Text(session.error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
-          if (session.clip != null && session.clipMode == mode && !session.recording)
+          if (session.clip != null && session.clipMode == mode && !session.recording) ...[
             const Padding(
-              padding: EdgeInsets.symmetric(vertical: 6),
-              child: Text('Recording ready. Record again to replace it.'),
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Text('Review your recording before submitting it. Record again if a face is hidden, too dark or too far away.'),
             ),
+            ClipPlayback(file: session.clip!),
+          ],
           Wrap(
             spacing: 12,
             runSpacing: 8,

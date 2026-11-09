@@ -153,4 +153,19 @@ void main() {
     expect(tester.widget<FilledButton>(check).onPressed, isNull);
     expect(find.textContaining('Everyone in view has agreed'), findsOneWidget);
   });
+
+  testWidgets('Guided console stays usable on a phone with large text', (tester) async {
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final session = CaptureSession(FakeCamera());
+    addTearDown(session.dispose);
+    await tester.pumpWidget(MediaQuery(
+      data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+      child: ModelTestConsoleApp(backend: FakeBackend(), session: session),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('See how the face model performs'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

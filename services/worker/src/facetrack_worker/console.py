@@ -237,12 +237,23 @@ class ConsoleService:
                 for pid, info in sorted(people.items())]
 
     def _next_id(self) -> str:
+        counter = self._read("next-person-id.json", None)
+        if isinstance(counter, dict) and isinstance(counter.get("next"), int):
+            number = counter["next"]
+            if not 1 <= number <= 9999:
+                raise ConsoleError("TOO_MANY_PEOPLE", "Too many volunteers.", 409)
+            self._write("next-person-id.json", {"next": number + 1})
+            return f"p{number:02d}"
         used = {int(p[1:]) for p in self._people()}
         used |= {int(p.stem[1:]) for p in (self.engine / "templates").glob("p*.enc")
                  if PID_PATTERN.fullmatch(p.stem)}
+        for attempt in self._attempts():
+            used |= {int(pid[1:]) for key in ("expected", "suggested", "false_presence", "missed")
+                     for pid in attempt.get(key, []) if PID_PATTERN.fullmatch(pid)}
         number = max(used, default=0) + 1
         if number > 9999:
             raise ConsoleError("TOO_MANY_PEOPLE", "Too many volunteers.", 409)
+        self._write("next-person-id.json", {"next": number + 1})
         return f"p{number:02d}"
 
     def enrol(self, label: str, video: Path, *, consent: bool, supervised: bool) -> dict:
@@ -313,17 +324,18 @@ class ConsoleService:
                                "At least one enrolled volunteer must be absent from this recording.", 400)
 
     def run(self, scenario: str, present: list[str], unknown: bool, video: Path) -> dict:
-        enrolled = sorted(self._people())
-        if len(enrolled) < 2:
-            raise ConsoleError("NEED_TWO_PEOPLE", "Enrol at least two volunteers first.", 409)
-        self._validate_truth(scenario, present, unknown, enrolled)
         if not self._acquire():
             raise ConsoleError("BUSY", "Another step is still running. Please wait.", 409)
-        started = time.perf_counter()
-        attempt = {"attempt_id": uuid.uuid4().hex[:12], "at": int(time.time()), "scenario": scenario,
-                   "expected": sorted(present), "stranger_present": unknown,
-                   "roster_size": len(enrolled), "media_sha256_prefix": sha256_file(video)[:12]}
+        attempt = None
         try:
+            enrolled = sorted(self._people())
+            if len(enrolled) < 2:
+                raise ConsoleError("NEED_TWO_PEOPLE", "Enrol at least two volunteers first.", 409)
+            self._validate_truth(scenario, present, unknown, enrolled)
+            started = time.perf_counter()
+            attempt = {"attempt_id": uuid.uuid4().hex[:12], "at": int(time.time()), "scenario": scenario,
+                       "expected": sorted(present), "stranger_present": unknown,
+                       "roster_size": len(enrolled), "media_sha256_prefix": sha256_file(video)[:12]}
             self._require_integrity()
             processed = self._prepare_video(video, enrollment=False)
             outcomes = []
@@ -332,27 +344,29 @@ class ConsoleService:
                                    str(self.manifest), "--profile", str(self.profile))
                 outcomes.append(result)
         except ConsoleError as error:
-            self._append_attempt({**attempt, "status": "rejected_input", "code": error.code})
+            if attempt is not None:
+                self._append_attempt({**attempt, "status": "rejected_input", "code": error.code})
             raise
+        else:
+            suggested = [sorted(p["participant_id"] for p in r["proposals"]) for r in outcomes]
+            stable = all(item == suggested[0] for item in suggested)
+            proposed, expected = set(suggested[0]), set(present)
+            false_presence, missed = sorted(proposed - expected), sorted(expected - proposed)
+            quality = outcomes[0].get("quality", {})
+            row = {**attempt, "status": "scored", "suggested": sorted(proposed), "correct": not (
+                false_presence or missed), "false_presence": false_presence, "missed": missed,
+                "stable_across_repeats": stable, "repeats": REPEATS,
+                "unknown_observations": outcomes[0].get("unknown_observations", 0),
+                "sampled_frames": quality.get("sampled_frames", 0),
+                "detections": quality.get("detections", 0),
+                "quality_rejects": quality.get("quality_rejects", 0),
+                "processing_ms": [round(r.get("timings", {}).get("processing_total_ms", 0), 1)
+                                  for r in outcomes],
+                "wall_seconds": round(time.perf_counter() - started, 1)}
+            self._append_attempt(row)
+            return self._public_attempt(row)
         finally:
             self.lock.release()
-        suggested = [sorted(p["participant_id"] for p in r["proposals"]) for r in outcomes]
-        stable = all(item == suggested[0] for item in suggested)
-        proposed, expected = set(suggested[0]), set(present)
-        false_presence, missed = sorted(proposed - expected), sorted(expected - proposed)
-        quality = outcomes[0].get("quality", {})
-        row = {**attempt, "status": "scored", "suggested": sorted(proposed), "correct": not (
-            false_presence or missed), "false_presence": false_presence, "missed": missed,
-            "stable_across_repeats": stable, "repeats": REPEATS,
-            "unknown_observations": outcomes[0].get("unknown_observations", 0),
-            "sampled_frames": quality.get("sampled_frames", 0),
-            "detections": quality.get("detections", 0),
-            "quality_rejects": quality.get("quality_rejects", 0),
-            "processing_ms": [round(r.get("timings", {}).get("processing_total_ms", 0), 1)
-                              for r in outcomes],
-            "wall_seconds": round(time.perf_counter() - started, 1)}
-        self._append_attempt(row)
-        return self._public_attempt(row)
 
     def _acquire(self) -> bool:
         return self.lock.acquire(blocking=False)
@@ -449,7 +463,7 @@ class ConsoleService:
         try:
             shutil.rmtree(self.engine, ignore_errors=True)
             shutil.rmtree(self.media, ignore_errors=True)
-            for name in ("people.json", "attempts.jsonl"):
+            for name in ("people.json", "attempts.jsonl", "next-person-id.json"):
                 (self.root / name).unlink(missing_ok=True)
             self.engine.mkdir(mode=0o700, parents=True, exist_ok=True)
             self.media.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -594,7 +608,9 @@ class Handler(BaseHTTPRequestHandler):
             raise ConsoleError("LENGTH_REQUIRED", "Upload size is required.", 411) from error
         if length <= 0 or length > limit:
             raise ConsoleError("TOO_LARGE", "The recording is too large or empty.", 413)
-        fd, name = tempfile.mkstemp(dir=self.service.media, suffix=".upload")
+        request_dir = Path(tempfile.mkdtemp(dir=self.service.media))
+        request_dir.chmod(0o700)
+        fd, name = tempfile.mkstemp(dir=request_dir, suffix=".upload")
         path = Path(name)
         try:
             remaining = length
@@ -606,12 +622,12 @@ class Handler(BaseHTTPRequestHandler):
                     stream.write(chunk)
                     remaining -= len(chunk)
         except BaseException:
-            path.unlink(missing_ok=True)
+            shutil.rmtree(request_dir, ignore_errors=True)
             raise
         kind = self.headers.get("Content-Type", "")
         suffix = ".mp4" if "mp4" in kind else ".webm" if "webm" in kind else None
         if suffix is None:
-            path.unlink(missing_ok=True)
+            shutil.rmtree(request_dir, ignore_errors=True)
             raise ConsoleError("UNSUPPORTED_MEDIA", "Only WebM or MP4 recordings are accepted.", 415)
         final = path.with_suffix(suffix)
         path.rename(final)
@@ -630,12 +646,16 @@ class Handler(BaseHTTPRequestHandler):
                 result = self.service.enrol(query.get("label", ""), video,
                                             consent=query.get("consent") == "1",
                                             supervised=query.get("supervised") == "1")
+                self._cleanup_video(video)
+                video = None
                 return self._json(200, result)
             if parsed.path == "/api/runs":
                 video = self._read_body(MAX_RUN_BYTES)
                 present = [p for p in query.get("present", "").split(",") if p]
                 result = self.service.run(query.get("scenario", ""), present,
                                           query.get("stranger") == "1", video)
+                self._cleanup_video(video)
+                video = None
                 return self._json(200, result)
             if parsed.path == "/api/wipe":
                 if query.get("confirm") != "DELETE":
@@ -644,15 +664,23 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(200, {"status": "deleted"})
             return self._json(404, {"error": {"code": "NOT_FOUND", "message": "Not found."}})
         except ConsoleError as error:
+            if video is not None:
+                self._cleanup_video(video)
+                video = None
             return self._error(error)
         except Exception:  # noqa: BLE001 - no internals in responses
+            if video is not None:
+                self._cleanup_video(video)
+                video = None
             return self._json(500, {"error": {"code": "SERVER_ERROR",
                                               "message": "Something went wrong. Please try again."}})
         finally:
             if video is not None:
-                video.unlink(missing_ok=True)
-                for leftover in video.parent.glob("upright.mp4"):
-                    leftover.unlink(missing_ok=True)
+                self._cleanup_video(video)
+
+    @staticmethod
+    def _cleanup_video(video: Path) -> None:
+        shutil.rmtree(video.parent, ignore_errors=True)
 
     def do_DELETE(self) -> None:  # noqa: N802
         if not self._guard(True):

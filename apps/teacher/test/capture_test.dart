@@ -37,6 +37,23 @@ class FakeCamera implements CameraGateway {
   Widget preview() => const Text('Synthetic preview fixture');
 }
 
+class SelectableFakeCamera extends FakeCamera implements SelectableCameraGateway {
+  static const front = CameraDescription(
+    name: 'front', lensDirection: CameraLensDirection.front, sensorOrientation: 0,
+  );
+  static const external = CameraDescription(
+    name: 'external', lensDirection: CameraLensDirection.external, sensorOrientation: 0,
+  );
+  @override
+  List<CameraDescription> get cameras => const [front, external];
+  @override
+  CameraDescription? selectedCamera = front;
+  @override
+  Future<void> selectCamera(CameraDescription choice) async {
+    selectedCamera = choice;
+  }
+}
+
 void main() {
   testWidgets('App starts with camera off and no automatic capture', (
     tester,
@@ -70,6 +87,19 @@ void main() {
     await session.stop();
     expect(session.clip, isNull);
     expect(session.error, contains('too short'));
+    session.dispose();
+  });
+  test('Camera may change before recording but stays fixed during a clip', () async {
+    final gateway = SelectableFakeCamera();
+    final session = CaptureSession(gateway)..setConsent(true);
+    await session.initialize();
+    expect(session.cameras, hasLength(2));
+    await session.selectCamera(SelectableFakeCamera.external);
+    expect(session.selectedCamera, SelectableFakeCamera.external);
+    await session.start();
+    await session.selectCamera(SelectableFakeCamera.front);
+    expect(session.selectedCamera, SelectableFakeCamera.external);
+    await session.close(interrupted: true);
     session.dispose();
   });
   testWidgets('Guided recording auto-stops and preserves clip mode', (
