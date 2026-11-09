@@ -4,49 +4,79 @@ window.FaceTrackCapture = {
   cancel() { window.FaceTrackCapture._stop?.(true); },
   async record(order, onFrame) {
     const root = document.createElement('div');
-    root.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#f3f7f5;display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif;color:#17392f';
+    root.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#f3f7f5;font-family:system-ui,sans-serif;color:#17392f;overflow:auto';
     const card = document.createElement('div');
-    card.style.cssText = 'width:min(100%,520px);background:white;border:1px solid #d5e2dc;border-radius:22px;padding:20px;box-shadow:0 12px 40px #17392f22';
+    card.style.cssText = 'box-sizing:border-box;min-height:100%;max-width:1000px;margin:auto;display:flex;flex-direction:column;justify-content:center;padding:16px max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))';
     const title = document.createElement('h2');
     title.textContent = 'Record your face';
     title.style.cssText = 'font-size:22px;margin:0 0 12px';
     const stage = document.createElement('div');
-    stage.style.cssText = 'position:relative;overflow:hidden;border-radius:16px;background:#23372f;aspect-ratio:4/3';
+    stage.style.cssText = 'position:relative;overflow:hidden;border-radius:18px;background:#23372f;flex:0 1 auto;align-self:center;width:min(100%,680px);height:min(60vh,620px);box-shadow:0 14px 40px #102e2630';
+    const frame = document.createElement('div');
+    frame.style.cssText = 'position:absolute;inset:0';
     const video = document.createElement('video');
     video.autoplay = true;
     video.muted = true;
     video.playsInline = true;
-    video.style.cssText = 'width:100%;height:100%;object-fit:contain;transform:scaleX(-1)';
+    video.style.cssText = 'width:100%;height:100%;object-fit:contain;display:block';
     const oval = document.createElement('div');
     oval.style.cssText = 'position:absolute;inset:12% 20%;border:3px solid #e9f7f0;border-radius:50%;pointer-events:none;box-shadow:0 0 0 100vmax #0002';
-    stage.append(video, oval);
+    frame.append(video, oval);
+    stage.append(frame);
     const prompt = document.createElement('div');
     prompt.setAttribute('aria-live', 'polite');
-    prompt.style.cssText = 'font-size:22px;font-weight:650;margin:16px 0 4px';
+    prompt.style.cssText = 'font-size:22px;font-weight:650;margin:6px 0 2px';
     prompt.textContent = 'Allow camera access';
     const hint = document.createElement('div');
     hint.setAttribute('aria-live', 'polite');
-    hint.style.cssText = 'min-height:44px;color:#48645a';
+    hint.style.cssText = 'color:#48645a';
     const circles = document.createElement('div');
-    circles.style.cssText = 'display:flex;gap:9px;margin:12px 0 16px;flex-wrap:wrap';
+    circles.style.cssText = 'display:flex;gap:9px;margin:4px 0;flex-wrap:wrap';
     const status = document.createElement('div');
     status.style.cssText = 'font-size:14px;color:#48645a;margin-bottom:12px';
     const stopButton = document.createElement('button');
-    stopButton.textContent = 'Stop and retry';
-    stopButton.style.cssText = 'border:1px solid #0b6b57;color:#0b6b57;background:white;border-radius:12px;padding:12px 18px;min-height:48px;font:inherit;cursor:pointer';
+    stopButton.textContent = 'Cancel recording';
+    stopButton.style.cssText = 'position:sticky;bottom:0;flex-shrink:0;border:1px solid #0b6b57;color:#0b6b57;background:white;border-radius:12px;padding:12px 18px;min-height:48px;font:inherit;cursor:pointer';
     const cameraSelect = document.createElement('select');
     cameraSelect.setAttribute('aria-label', 'Camera');
     cameraSelect.style.cssText = 'width:100%;padding:12px;margin:8px 0;border:1px solid #86a59a;border-radius:10px;font:inherit';
+    const rotateButton = document.createElement('button');
+    rotateButton.textContent = 'Rotate preview';
+    rotateButton.style.cssText = 'align-self:flex-start;border:1px solid #86a59a;color:#17392f;background:white;border-radius:10px;padding:8px 12px;margin:8px 0;font:inherit;cursor:pointer';
     const startButton = document.createElement('button');
     startButton.textContent = 'Start recording';
+    startButton.disabled = true;
     startButton.style.cssText = 'background:#0b6b57;color:white;border:0;border-radius:12px;padding:12px 18px;min-height:48px;font:inherit;cursor:pointer;margin-right:8px';
-    card.append(title, stage, prompt, hint, circles, status, cameraSelect, startButton, stopButton);
+    card.append(title, stage, rotateButton, prompt, hint, circles, status, cameraSelect, startButton, stopButton);
     root.append(card);
     document.body.append(root);
 
     let stream, recorder, landmarker, interval, started, resolveStopped, resolveStart;
     let latest = { allCaptured: false, completed: [], current: order[0], hint: '' };
     let cancelled = false, stopped = false, lastAnalysis = 0;
+    let mirrored = false, lastValid = 0, timed = false, lastVideoTime = -1, previewTurns = 0;
+    const fitStage = () => {
+      if (!video.videoWidth || !video.videoHeight) return;
+      const ratio = previewTurns % 2 ? video.videoHeight / video.videoWidth : video.videoWidth / video.videoHeight;
+      const width = Math.min(card.clientWidth - 32, 680, window.innerHeight * .6 * ratio);
+      const stageWidth = Math.max(1, width), stageHeight = Math.max(1, width / ratio);
+      stage.style.width = `${stageWidth}px`;
+      stage.style.height = `${stageHeight}px`;
+      const frameWidth = previewTurns % 2 ? stageHeight : stageWidth;
+      const frameHeight = previewTurns % 2 ? stageWidth : stageHeight;
+      frame.style.width = `${frameWidth}px`;
+      frame.style.height = `${frameHeight}px`;
+      frame.style.left = `${(stageWidth - frameWidth) / 2}px`;
+      frame.style.top = `${(stageHeight - frameHeight) / 2}px`;
+      frame.style.transform = `rotate(${previewTurns * 90}deg)`;
+      render();
+    };
+    rotateButton.onclick = () => { previewTurns = (previewTurns + 1) % 4; fitStage(); };
+    const updateMirror = () => {
+      const facing = stream?.getVideoTracks()[0]?.getSettings().facingMode;
+      mirrored = facing === 'user';
+      video.style.transform = mirrored ? 'scaleX(-1)' : '';
+    };
     const chunks = [];
     const stoppedPromise = new Promise(resolve => { resolveStopped = resolve; });
     const render = () => {
@@ -60,13 +90,17 @@ window.FaceTrackCapture = {
         return item;
       }));
       oval.style.borderColor = latest.hint === 'Hold still…' || latest.allCaptured ? '#52df9d' : '#e9f7f0';
-      if (latest.bounds) {
-        const [left, top, right, bottom] = latest.bounds;
-        oval.style.inset = `${top * 100}% ${left * 100}% ${(1 - bottom) * 100}% ${(1 - right) * 100}%`;
-        oval.style.borderRadius = '16px';
-      } else {
-        oval.style.inset = '12% 20%';
-        oval.style.borderRadius = '50%';
+      const scale = Math.min(frame.clientWidth / video.videoWidth, frame.clientHeight / video.videoHeight);
+      if (Number.isFinite(scale) && scale > 0) {
+        const width = video.videoWidth * scale, height = video.videoHeight * scale;
+        let [left, top, right, bottom] = latest.bounds || [.24, .12, .76, .88];
+        if (mirrored) [left, right] = [1 - right, 1 - left];
+        oval.style.inset = 'auto';
+        oval.style.left = `${(frame.clientWidth - width) / 2 + left * width}px`;
+        oval.style.top = `${(frame.clientHeight - height) / 2 + top * height}px`;
+        oval.style.width = `${(right - left) * width}px`;
+        oval.style.height = `${(bottom - top) * height}px`;
+        oval.style.borderRadius = latest.bounds ? '16px' : '50%';
       }
       if (started) status.textContent = `${Math.min(25, Math.floor((performance.now() - started) / 1000))} / 25 seconds · audio off`;
     };
@@ -78,6 +112,15 @@ window.FaceTrackCapture = {
       if (recorder?.state === 'recording') recorder.stop();
       else resolveStopped();
     };
+    const resize = new ResizeObserver(() => {
+      if (started) render();
+      else {
+        const text = prompt.textContent;
+        render();
+        prompt.textContent = text;
+      }
+    });
+    resize.observe(stage);
     window.FaceTrackCapture._stop = stop;
     stopButton.onclick = () => stop(true);
 
@@ -86,8 +129,12 @@ window.FaceTrackCapture = {
         video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
         audio: false,
       });
+      if (stopped) return null;
       video.srcObject = stream;
+      updateMirror();
       await video.play();
+      fitStage();
+      window.addEventListener('resize', fitStage);
       const devices = (await navigator.mediaDevices.enumerateDevices())
         .filter(device => device.kind === 'videoinput' && device.deviceId);
       for (const [index, device] of devices.entries()) {
@@ -111,7 +158,9 @@ window.FaceTrackCapture = {
           stream.getTracks().forEach(track => track.stop());
           stream = next;
           video.srcObject = next;
+          updateMirror();
           await video.play();
+          fitStage();
         } catch (_) {
           const stillActive = stream?.getVideoTracks()[0]?.getSettings().deviceId;
           if (stillActive && devices.some(device => device.deviceId === stillActive)) cameraSelect.value = stillActive;
@@ -120,26 +169,34 @@ window.FaceTrackCapture = {
           startButton.disabled = false;
         }
       };
+      if (stopped) return null;
       prompt.textContent = 'Choose a camera, then start recording';
+      startButton.disabled = false;
       await new Promise(resolve => { resolveStart = resolve; startButton.onclick = resolve; });
       if (stopped) return null;
       cameraSelect.disabled = true;
       startButton.remove();
-      // Match the video content's ratio so normalized landmarks align with
-      // the visible outline instead of the letterboxed stage.
-      if (video.videoWidth && video.videoHeight) {
-        stage.style.aspectRatio = `${video.videoWidth}/${video.videoHeight}`;
-      }
       prompt.textContent = 'Preparing face guide…';
-      try {
+      let waitingForGuide = true, guideTimeout;
+      const loadGuide = async () => {
         const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs');
         const files = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm');
-        landmarker = await vision.FaceLandmarker.createFromOptions(files, {
+        const detector = await vision.FaceLandmarker.createFromOptions(files, {
           baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' },
           runningMode: 'VIDEO', numFaces: 2, outputFacialTransformationMatrixes: true,
         });
-      } catch (_) {
-        latest.hint = 'Live guidance unavailable; follow each prompt and review your video';
+        if (!waitingForGuide || stopped) { detector.close(); return null; }
+        return detector;
+      };
+      try {
+        landmarker = await Promise.race([
+          loadGuide().catch(() => null),
+          stoppedPromise.then(() => null),
+          new Promise(resolve => { guideTimeout = setTimeout(() => resolve(null), 8000); }),
+        ]);
+      } finally {
+        waitingForGuide = false;
+        clearTimeout(guideTimeout);
       }
       if (stopped) return null;
       const mime = ['video/webm;codecs=vp8', 'video/webm'].find(MediaRecorder.isTypeSupported);
@@ -161,13 +218,17 @@ window.FaceTrackCapture = {
           stop();
           return;
         }
-        if (!landmarker) {
+        timed = !landmarker || elapsed - lastValid >= 2000;
+        if (timed) {
+          latest.bounds = null;
+          latest.hint = 'Live guidance unavailable. Follow the timed directions.';
           const index = Math.min(order.length - 1, Math.floor(elapsed / 5000));
           latest.current = order[index];
           render();
-          return;
+          if (!landmarker) return;
         }
-        if (elapsed - lastAnalysis < 170 || video.readyState < 2) return;
+        if (elapsed - lastAnalysis < 200 || video.readyState < 2 || video.currentTime === lastVideoTime) return;
+        lastVideoTime = video.currentTime;
         lastAnalysis = elapsed;
         try {
           const result = landmarker.detectForVideo(video, performance.now());
@@ -180,7 +241,7 @@ window.FaceTrackCapture = {
               Math.min(1, Math.max(...xs)), Math.min(1, Math.max(...ys))];
             const matrix = result.facialTransformationMatrixes?.[0]?.data;
             if (matrix?.length >= 16) {
-              yaw = Math.atan2(matrix[2], matrix[10]) * 180 / Math.PI;
+              yaw = Math.atan2(matrix[2], matrix[10]) * 180 / Math.PI * (mirrored ? 1 : -1);
               pitch = Math.asin(Math.max(-1, Math.min(1, -matrix[6]))) * 180 / Math.PI;
             }
             context.drawImage(video, 0, 0, 24, 18);
@@ -189,9 +250,13 @@ window.FaceTrackCapture = {
             for (let i = 0; i < pixels.length; i += 16) total += (pixels[i] + pixels[i + 1] + pixels[i + 2]) / 3;
             luminance = total / (pixels.length / 16);
           }
+          lastValid = elapsed;
+          timed = false;
           latest = JSON.parse(onFrame(JSON.stringify({ faceCount: faces.length, bounds, yaw, pitch, luminance })));
         } catch (_) {
-          latest.hint = 'Live guidance unavailable; follow the prompts and review your video';
+          timed = true;
+          latest.bounds = null;
+          latest.hint = 'Live guidance unavailable. Follow the timed directions.';
         }
         render();
       }, 100);
@@ -200,10 +265,12 @@ window.FaceTrackCapture = {
       if (cancelled || blob.size === 0 || performance.now() - started < 10000) return null;
       return URL.createObjectURL(blob);
     } finally {
-      window.FaceTrackCapture._stop = null;
+      if (window.FaceTrackCapture._stop === stop) window.FaceTrackCapture._stop = null;
       clearInterval(interval);
       stream?.getTracks().forEach(track => track.stop());
       landmarker?.close();
+      resize.disconnect();
+      window.removeEventListener('resize', fitStage);
       root.remove();
     }
   },

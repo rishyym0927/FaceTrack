@@ -3,6 +3,8 @@ import 'dart:async';
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 
+import 'dart:ui' show Offset, Rect;
+
 import 'browser_capture_stub.dart'
     if (dart.library.js_interop) 'browser_capture_web.dart'
     as browser;
@@ -12,6 +14,63 @@ import 'files_stub.dart'
     as files;
 import 'pose_analyzer.dart';
 import 'pose_guidance.dart';
+
+CameraDescription preferredCamera(
+  List<CameraDescription> cameras, {
+  required bool enrollment,
+}) => cameras.firstWhere(
+  (camera) =>
+      camera.lensDirection ==
+      (enrollment ? CameraLensDirection.front : CameraLensDirection.back),
+  orElse: () => cameras.first,
+);
+
+class LiveFaceTracker extends ChangeNotifier {
+  final _since = <int, DateTime>{};
+  List<({Rect bounds, bool framed})> faces = [];
+  DateTime? _last;
+  bool get available => _last != null;
+
+  void observe(PoseObservation observation) {
+    expire(observation.timestamp);
+    _last = observation.timestamp;
+    final visible = <int>{};
+    faces = [
+      for (final face in observation.trackedFaces)
+        (
+          bounds: face.bounds,
+          framed: _qualified(face, observation.timestamp, visible),
+        ),
+    ];
+    _since.removeWhere((id, _) => !visible.contains(id));
+    notifyListeners();
+  }
+
+  bool _qualified(
+    ({int? id, Rect bounds, bool framed}) face,
+    DateTime now,
+    Set<int> visible,
+  ) {
+    final id = face.id;
+    if (!face.framed || id == null) return false;
+    visible.add(id);
+    return now.difference(_since.putIfAbsent(id, () => now)) >=
+        const Duration(milliseconds: 400);
+  }
+
+  void expire(DateTime now) {
+    if (_last == null || now.difference(_last!) >= const Duration(seconds: 1))
+      clear();
+  }
+
+  void clear() {
+    final changed = _last != null;
+    faces = [];
+    _since.clear();
+    _last = null;
+    if (changed) notifyListeners();
+  }
+}
 
 class GuidedCamera extends ChangeNotifier {
   GuidedCamera({this.enrollmentGuidance = false, this.analyzerFactory});
@@ -23,7 +82,59 @@ class GuidedCamera extends ChangeNotifier {
   CameraDescription? selectedCamera;
   PoseFrameAnalyzer? analyzer;
   PoseGuidance? guidance;
-  Timer? timer;
+  Timer? timer, _faceExpiry;
+  final faceTracker = LiveFaceTracker();
+  String? controlMessage;
+  Future<void> focus(Offset point) async {
+    final current = controller;
+    if (current == null || busy) return;
+    if (!current.value.focusPointSupported) {
+      controlMessage = 'Tap-to-focus is unavailable on this camera.';
+    } else {
+      try {
+        await current.setFocusPoint(point);
+        controlMessage = null;
+      } catch (_) {
+        controlMessage = 'Could not adjust focus on this camera.';
+      }
+    }
+    if (identical(controller, current)) emit();
+  }
+
+  Future<void> toggleTorch() async {
+    final current = controller;
+    if (current == null || busy) return;
+    try {
+      await current.setFlashMode(
+        current.value.flashMode == FlashMode.torch
+            ? FlashMode.off
+            : FlashMode.torch,
+      );
+      controlMessage = null;
+    } catch (_) {
+      controlMessage = 'Torch is unavailable on this camera.';
+    }
+    if (identical(controller, current)) emit();
+  }
+
+  Future<void> _closeAnalyzer(PoseFrameAnalyzer? old) async {
+    try {
+      await old?.close();
+    } catch (_) {
+      // A failed detector cleanup must not block recording or camera release.
+    }
+  }
+
+  Future<void> _release(CameraController? old) async {
+    if (old == null) return;
+    if (old.value.flashMode == FlashMode.torch) {
+      try {
+        await old.setFlashMode(FlashMode.off);
+      } catch (_) {}
+    }
+    await old.dispose();
+  }
+
   bool recording = false, busy = false, disposed = false, ready = false;
   bool _analysisBusy = false;
   DateTime? _lastAnalysis;
@@ -53,17 +164,19 @@ class GuidedCamera extends ChangeNotifier {
       final cameras = await availableCameras();
       if (cameras.isEmpty) throw StateError('No camera');
       this.cameras = cameras;
-      final front = cameras.where(
-        (c) => c.lensDirection == CameraLensDirection.front,
-      );
-      selectedCamera ??= front.isEmpty ? cameras.first : front.first;
+      if (!cameras.contains(selectedCamera)) {
+        selectedCamera = preferredCamera(
+          cameras,
+          enrollment: enrollmentGuidance,
+        );
+      }
       next = CameraController(
         selectedCamera!,
         ResolutionPreset.high,
         enableAudio: false,
         fps: enrollmentGuidance ? 24 : null,
         videoBitrate: enrollmentGuidance ? 4000000 : null,
-        imageFormatGroup: enrollmentGuidance && !kIsWeb
+        imageFormatGroup: analyzerFactory != null && !kIsWeb
             ? ImageFormatGroup.nv21
             : null,
       );
@@ -84,15 +197,27 @@ class GuidedCamera extends ChangeNotifier {
   }
 
   Future<void> selectCamera(CameraDescription choice) async {
-    if (busy || recording || clip != null || !cameras.contains(choice) ||
-        selectedCamera == choice) return;
+    if (busy ||
+        recording ||
+        clip != null ||
+        !cameras.contains(choice) ||
+        selectedCamera == choice)
+      return;
     final old = controller;
     controller = null;
     ready = false;
     selectedCamera = choice;
+    controlMessage = null;
     epoch++;
-    await old?.dispose();
-    await initialize();
+    busy = true;
+    emit();
+    final generation = epoch;
+    try {
+      await _release(old);
+    } finally {
+      if (epoch == generation) busy = false;
+    }
+    if (epoch == generation && !disposed) await initialize();
   }
 
   Future<void> start(List<String> order) async {
@@ -111,6 +236,7 @@ class GuidedCamera extends ChangeNotifier {
       poses = List.of(order);
       elapsed = 0;
       _lastAnalysis = null;
+      faceTracker.clear();
       error = null;
       if (kIsWeb && enrollmentGuidance) {
         recording = true;
@@ -127,7 +253,7 @@ class GuidedCamera extends ChangeNotifier {
       } else {
         final activeController = controller!;
         var startedWithFrames = false;
-        if (enrollmentGuidance && analyzerFactory != null) {
+        if (!kIsWeb && analyzerFactory != null) {
           try {
             analyzer = analyzerFactory!(activeController);
             await activeController.startVideoRecording(
@@ -137,7 +263,7 @@ class GuidedCamera extends ChangeNotifier {
           } catch (_) {
             final failed = analyzer;
             analyzer = null;
-            if (failed != null) await failed.close();
+            await _closeAnalyzer(failed);
             if (!disposed && generation == epoch) {
               guidance?.unavailable(DateTime.now());
             }
@@ -159,7 +285,7 @@ class GuidedCamera extends ChangeNotifier {
         recording = true;
         timer = Timer.periodic(const Duration(seconds: 1), (_) {
           elapsed++;
-          guidance?.unavailable(DateTime.now());
+          if (elapsed >= 2) guidance?.unavailable(DateTime.now());
           emit();
           if (elapsed >= (enrollmentGuidance ? 25 : 15) ||
               (enrollmentGuidance &&
@@ -190,18 +316,35 @@ class GuidedCamera extends ChangeNotifier {
   void _analyzeFrame(CameraImage frame) {
     if (!recording || _analysisBusy || analyzer == null) return;
     final now = DateTime.now();
+    final active = analyzer!;
+    final generation = epoch;
     if (_lastAnalysis != null &&
-        now.difference(_lastAnalysis!) < const Duration(milliseconds: 170))
+        now.difference(_lastAnalysis!) < const Duration(milliseconds: 200))
       return;
     _lastAnalysis = now;
     _analysisBusy = true;
     unawaited(() async {
       try {
-        final result = await analyzer!.analyze(frame);
-        if (result != null && recording) guidance?.observe(result);
+        final result = await active.analyze(frame);
+        if (result == null ||
+            !recording ||
+            epoch != generation ||
+            !identical(active, analyzer))
+          return;
+        guidance?.observe(result);
+        if (!enrollmentGuidance) {
+          final remaining =
+              const Duration(seconds: 1) -
+              DateTime.now().difference(result.timestamp);
+          if (remaining <= Duration.zero) return;
+          faceTracker.observe(result);
+          _faceExpiry?.cancel();
+          _faceExpiry = Timer(remaining, faceTracker.clear);
+        }
       } catch (_) {
-        if (recording)
+        if (recording && epoch == generation && identical(active, analyzer)) {
           guidance?.unavailable(DateTime.now().add(const Duration(seconds: 3)));
+        }
       } finally {
         _analysisBusy = false;
       }
@@ -211,11 +354,22 @@ class GuidedCamera extends ChangeNotifier {
   Future<void> stop() async {
     if (!recording || busy || (kIsWeb && enrollmentGuidance)) return;
     timer?.cancel();
+    _faceExpiry?.cancel();
+    faceTracker.clear();
     busy = true;
     recording = false;
+    final generation = epoch;
+    final oldAnalyzer = analyzer;
+    analyzer = null;
     try {
-      final value = await controller!.stopVideoRecording();
-      if (disposed || elapsed < 10) {
+      final current = controller!;
+      final value = await current.stopVideoRecording();
+      if (current.value.flashMode == FlashMode.torch) {
+        try {
+          await current.setFlashMode(FlashMode.off);
+        } catch (_) {}
+      }
+      if (disposed || generation != epoch || elapsed < 10) {
         await files.remove(value.path);
         error = 'Record the full guided video.';
       } else {
@@ -224,11 +378,14 @@ class GuidedCamera extends ChangeNotifier {
     } catch (_) {
       error = 'Recording was interrupted. Please record again.';
     } finally {
-      final oldAnalyzer = analyzer;
-      analyzer = null;
-      if (oldAnalyzer != null) await oldAnalyzer.close();
-      busy = false;
-      emit();
+      try {
+        await _closeAnalyzer(oldAnalyzer);
+      } finally {
+        if (generation == epoch) {
+          busy = false;
+          emit();
+        }
+      }
     }
   }
 
@@ -239,29 +396,51 @@ class GuidedCamera extends ChangeNotifier {
     emit();
   }
 
+  /// A stopped CameraX or browser recording can leave its preview on the last
+  /// frame. Release that camera before opening a fresh preview for a retake.
+  Future<void> retake() async {
+    if (busy || recording || clip == null) return;
+    await interrupt();
+    await discard();
+    if (!disposed) await initialize();
+  }
+
   Future<void> interrupt() async {
-    epoch++;
+    final generation = ++epoch;
     timer?.cancel();
-    if (kIsWeb && enrollmentGuidance) browser.cancelBrowserRecording();
-    if (recording) {
-      try {
-        final file = await controller?.stopVideoRecording();
-        if (file != null) await files.remove(file.path);
-      } catch (_) {}
-    }
-    recording = false;
-    busy = false;
-    ready = false;
-    final oldAnalyzer = analyzer;
-    analyzer = null;
-    if (oldAnalyzer != null) await oldAnalyzer.close();
+    _faceExpiry?.cancel();
+    faceTracker.clear();
     final old = controller;
+    final wasRecording = recording;
+    final oldAnalyzer = analyzer;
     controller = null;
-    await old?.dispose();
+    analyzer = null;
+    recording = false;
+    ready = false;
+    busy = true;
     guidance?.removeListener(emit);
     guidance?.dispose();
     guidance = null;
     emit();
+    try {
+      if (kIsWeb && enrollmentGuidance) browser.cancelBrowserRecording();
+      if (wasRecording && old != null) {
+        try {
+          final file = await old.stopVideoRecording();
+          await files.remove(file.path);
+        } catch (_) {}
+      }
+      try {
+        await _closeAnalyzer(oldAnalyzer);
+      } finally {
+        await _release(old);
+      }
+    } finally {
+      if (generation == epoch) {
+        busy = false;
+        emit();
+      }
+    }
   }
 
   @override
@@ -269,6 +448,7 @@ class GuidedCamera extends ChangeNotifier {
     disposed = true;
     timer?.cancel();
     unawaited(interrupt());
+    faceTracker.dispose();
     super.dispose();
   }
 }

@@ -12,8 +12,10 @@ class PoseObservation {
     this.yaw,
     this.pitch,
     this.luminance,
+    this.trackedFaces = const [],
   });
 
+  final List<({int? id, Rect bounds, bool framed})> trackedFaces;
   final DateTime timestamp;
   final int faceCount;
   final Rect? bounds; // Normalized, unmirrored camera coordinates.
@@ -30,28 +32,40 @@ class PoseGuidance extends ChangeNotifier {
   final Set<String> completed = {};
   String hint = 'Position your face inside the guide';
   Rect? faceBounds;
+  bool faceFramed = false;
   DateTime? _holdStarted;
   DateTime? _lastObservation;
   int _acceptedFrames = 0;
 
   String? get current =>
       completed.length < order.length ? order[completed.length] : null;
+  bool get analysisUnavailable => hint.startsWith('Live guidance unavailable');
+  bool get poseAligned => hint == 'Hold still…';
   bool get allCaptured => completed.length == order.length;
 
   void observe(PoseObservation value) {
     _lastObservation = value.timestamp;
     faceBounds = value.faceCount == 1 ? value.bounds : null;
+    final bounds = faceBounds;
+    faceFramed =
+        bounds != null &&
+        bounds.width >= .20 &&
+        bounds.center.dx >= .23 &&
+        bounds.center.dx <= .77 &&
+        bounds.center.dy >= .20 &&
+        bounds.center.dy <= .80 &&
+        (value.luminance == null || value.luminance! >= 45);
     String nextHint;
     if (value.faceCount == 0) {
       nextHint = 'Move your face into view';
     } else if (value.faceCount > 1) {
       nextHint = 'Only one person should be visible';
-    } else if (value.bounds == null ||
-        value.bounds!.width < .20 ||
-        value.bounds!.center.dx < .23 ||
-        value.bounds!.center.dx > .77 ||
-        value.bounds!.center.dy < .20 ||
-        value.bounds!.center.dy > .80) {
+    } else if (bounds == null ||
+        bounds.width < .20 ||
+        bounds.center.dx < .23 ||
+        bounds.center.dx > .77 ||
+        bounds.center.dy < .20 ||
+        bounds.center.dy > .80) {
       nextHint = 'Move closer and center your face';
     } else if (value.luminance != null && value.luminance! < 45) {
       nextHint = 'Improve lighting on your face';
@@ -94,9 +108,11 @@ class PoseGuidance extends ChangeNotifier {
   void unavailable(DateTime now) {
     if (_lastObservation == null ||
         now.difference(_lastObservation!) > const Duration(seconds: 2)) {
+      if (analysisUnavailable) return;
       _holdStarted = null;
       _acceptedFrames = 0;
       faceBounds = null;
+      faceFramed = false;
       hint =
           'Live guidance unavailable; follow the prompts and review your video';
       notifyListeners();

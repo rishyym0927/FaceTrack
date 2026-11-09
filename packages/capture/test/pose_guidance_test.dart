@@ -37,6 +37,8 @@ void main() {
   test('advances only after two separated usable observations in order', () {
     final guide = PoseGuidance(order: ['front', 'left', 'down']);
     guide.observe(observation(0));
+    expect(guide.poseAligned, isTrue);
+    expect(guide.faceFramed, isTrue);
     expect(guide.current, 'front');
     guide.observe(observation(250));
     expect(guide.current, 'front');
@@ -55,12 +57,15 @@ void main() {
     final guide = PoseGuidance(order: ['front', 'right']);
     guide.observe(observation(0, faces: 2));
     expect(guide.hint, contains('Only one'));
+    expect(guide.faceFramed, isFalse);
     guide.observe(
       observation(500, bounds: const Rect.fromLTRB(.45, .45, .55, .55)),
     );
     expect(guide.hint, contains('Move closer'));
+    expect(guide.faceFramed, isFalse);
     guide.observe(observation(1000, brightness: 20));
     expect(guide.hint, contains('lighting'));
+    expect(guide.faceFramed, isFalse);
     guide.observe(observation(1500, yaw: 25));
     expect(guide.current, 'front');
     guide.observe(observation(2000));
@@ -78,6 +83,12 @@ void main() {
       guide.unavailable(start.add(const Duration(seconds: 3)));
       expect(guide.allCaptured, isFalse);
       expect(guide.hint, contains('guidance unavailable'));
+      expect(guide.poseAligned, isFalse);
+      expect(guide.faceFramed, isFalse);
+      guide.observe(observation(3200));
+      expect(guide.poseAligned, isTrue);
+      expect(guide.faceFramed, isTrue);
+      expect(guide.completed, isEmpty);
     },
   );
 

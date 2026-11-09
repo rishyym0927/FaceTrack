@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:camera/camera.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -222,8 +223,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
       }
     }
     if (a.status != 'awaiting_upload') return;
-    await camera.initialize();
-    if (camera.ready) await camera.start(a.poses);
+    await openCapture(a.poses);
   });
   Future<void> upload() => action(() async {
     final clip = pending!, a = state!.attempt!;
@@ -328,17 +328,43 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
         'This upload has started. Retry it or cancel this enrolment before recording a replacement.',
       );
     }
-    await camera.initialize();
-    if (!camera.ready) {
-      throw const AppFailure(
-        'Camera unavailable. Your current recording is still saved; allow camera access and retry.',
-      );
-    }
-    await PendingClips.clear();
-    camera.clip = null;
-    if (mounted) setState(() => pending = null);
-    await camera.start(attempt.poses);
+    await openCapture(
+      attempt.poses,
+      beforeStart: () async {
+        await PendingClips.clear();
+        camera.clip = null;
+        if (mounted) setState(() => pending = null);
+      },
+    );
   });
+
+  Future<void> openCapture(
+    List<String> order, {
+    Future<void> Function()? beforeStart,
+  }) async {
+    Future<void> start() async {
+      await beforeStart?.call();
+      await camera.start(order);
+    }
+
+    if (!mounted) return;
+    if (kIsWeb) {
+      await camera.initialize();
+      if (camera.ready) await start();
+      return;
+    }
+    try {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          fullscreenDialog: true,
+          builder: (_) =>
+              _StudentCameraPage(camera: camera, order: order, start: start),
+        ),
+      );
+    } finally {
+      if (!camera.disposed) await camera.interrupt();
+    }
+  }
 
   Future<void> cancel() async {
     final a = state!.attempt!;
@@ -591,161 +617,6 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   ),
                   const SizedBox(height: 16),
                 ],
-                if (camera.cameras.length > 1 && pending == null && camera.clip == null)
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(camera.selectedCamera?.name),
-                    initialValue: camera.selectedCamera?.name,
-                    decoration: const InputDecoration(labelText: 'Camera'),
-                    items: [
-                      for (final device in camera.cameras)
-                        DropdownMenuItem(
-                          value: device.name,
-                          child: Text('${device.lensDirection.name} · ${device.name}'),
-                        ),
-                    ],
-                    onChanged: camera.busy || camera.recording
-                        ? null
-                        : (name) {
-                            for (final device in camera.cameras) {
-                              if (device.name == name) {
-                                camera.selectCamera(device);
-                                break;
-                              }
-                            }
-                          },
-                  ),
-                if (camera.controller != null && pending == null)
-                  AspectRatio(
-                    aspectRatio:
-                        cameraQuarterTurns(
-                          camera.controller!.description,
-                          camera.controller!.value.deviceOrientation,
-                        ).isOdd
-                        ? 1 / camera.controller!.value.aspectRatio
-                        : camera.controller!.value.aspectRatio,
-                    child: Stack(
-                      fit: StackFit.expand,
-                      children: [
-                        // Rotate the CameraX texture using the same sensor
-                        // orientation as ML Kit. Guidance stays upright.
-                        RotatedBox(
-                          quarterTurns: cameraQuarterTurns(
-                            camera.controller!.description,
-                            camera.controller!.value.deviceOrientation,
-                          ),
-                          child: camera.controller!.buildPreview(),
-                        ),
-                        IgnorePointer(
-                          child: LayoutBuilder(
-                            builder: (context, constraints) {
-                              final face = camera.guidance?.faceBounds;
-                              if (face == null) {
-                                return Center(
-                                  child: Container(
-                                    width: 220,
-                                    height: 280,
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(140),
-                                      border: Border.all(
-                                        color: Colors.white,
-                                        width: 3,
-                                      ),
-                                    ),
-                                  ),
-                                );
-                              }
-                              return Stack(
-                                children: [
-                                  Positioned(
-                                    left:
-                                        (1 - face.right) * constraints.maxWidth,
-                                    top: face.top * constraints.maxHeight,
-                                    width: face.width * constraints.maxWidth,
-                                    height: face.height * constraints.maxHeight,
-                                    child: DecoratedBox(
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(12),
-                                        border: Border.all(
-                                          color:
-                                              camera.guidance?.hint ==
-                                                  'Hold still…'
-                                              ? Colors.greenAccent
-                                              : Colors.white,
-                                          width: 3,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              );
-                            },
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                if (camera.recording) ...[
-                  const SizedBox(height: 16),
-                  AnimatedSwitcher(
-                    duration: MediaQuery.disableAnimationsOf(context)
-                        ? Duration.zero
-                        : const Duration(milliseconds: 240),
-                    child: Text(
-                      camera.guidance?.current == null
-                          ? 'All directions captured'
-                          : 'Look ${camera.guidance!.current}',
-                      key: ValueKey(camera.guidance?.current ?? 'done'),
-                      style: Theme.of(context).textTheme.headlineMedium,
-                    ),
-                  ),
-                  if (camera.guidance != null) ...[
-                    const SizedBox(height: 8),
-                    Semantics(
-                      liveRegion: true,
-                      child: Text(camera.guidance!.hint),
-                    ),
-                    const SizedBox(height: 16),
-                    Row(
-                      children: [
-                        Text(
-                          '${camera.guidance!.completed.length} of ${camera.poses.length} directions',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        const Spacer(),
-                        Text(
-                          '${camera.elapsed}s · audio off',
-                          style: TextStyle(
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 8),
-                    TrackBar(
-                      value: camera.poses.isEmpty
-                          ? 0
-                          : camera.guidance!.completed.length /
-                                camera.poses.length,
-                      color: const Color(0xff176451),
-                      height: 9,
-                    ),
-                    const SizedBox(height: 14),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        for (final pose in camera.poses)
-                          _PoseChip(
-                            pose: pose,
-                            done: camera.guidance!.completed.contains(pose),
-                          ),
-                      ],
-                    ),
-                  ] else
-                    Text('${camera.elapsed} / 25 seconds · audio off'),
-                ],
                 if (camera.error != null)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 12),
@@ -948,48 +819,275 @@ class _ManageRow extends StatelessWidget {
   }
 }
 
-class _PoseChip extends StatelessWidget {
-  const _PoseChip({required this.pose, required this.done});
-  final String pose;
-  final bool done;
+class _StudentCameraPage extends StatefulWidget {
+  const _StudentCameraPage({
+    required this.camera,
+    required this.order,
+    required this.start,
+  });
+  final GuidedCamera camera;
+  final List<String> order;
+  final Future<void> Function() start;
   @override
-  Widget build(BuildContext context) {
-    const green = Color(0xff176451);
-    final muted = Theme.of(context).colorScheme.onSurfaceVariant;
-    return AnimatedContainer(
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 220),
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      decoration: BoxDecoration(
-        color: done ? const Color(0xffdcefe5) : Colors.white,
-        borderRadius: BorderRadius.circular(100),
-        border: Border.all(
-          color: done
-              ? green.withValues(alpha: .35)
-              : Theme.of(context).colorScheme.outline,
-        ),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(
-            done ? Icons.check_circle : Icons.circle_outlined,
-            size: 18,
-            color: done ? green : muted,
-          ),
-          const SizedBox(width: 8),
-          Text(
-            pose,
-            style: TextStyle(
-              fontWeight: FontWeight.w600,
-              color: done ? green : Theme.of(context).colorScheme.onSurface,
-            ),
-          ),
-        ],
-      ),
-    );
+  State<_StudentCameraPage> createState() => _StudentCameraPageState();
+}
+
+class _StudentCameraPageState extends State<_StudentCameraPage> {
+  bool starting = false, attempted = false;
+  GuidedCamera get camera => widget.camera;
+
+  @override
+  void initState() {
+    super.initState();
+    camera.addListener(_finished);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(camera.initialize());
+    });
   }
+
+  void _finished() {
+    if (attempted &&
+        camera.clip != null &&
+        !camera.busy &&
+        mounted &&
+        ModalRoute.of(context)?.isCurrent == true) {
+      attempted = false;
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  void dispose() {
+    camera.removeListener(_finished);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: AppBar(
+      title: const Text('Record your face'),
+      leading: IconButton(
+        tooltip: 'Cancel recording',
+        onPressed: () => Navigator.of(context).pop(),
+        icon: const Icon(Icons.close),
+      ),
+    ),
+    backgroundColor: Colors.black,
+    body: SafeArea(
+      child: ListenableBuilder(
+        listenable: camera,
+        builder: (context, _) {
+          final guidance = camera.guidance;
+          final controller = camera.controller;
+          final timed = guidance?.analysisUnavailable ?? false;
+          final index = (camera.elapsed ~/ 5).clamp(0, widget.order.length - 1);
+          final pose = timed
+              ? widget.order[index]
+              : guidance?.current ?? widget.order.first;
+          final preview = controller == null
+              ? Center(
+                  child: camera.busy
+                      ? const CircularProgressIndicator()
+                      : const SizedBox.shrink(),
+                )
+              : LiveCameraPreview(
+                  camera: controller,
+                  showGuide: true,
+                  guideAligned: guidance?.poseAligned == true,
+                  faces: guidance?.faceBounds == null
+                      ? const []
+                      : [
+                          (
+                            bounds: guidance!.faceBounds!,
+                            framed: guidance.faceFramed,
+                          ),
+                        ],
+                );
+          final controls = Material(
+            color: Theme.of(context).colorScheme.surface,
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      guidance?.allCaptured == true
+                          ? 'All directions captured'
+                          : pose == 'front'
+                          ? 'Look straight at the camera'
+                          : 'Look $pose',
+                      style: Theme.of(context).textTheme.titleLarge,
+                    ),
+                  ),
+                  Text(
+                    camera.error ??
+                        (timed
+                            ? 'Live guidance unavailable. Follow the timed directions.'
+                            : guidance?.hint ??
+                                  'Center your face in the guide.'),
+                  ),
+                  if (!kIsWeb && guidance?.faceBounds != null)
+                    const Text(
+                      'Green box: face is centered. Hold each direction until it is marked complete.',
+                    ),
+                  if (camera.recording)
+                    Text('${camera.elapsed} / 25 seconds · audio off'),
+                  Wrap(
+                    spacing: 10,
+                    children: [
+                      for (final direction in widget.order)
+                        Text(
+                          '${guidance?.completed.contains(direction) == true ? '✓' : '○'} $direction',
+                        ),
+                    ],
+                  ),
+                  Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      TextButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        child: const Text('Cancel recording'),
+                      ),
+                      if (!camera.recording && !camera.busy)
+                        FilledButton(
+                          onPressed: starting
+                              ? null
+                              : () async {
+                                  if (!camera.ready) {
+                                    await camera.initialize();
+                                    return;
+                                  }
+                                  setState(() {
+                                    starting = true;
+                                    attempted = true;
+                                  });
+                                  try {
+                                    await widget.start();
+                                  } catch (_) {
+                                    if (context.mounted) {
+                                      showMessage(
+                                        context,
+                                        'Could not start recording. Please retry.',
+                                      );
+                                    }
+                                  } finally {
+                                    if (mounted) {
+                                      setState(() => starting = false);
+                                    }
+                                  }
+                                },
+                          child: Text(
+                            camera.ready ? 'Start recording' : 'Open camera',
+                          ),
+                        ),
+                    ],
+                  ),
+                  if (!camera.recording &&
+                      camera.cameras.length > 1 &&
+                      camera.clip == null)
+                    DropdownButton<CameraDescription>(
+                      value: camera.selectedCamera,
+                      isExpanded: true,
+                      onChanged: camera.busy
+                          ? null
+                          : (choice) {
+                              if (choice != null) {
+                                unawaited(camera.selectCamera(choice));
+                              }
+                            },
+                      items: [
+                        for (final device in camera.cameras)
+                          DropdownMenuItem(
+                            value: device,
+                            child: Text(
+                              '${device.lensDirection.name} · ${device.name}',
+                            ),
+                          ),
+                      ],
+                    ),
+                ],
+              ),
+            ),
+          );
+          return LayoutBuilder(
+            builder: (context, constraints) {
+              if (kIsWeb) {
+                final isWide = constraints.maxWidth >= 760;
+                return Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 1000),
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: isWide
+                          ? Row(
+                              children: [
+                                Expanded(
+                                  child: Center(
+                                    child: ConstrainedBox(
+                                      constraints: const BoxConstraints(
+                                        maxHeight: 620,
+                                      ),
+                                      child: preview,
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                SizedBox(width: 330, child: controls),
+                              ],
+                            )
+                          : Column(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Flexible(
+                                  child: ConstrainedBox(
+                                    constraints: const BoxConstraints(
+                                      maxHeight: 620,
+                                    ),
+                                    child: preview,
+                                  ),
+                                ),
+                                const SizedBox(height: 12),
+                                ConstrainedBox(
+                                  constraints: BoxConstraints(
+                                    maxHeight: constraints.maxHeight * .48,
+                                  ),
+                                  child: controls,
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                );
+              }
+              if (constraints.maxWidth > constraints.maxHeight * 1.35) {
+                return Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Expanded(flex: 3, child: preview),
+                    Expanded(flex: 2, child: Center(child: controls)),
+                  ],
+                );
+              }
+              return Column(
+                children: [
+                  Expanded(child: preview),
+                  ConstrainedBox(
+                    constraints: BoxConstraints(
+                      maxHeight: constraints.maxHeight * .55,
+                    ),
+                    child: controls,
+                  ),
+                ],
+              );
+            },
+          );
+        },
+      ),
+    ),
+  );
 }
 
 class EnrolmentSteps extends StatelessWidget {

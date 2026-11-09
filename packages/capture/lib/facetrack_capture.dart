@@ -7,3 +7,6 @@ export 'src/playback.dart';
 export 'src/pending.dart';
 export 'src/upload.dart';
 export 'src/orientation.dart';
+export 'src/device_face_analyzer_stub.dart'
+    if (dart.library.io) 'src/device_face_analyzer_io.dart';
+export 'src/live_preview.dart';

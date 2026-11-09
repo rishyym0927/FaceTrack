@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -644,8 +645,13 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   /// button rather than at the top of the page.
   AppFailure? captureError;
   bool busy = false, ack = false;
+  int webPreviewTurns = 0;
   final decisions = <String, String>{};
-  final camera = GuidedCamera();
+  final camera = GuidedCamera(
+    analyzerFactory: !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+        ? (controller) => createDeviceFaceAnalyzer(controller, classroom: true)
+        : null,
+  );
   ResumableUpload? uploader;
   double? progress;
   Json? capture;
@@ -894,6 +900,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         mutation: _mutation(name),
       );
       _mutation(name).reset();
+      if (name == 'close') await camera.interrupt();
       await load(keepDecisions: true);
     });
   }
@@ -925,6 +932,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     );
     reason.dispose();
     await load();
+    if (mounted && data?['session']['status'] == 'cancelled') {
+      await camera.interrupt();
+    }
   }
 
   Future<void> record() => action(capturePanel: true, () async {
@@ -1239,12 +1249,16 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                       ),
                     if (status == 'open')
                       (captured ? FilledButton.icon : OutlinedButton.icon)(
-                        onPressed: busy ? null : () => transition('close'),
+                        onPressed: busy || camera.busy || camera.recording
+                            ? null
+                            : () => transition('close'),
                         icon: const Icon(Icons.lock_outline),
                         label: const Text('Close session'),
                       ),
                     TextButton(
-                      onPressed: busy ? null : cancel,
+                      onPressed: busy || camera.busy || camera.recording
+                          ? null
+                          : cancel,
                       child: const Text('Cancel session'),
                     ),
                   ],
@@ -1275,7 +1289,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                       for (final device in camera.cameras)
                         DropdownMenuItem(
                           value: device.name,
-                          child: Text('${device.lensDirection.name} · ${device.name}'),
+                          child: Text(
+                            '${device.lensDirection.name} · ${device.name}',
+                          ),
                         ),
                     ],
                     onChanged: busy || camera.busy || camera.recording
@@ -1289,30 +1305,82 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                             }
                           },
                   ),
-                if (camera.controller != null && camera.clip == null)
-                  Builder(
-                    builder: (context) {
-                      // Same sensor-orientation handling as the Student
-                      // enrolment camera, so portrait phones show it upright.
-                      final c = camera.controller!;
-                      final turns = cameraQuarterTurns(
-                        c.description,
-                        c.value.deviceOrientation,
-                      );
-                      return ClipRRect(
-                        borderRadius: BorderRadius.circular(16),
-                        child: AspectRatio(
-                          aspectRatio: turns.isOdd
-                              ? 1 / c.value.aspectRatio
-                              : c.value.aspectRatio,
-                          child: RotatedBox(
-                            quarterTurns: turns,
-                            child: c.buildPreview(),
+                if (camera.controller != null && camera.clip == null) ...[
+                  const SizedBox(height: 12),
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final width = constraints.maxWidth.clamp(0.0, 720.0);
+                      final height = (width * .6).clamp(220.0, 420.0);
+                      return Align(
+                        alignment: Alignment.centerLeft,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(18),
+                          child: SizedBox(
+                            width: width,
+                            height: height,
+                            child: ColoredBox(
+                              color: Colors.black,
+                              child: ListenableBuilder(
+                                listenable: camera.faceTracker,
+                                builder: (context, _) => RotatedBox(
+                                  quarterTurns: kIsWeb ? webPreviewTurns : 0,
+                                  child: LiveCameraPreview(
+                                    camera: camera.controller!,
+                                    faces: camera.faceTracker.faces,
+                                    onFocus: (point) =>
+                                        unawaited(camera.focus(point)),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
                         ),
                       );
                     },
                   ),
+                  if (camera.controller!.value.focusPointSupported)
+                    const Text('Tap the preview to focus.'),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      if (kIsWeb)
+                        TextButton.icon(
+                          onPressed: () => setState(
+                            () => webPreviewTurns = (webPreviewTurns + 1) % 4,
+                          ),
+                          icon: const Icon(Icons.rotate_right),
+                          label: const Text('Rotate preview'),
+                        ),
+                      TextButton.icon(
+                        onPressed: camera.busy ? null : camera.toggleTorch,
+                        icon: const Icon(Icons.flashlight_on),
+                        label: Text(
+                          camera.controller!.value.flashMode == FlashMode.torch
+                              ? 'Turn torch off'
+                              : 'Turn torch on',
+                        ),
+                      ),
+                      if (!camera.recording)
+                        TextButton(
+                          onPressed: camera.busy ? null : camera.interrupt,
+                          child: const Text('Close camera'),
+                        ),
+                    ],
+                  ),
+                  if (camera.controlMessage != null)
+                    Text(camera.controlMessage!),
+                  if (camera.recording && !kIsWeb)
+                    ListenableBuilder(
+                      listenable: camera.faceTracker,
+                      builder: (context, _) => Text(
+                        camera.faceTracker.available
+                            ? camera.faceTracker.faces.isEmpty
+                                  ? 'No faces in view. Aim the camera toward the class.'
+                                  : 'Green outlines show faces that are well framed.'
+                            : 'Live face guidance is currently unavailable. Recording continues.',
+                      ),
+                    ),
+                ],
                 if (camera.error != null) Text(camera.error!),
                 if (camera.recording)
                   Padding(
@@ -1349,7 +1417,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                         ),
                       ),
                       TextButton(
-                        onPressed: busy ? null : () => camera.discard(),
+                        onPressed: busy || camera.busy ? null : camera.retake,
                         child: const Text('Retake recording'),
                       ),
                     ],
@@ -1360,9 +1428,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: FilledButton.icon(
-                        onPressed: busy ? null : record,
+                        onPressed: busy || camera.busy
+                            ? null
+                            : camera.ready
+                            ? record
+                            : camera.initialize,
                         icon: const Icon(Icons.videocam_outlined),
-                        label: const Text('Record classroom'),
+                        label: Text(
+                          camera.ready ? 'Start recording' : 'Open camera',
+                        ),
                       ),
                     ),
                   ),
