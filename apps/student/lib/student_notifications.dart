@@ -184,6 +184,7 @@ Iterable<AppNotice> attendanceNotices(
     );
   for (final r in sorted.take(_recentPublications)) {
     final status = finalStatus(r['status'] as String?);
+    if (!finalStatuses.contains(status)) continue;
     final subject = titles[r['offering_id']] ?? 'Subject';
     final starts = _time(r['starts_at'])?.toLocal();
     final date = starts == null

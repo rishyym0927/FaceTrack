@@ -77,14 +77,14 @@ def safe(value):
 
 
 def attendance_label(status):
-    """Three final states; legacy late/excused show as Present/Unassessed."""
+    """Format binary marks and distinguish suggestions in draft reports."""
     return {
         "present": "Present",
         "late": "Present",
         "absent": "Absent",
-        "proposed_present": "Matched (draft)",
-        "proposed_absent": "Not recognized (draft)",
-    }.get(status, "Unassessed")
+        "proposed_present": "Present (draft)",
+        "proposed_absent": "Absent (draft)",
+    }.get(status, "")
 
 
 def report(snapshot):
@@ -162,8 +162,8 @@ def report(snapshot):
     labels = [attendance_label(r["status"]) for r in snapshot["records"]]
     counts = {
         k: labels.count(k)
-        for k in ("Present", "Absent", "Unassessed", "Matched (draft)", "Not recognized (draft)")
-        if k in ("Present", "Absent", "Unassessed") or k in labels
+        for k in ("Present", "Absent", "Present (draft)", "Absent (draft)")
+        if k in ("Present", "Absent") or k in labels
     }
     content = [
         title,

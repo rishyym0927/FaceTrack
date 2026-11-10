@@ -41,13 +41,13 @@ class SessionCreate(Strict):
 
 class Decision(Strict):
     student_id: UUID
-    status: Literal["present", "absent", "unassessed"]
+    status: Literal["present", "absent"]
     reason: str | None = Field(default=None, max_length=500)
 
 
 class Review(Strict):
     decisions: list[Decision] = Field(max_length=500)
-    acknowledge_unassessed: bool = False
+    acknowledge_unassessed: bool = Field(default=False, deprecated=True)
 
     @model_validator(mode="after")
     def unique(self):
@@ -322,6 +322,19 @@ async def can_publish(conn, actor, institute, offering):
         )
 
 
+async def recognition_pending(conn, institute, session_id):
+    return bool(
+        await one(
+            conn,
+            """SELECT j.id FROM app.jobs j JOIN app.captures cap
+           ON cap.institute_id=j.institute_id AND cap.id=j.capture_id
+           WHERE cap.institute_id=:i AND cap.session_id=:id
+           AND j.state IN ('queued','leased','running','retry_wait') LIMIT 1""",
+            {"i": institute, "id": session_id},
+        )
+    )
+
+
 async def publish(conn, actor, institute, s, reason=None):
     await can_publish(conn, actor, institute, s["offering_id"])
     rows = await attendance(conn, institute, s["id"])
@@ -593,7 +606,11 @@ def install(app, engine, settings, principal, storage):
     async def records(identifier: UUID, user: User, institute_id: Institute):
         async with transaction(engine, user.user_id, institute_id) as c:
             s = await session(c, user.user_id, institute_id, identifier)
-            return {"session": dict(s), "items": await attendance(c, institute_id, identifier)}
+            return {
+                "session": dict(s),
+                "items": await attendance(c, institute_id, identifier),
+                "processing_pending": await recognition_pending(c, institute_id, identifier),
+            }
 
     @app.put("/v1/sessions/{identifier}/attendance-review")
     @app.post("/v1/sessions/{identifier}/finalize")
@@ -625,25 +642,17 @@ def install(app, engine, settings, principal, storage):
             finalize = route.endswith("/finalize")
             if finalize and s["status"] == "open":
                 raise APIError(409, "SESSION_STATE", "Close the session before publishing.")
-            if finalize and await one(
-                c,
-                "SELECT id FROM app.jobs WHERE institute_id=:i AND capture_id IN (SELECT id FROM app.captures WHERE institute_id=:i AND session_id=:id) AND state IN ('queued','leased','running','retry_wait')",
-                {"i": institute_id, "id": identifier},
-            ):
+            if finalize and await recognition_pending(c, institute_id, identifier):
                 raise APIError(
                     409, "PROCESSING_PENDING", "Wait for processing to finish before publishing."
                 )
             await apply_decisions(c, user.user_id, institute_id, identifier, body.decisions)
             rows = await attendance(c, institute_id, identifier)
-            if (
-                finalize
-                and any(x["status"] == "unassessed" for x in rows)
-                and not body.acknowledge_unassessed
-            ):
+            if finalize and any(x["status"] not in ("present", "absent") for x in rows):
                 raise APIError(
                     409,
-                    "UNASSESSED_ACK_REQUIRED",
-                    "Acknowledge unassessed students before publishing an incomplete result.",
+                    "REVIEW_REQUIRED",
+                    "Choose Present or Absent for every student before publishing.",
                 )
             result = (
                 await publish(c, user.user_id, institute_id, s)
@@ -787,7 +796,10 @@ def install(app, engine, settings, principal, storage):
                     and x["session_id"] != str(at["session_id"])
                 ]
             return {
-                **page(filtered, limit),
+                **page(
+                    [row for row in filtered if row["status"] in ("present", "late", "absent")],
+                    limit,
+                ),
                 "summary": {
                     "present_or_late": present,
                     "assessed": den,

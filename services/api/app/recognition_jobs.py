@@ -250,19 +250,29 @@ async def complete(conn, worker, job_id, body, settings):
     usable = max(0, body.quality.get("detections", 0) - body.quality.get("quality_rejects", 0))
     sufficient_capture = body.quality.get("sampled_frames", 0) >= 2 and usable >= 2
     for r in roster:
-        if not r["recognition_eligible"] or str(r["student_id"]) in proposed:
+        student_id = str(r["student_id"])
+        eligible = student_id in allowed
+        if student_id in proposed or (not eligible and not sufficient_capture):
             continue
         await conn.execute(
             text(
                 """UPDATE app.attendance_records SET status=:status,source=:source,
                 assessment_code=:code,evidence_summary=CAST(:summary AS jsonb),version=version+1
                 WHERE institute_id=:i AND session_id=:s AND student_id=:student AND NOT manual_lock
-                AND status<>'proposed_present'"""
+                AND status<>'proposed_present'
+                AND (:sufficient OR status<>'proposed_absent')"""
             ),
             {
                 "status": "proposed_absent" if sufficient_capture else "unassessed",
                 "source": "ml" if sufficient_capture else "none",
-                "code": "not_recognized" if sufficient_capture else "limited_capture",
+                "code": (
+                    "template_ineligible"
+                    if not eligible
+                    else "not_recognized"
+                    if sufficient_capture
+                    else "limited_capture"
+                ),
+                "sufficient": sufficient_capture,
                 "summary": json.dumps({"usable_observations": usable}),
                 "i": i,
                 "s": s["id"],

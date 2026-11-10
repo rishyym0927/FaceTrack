@@ -268,7 +268,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     }
 
     final lines = <String>[
-      'Semester,Branch,Section,Subject code,Subject,Enrolment,Name,Classes conducted,Present,Absent,Unassessed,Percentage',
+      'Semester,Branch,Section,Subject code,Subject,Enrolment,Name,Classes conducted,Present,Absent,Percentage',
     ];
     for (final s in _sorted(_visible)) {
       if (s.error != null) continue;
@@ -285,7 +285,6 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           esc(d['conducted']),
           esc(d['attended']),
           esc(d['absent']),
-          esc(unassessedCount(d)),
           esc(d['percentage']),
         ].join(','));
       }

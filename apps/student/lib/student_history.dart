@@ -33,19 +33,22 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
           query: {'offering_id': widget.offering, 'cursor': ?cursor},
         );
         if (mounted && current == summaryGeneration) {
-          final disputeResult = await api.send(
-            'GET',
-            '/v1/me/attendance-disputes',
-            institute: institute,
-            query: {'limit': 200},
-          );
-          if (!mounted || current != summaryGeneration) {
-            return PageData.fromJson(result, (j) => j);
-          }
           summary = result['summary'];
-          disputes = (disputeResult['items'] as List).cast<Json>();
+          try {
+            final disputeResult = await api.send(
+              'GET',
+              '/v1/me/attendance-disputes',
+              institute: institute,
+              query: {'limit': 200},
+            );
+            if (mounted && current == summaryGeneration) {
+              disputes = (disputeResult['items'] as List).cast<Json>();
+            }
+          } on AppFailure {
+            // The published marks remain available when query history fails.
+          }
         }
-        return PageData.fromJson(result, (j) => j);
+        return PageData<Json>.fromJson(result, (row) => row);
       } on AppFailure catch (e) {
         if (mounted &&
             current == summaryGeneration &&
@@ -123,7 +126,6 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
     final pct = summary['percentage'];
     final present = summary['present_or_late'] as num? ?? 0;
     final assessed = summary['assessed'] as num? ?? 0;
-    final unassessed = summary['unassessed'] as num? ?? 0;
     final ring = PercentRing(
       value: pct is num ? pct.toDouble() : null,
       size: 128,
@@ -143,12 +145,6 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
           value: assessed - present,
           accent: const Color(0xffa22f2f),
           icon: Icons.cancel_outlined,
-        ),
-        StatTile(
-          label: 'Unassessed',
-          value: unassessed,
-          accent: const Color(0xff9a6a00),
-          icon: Icons.help_outline,
         ),
       ],
     );
@@ -210,14 +206,6 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                       ),
                       const SizedBox(height: 16),
                       _summaryBody(context, summary!),
-                      const SizedBox(height: 12),
-                      Text(
-                        'Unassessed classes are excluded from the percentage.',
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                      ),
                     ],
                   ),
                 ),
@@ -228,6 +216,8 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         emptyTitle: 'No published attendance yet',
         emptyMessage: 'Your faculty must review and publish a session before it appears here.',
         item: (r) {
+          final mark = finalStatus(r['status'] as String?);
+          if (!finalStatuses.contains(mark)) return const SizedBox.shrink();
           final d = DateTime.parse(r['starts_at']).toLocal(),
               l = MaterialLocalizations.of(context);
           // Match by session, not by publication id: an accepted correction
@@ -249,19 +239,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                   '${l.formatMediumDate(d)} · ${l.formatTimeOfDay(TimeOfDay.fromDateTime(d))}',
                 ),
                 const SizedBox(height: 12),
-                StatusBadge(r['status']),
-                if (r['assessment_code'] != null) ...[
-                  const SizedBox(height: 8),
-                  Text(switch (r['assessment_code']) {
-                    'recognized' => 'Recognition evidence was available before faculty review.',
-                    'not_recognized' => 'The system did not recognize you in the usable capture; your faculty confirmed the final result.',
-                    'template_ineligible' => 'Face recognition was unavailable; your faculty assessed this manually.',
-                    'limited_capture' => 'Capture coverage was limited; your faculty assessed this manually.',
-                    'processing_failed' =>
-                      'Processing failed; your faculty assessed this manually.',
-                    _ => 'Your faculty reviewed this result.',
-                  }),
-                ],
+                StatusBadge(mark),
                 const SizedBox(height: 12),
                 if ((r['revision'] as num? ?? 1) > 1)
                   const Row(

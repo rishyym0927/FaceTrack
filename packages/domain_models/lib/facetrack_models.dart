@@ -16,7 +16,10 @@ String semesterLabel(int semester) => '${ordinal(semester)} Semester';
 
 /// "2026-ODD" -> "Odd Semester 2026"; any other code is shown unchanged.
 String termLabel(String code) {
-  final m = RegExp(r'^(\d{4})-(ODD|EVEN)$', caseSensitive: false).firstMatch(code);
+  final m = RegExp(
+    r'^(\d{4})-(ODD|EVEN)$',
+    caseSensitive: false,
+  ).firstMatch(code);
   if (m == null) return code;
   final kind = m.group(2)!.toLowerCase();
   return '${kind[0].toUpperCase()}${kind.substring(1)} Semester ${m.group(1)}';
@@ -164,8 +167,8 @@ String statusLabel(String status) => switch (status) {
   _ => 'Unavailable',
 };
 
-/// The three final attendance states shown everywhere.
-const finalStatuses = ['present', 'absent', 'unassessed'];
+/// Attendance marks allowed for new decisions.
+const finalStatuses = ['present', 'absent'];
 
 /// Folds any stored attendance status into one of [finalStatuses]. Older
 /// publications may hold `late` (shown as Present) or `excused` (shown as

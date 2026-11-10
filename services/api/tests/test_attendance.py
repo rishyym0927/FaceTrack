@@ -58,9 +58,10 @@ async def test_session_roster_manual_publication_correction_history(bio):
     noack = await b.client.post(
         f"/v1/sessions/{sid}/finalize",
         headers=b.headers("teacher", key="noack", version=s["version"]),
-        json={"decisions": []},
+        json={"decisions": [], "acknowledge_unassessed": True},
     )
     assert noack.status_code == 409
+    assert noack.json()["error"]["code"] == "REVIEW_REQUIRED"
     decisions = {
         "decisions": [
             {
@@ -93,14 +94,14 @@ async def test_session_roster_manual_publication_correction_history(bio):
         headers=b.headers("teacher", key="correction", version=current["version"]),
         json={
             "student_id": b.ids["student1_profile"],
-            "status": "unassessed",
-            "reason": "Approved leave",
+            "status": "absent",
+            "reason": "Attendance verified after class",
             "publication_revision": 1,
         },
     )
     assert correction.status_code == 200, correction.text
     own = (await b.client.get("/v1/me/attendance", headers=b.headers("student1"))).json()
-    assert own["items"][0]["revision"] == 2 and own["summary"]["percentage"] is None
+    assert own["items"][0]["revision"] == 2 and own["summary"]["percentage"] == 0
     with connect(b.urls["owner"]) as c:
         snapshots = c.execute(
             "SELECT snapshot_json FROM app.publications ORDER BY revision"
@@ -149,8 +150,8 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
         headers=b.headers("teacher", key="corr", version=current["version"]),
         json={
             "student_id": b.ids["student1_profile"],
-            "status": "unassessed",
-            "reason": "Approved leave",
+            "status": "absent",
+            "reason": "Attendance verified after class",
             "publication_revision": 1,
         },
     )
@@ -160,11 +161,11 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
             f"/v1/offerings/{offering}/attendance-summary", headers=b.headers("teacher")
         )
     ).json()["students"][0]
-    assert after["unassessed"] == 1 and after["present"] == 0
-    assert after["assessed"] == 0 and after["percentage"] is None
-    # Only Present, Absent and Unassessed can be recorded now.
+    assert after["absent"] == 1 and after["present"] == 0
+    assert after["assessed"] == 1 and after["percentage"] == 0
+    # Only Present and Absent can be recorded now.
     current = (await b.client.get(f"/v1/sessions/{sid}", headers=b.headers("teacher"))).json()
-    for legacy in ("late", "excused"):
+    for legacy in ("late", "excused", "unassessed"):
         refused = await b.client.post(
             f"/v1/sessions/{sid}/corrections",
             headers=b.headers("teacher", key=f"legacy-{legacy}", version=current["version"]),
@@ -356,8 +357,21 @@ async def test_withdrawal_blocks_inflight_recognition_commit(bio):
 
 async def test_teacher_confirms_absence_and_student_disputes_latest_publication(bio):
     b = bio
+    with connect(b.urls["owner"]) as c:
+        unseen = c.execute(
+            """INSERT INTO app.students(institute_id,enrollment_number,official_name,official_email,status)
+               VALUES(%s,'UNSEEN','Unseen Student','unseen@example.edu','approved') RETURNING id""",
+            (b.ids["institute"],),
+        ).fetchone()[0]
+        c.execute(
+            "INSERT INTO app.course_enrollments(institute_id,offering_id,student_id,status) VALUES(%s,%s,%s,'active')",
+            (b.ids["institute"], b.ids["offering"], unseen),
+        )
     s = await recognition_ready(b)
     _, jid, epoch, data = await captured(b, s)
+    pending = await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
+    assert pending.json()["processing_pending"] is True
+    assert len(data["roster"]) == 2
     known = data["roster"][0]
     body = {
         k: data[k]
@@ -387,10 +401,39 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
         await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
     ).json()
     rows = {x["student_id"]: x for x in attendance["items"]}
-    absent_id = next(x for x in rows if x != known["student_id"])
+    absent_id = next(x for x in rows if x not in (known["student_id"], str(unseen)))
+    assert attendance["processing_pending"] is False
     assert rows[known["student_id"]]["status"] == "proposed_present"
     assert rows[absent_id]["status"] == "proposed_absent"
     assert rows[absent_id]["assessment_code"] == "not_recognized"
+    assert rows[str(unseen)]["status"] == "proposed_absent"
+    assert rows[str(unseen)]["assessment_code"] == "template_ineligible"
+
+    _, later_job, later_epoch, later_data = await captured(b, s, key="limited-after-usable")
+    limited = {
+        k: later_data[k]
+        for k in ("generation", "source_sha256", "model_hash", "profile_hash", "roster_hash")
+    }
+    limited.update(
+        epoch=later_epoch,
+        processed_sha256="f" * 64,
+        proposals=[],
+        unknown_observations=0,
+        quality={"sampled_frames": 12, "detections": 1, "quality_rejects": 1},
+        timings={"processing_total_ms": 5},
+    )
+    later = await b.client.post(
+        f"/internal/v1/jobs/{later_job}/complete", headers=b.wh, json=limited
+    )
+    assert later.status_code == 200, later.text
+    attendance = (
+        await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
+    ).json()
+    assert {r["student_id"]: r["status"] for r in attendance["items"]} == {
+        known["student_id"]: "proposed_present",
+        absent_id: "proposed_absent",
+        str(unseen): "proposed_absent",
+    }
 
     closed = await b.client.post(
         f"/v1/sessions/{s['id']}/close",
@@ -410,11 +453,17 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
             "decisions": [
                 {"student_id": known["student_id"], "status": "present"},
                 {"student_id": absent_id, "status": "absent"},
+                {"student_id": str(unseen), "status": "absent"},
             ]
         },
     )
     assert publication.status_code == 200, publication.text
     absent_label = "student1" if absent_id == b.ids["student1_profile"] else "student2"
+    present_label = "student2" if absent_label == "student1" else "student1"
+    for label, expected in ((absent_label, "absent"), (present_label, "present")):
+        history = await b.client.get("/v1/me/attendance", headers=b.headers(label))
+        assert history.status_code == 200
+        assert [row["status"] for row in history.json()["items"]] == [expected]
     blank_reason = await b.client.post(
         f"/v1/me/attendance/{publication.json()['id']}/disputes",
         headers=b.headers(absent_label, key="blank-attendance-query"),
@@ -463,9 +512,10 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
         json={"decision": "accepted", "reason": "Attendance verified with the faculty."},
     )
     assert replayed_resolution.status_code == 200
-    assert replayed_resolution.json()["resolved_publication_id"] == resolved.json()[
-        "resolved_publication_id"
-    ]
+    assert (
+        replayed_resolution.json()["resolved_publication_id"]
+        == resolved.json()["resolved_publication_id"]
+    )
     own = (await b.client.get("/v1/me/attendance", headers=b.headers(absent_label))).json()
     assert own["items"][0]["status"] == "present"
     assert own["items"][0]["revision"] == 2
@@ -487,9 +537,7 @@ async def test_limited_capture_never_proposes_absence(bio):
         quality={"sampled_frames": 12, "detections": 4, "quality_rejects": 4},
         timings={"processing_total_ms": 4},
     )
-    result = await b.client.post(
-        f"/internal/v1/jobs/{jid}/complete", headers=b.wh, json=body
-    )
+    result = await b.client.post(f"/internal/v1/jobs/{jid}/complete", headers=b.wh, json=body)
     assert result.status_code == 200, result.text
     rows = (
         await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
@@ -656,27 +704,31 @@ async def test_sequential_scan_segments_preserve_earlier_recognition(bio):
     for index in range(2):
         _, job, epoch, data = await captured(b, session, key=f"scan-{index}")
         person = data["roster"][index]
-        body = {key: data[key] for key in (
-            "generation", "source_sha256", "model_hash", "profile_hash", "roster_hash"
-        )}
+        body = {
+            key: data[key]
+            for key in ("generation", "source_sha256", "model_hash", "profile_hash", "roster_hash")
+        }
         body.update(
-            epoch=epoch, processed_sha256="d" * 64,
-            proposals=[{
-                "student_id": person["student_id"],
-                "template_set_id": person["template_set_id"],
-                "template_epoch": person["template_epoch"],
-                "hits": 2, "span_ms": 600, "similarity": 0.9,
-            }],
+            epoch=epoch,
+            processed_sha256="d" * 64,
+            proposals=[
+                {
+                    "student_id": person["student_id"],
+                    "template_set_id": person["template_set_id"],
+                    "template_epoch": person["template_epoch"],
+                    "hits": 2,
+                    "span_ms": 600,
+                    "similarity": 0.9,
+                }
+            ],
             unknown_observations=0,
             quality={"sampled_frames": 4, "detections": 4, "quality_rejects": 0},
             timings={"processing_total_ms": 2},
         )
-        response = await b.client.post(
-            f"/internal/v1/jobs/{job}/complete", headers=b.wh, json=body
-        )
+        response = await b.client.post(f"/internal/v1/jobs/{job}/complete", headers=b.wh, json=body)
         assert response.status_code == 200, response.text
-    rows = (await b.client.get(
-        f"/v1/sessions/{session['id']}/attendance", headers=b.headers("teacher")
-    )).json()["items"]
+    rows = (
+        await b.client.get(f"/v1/sessions/{session['id']}/attendance", headers=b.headers("teacher"))
+    ).json()["items"]
     assert len(rows) == 2
     assert all(row["status"] == "proposed_present" for row in rows)

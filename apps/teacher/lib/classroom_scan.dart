@@ -14,22 +14,30 @@ class ClassroomScan extends ChangeNotifier {
   final Future<void> Function(XFile) upload;
   final List<XFile> _queue = [];
   bool scanning = false, sending = false, collecting = false, closed = false;
+  bool ended = false, releasing = false;
   String? error;
+  double? uploadProgress;
+  String? uploadStatus;
   int submitted = 0;
   int get pending => _queue.length;
-  bool get finishing =>
-      !scanning && (camera.recording || pending > 0 || sending);
+  bool get finishing => ended && !canLeave;
   bool get canLeave =>
-      !scanning && !camera.recording && pending == 0 && !sending;
+      !scanning &&
+      !camera.busy &&
+      !camera.recording &&
+      !releasing &&
+      pending == 0 &&
+      !sending;
   void _emit() {
     if (!closed) notifyListeners();
   }
 
   Future<void> start() async {
-    if (closed || scanning || camera.busy || error != null) return;
+    if (closed || ended || scanning || camera.busy || error != null) return;
     scanning = true;
     _emit();
     await camera.initialize();
+    if (ended) return;
     if (!camera.ready) {
       scanning = false;
       error = camera.error ?? 'Camera unavailable. Please retry.';
@@ -49,10 +57,14 @@ class ClassroomScan extends ChangeNotifier {
       return;
     }
     await camera.start(const []);
-    if (!camera.recording && camera.clip == null && camera.error != null) {
+    if (!ended &&
+        !camera.recording &&
+        camera.clip == null &&
+        camera.error != null) {
       scanning = false;
       error = camera.error;
     }
+    if (ended) await _finishCamera();
     _emit();
   }
 
@@ -60,6 +72,9 @@ class ClassroomScan extends ChangeNotifier {
     if (closed) return;
     if (camera.clip != null && !camera.busy && !collecting) {
       unawaited(_collect());
+    }
+    if (ended && !camera.busy && !camera.recording) {
+      unawaited(_finishCamera());
     }
     _emit();
   }
@@ -81,6 +96,7 @@ class ClassroomScan extends ChangeNotifier {
     try {
       while (_queue.isNotEmpty && !closed) {
         final file = _queue.first;
+        reportUpload('Preparing upload…');
         await upload(file);
         _queue.removeAt(0);
         submitted++;
@@ -94,8 +110,7 @@ class ClassroomScan extends ChangeNotifier {
       }
     } catch (_) {
       error = 'Upload paused. Your captured segment is kept here. Check your connection and retry.';
-      scanning = false;
-      // Keep an active capture until its normal boundary so it is not lost.
+      await stop();
     } finally {
       sending = false;
       _emit();
@@ -104,10 +119,32 @@ class ClassroomScan extends ChangeNotifier {
 
   Future<void> stop() async {
     scanning = false;
+    ended = true;
     _emit();
-    // Finish a short segment at the normal boundary; existing decoder minimum
-    // and temporal corroboration are preserved.
-    if (camera.recording && camera.elapsed >= 10) await camera.stop();
+    await _finishCamera();
+  }
+
+  Future<void> _finishCamera() async {
+    if (closed ||
+        releasing ||
+        camera.busy ||
+        (!camera.ready && !camera.recording && camera.controller == null)) {
+      return;
+    }
+    releasing = true;
+    try {
+      if (camera.recording) await camera.stop();
+      await camera.interrupt();
+    } finally {
+      releasing = false;
+      _emit();
+    }
+  }
+
+  void reportUpload(String status, [double? progress]) {
+    uploadStatus = status;
+    uploadProgress = progress;
+    _emit();
   }
 
   Future<void> retry() async {
@@ -159,12 +196,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
   @override
   void initState() {
     super.initState();
-    lifecycle = AppLifecycleListener(
-      onPause: () async {
-        scan.scanning = false;
-        await scan.camera.interrupt();
-      },
-    );
+    lifecycle = AppLifecycleListener(onPause: () => unawaited(scan.stop()));
     WidgetsBinding.instance.addPostFrameCallback(
       (_) => scan.camera.initialize(),
     );
@@ -215,6 +247,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
     listenable: scan,
     builder: (context, _) {
       final camera = scan.camera;
+      if (scan.ended) return _uploadPage(context);
       return PopScope(
         canPop: scan.canLeave,
         onPopInvokedWithResult: (didPop, _) {
@@ -477,6 +510,99 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
         ),
       );
     },
+  );
+
+  Widget _uploadPage(BuildContext context) => PopScope(
+    canPop: scan.canLeave,
+    child: Scaffold(
+      appBar: AppBar(
+        automaticallyImplyLeading: scan.canLeave,
+        title: const Text('Classroom scan'),
+      ),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: SingleChildScrollView(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    scan.releasing || scan.camera.busy
+                        ? 'Closing camera…'
+                        : scan.error != null
+                        ? 'Upload paused'
+                        : scan.canLeave
+                        ? 'Scan complete'
+                        : 'Uploading recording',
+                    style: Theme.of(context).textTheme.headlineSmall,
+                  ),
+                  const SizedBox(height: 12),
+                  if (!scan.canLeave && scan.error == null) ...[
+                    LinearProgressIndicator(
+                      value: scan.uploadProgress,
+                      semanticsLabel: 'Recording upload progress',
+                    ),
+                    if (scan.uploadProgress case final value?)
+                      Text('${(value * 100).round()}% uploaded'),
+                  ],
+                  Text(
+                    scan.error ??
+                        (scan.canLeave
+                            ? scan.submitted == 0
+                                  ? 'No clip was saved. Record at least 10 seconds per segment.'
+                                  : '${scan.submitted} uploaded. Processing results will appear in the session.'
+                            : scan.uploadStatus ?? 'Saving the last segment…'),
+                  ),
+                  if (scan.pending > 0)
+                    Text(
+                      '${scan.submitted} uploaded · ${scan.pending} remaining',
+                    ),
+                  if (scan.error != null && !scan.sending) ...[
+                    FilledButton(
+                      onPressed: scan.retry,
+                      child: const Text('Retry upload'),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        final discard = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('Discard unsent segments?'),
+                            content: const Text(
+                              'Uploaded segments stay in the session.',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: const Text('Keep'),
+                              ),
+                              FilledButton(
+                                onPressed: () => Navigator.pop(context, true),
+                                child: const Text('Discard'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (discard == true) await scan.discardPending();
+                      },
+                      child: const Text('Discard unsent segments'),
+                    ),
+                  ],
+                  if (scan.canLeave)
+                    FilledButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      child: const Text('Back to session'),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    ),
   );
 }
 

@@ -78,9 +78,7 @@ void main() {
         expect(find.text('Employee number'), findsOneWidget);
         // Late counts as Present; excused folds into Unassessed.
         expect(
-          find.text(
-            'Marked across your subjects: Present 3 · Absent 1 · Unassessed 1',
-          ),
+          find.text('Marked across your subjects: Present 3 · Absent 1'),
           findsOneWidget,
         );
         expect(find.text('Sign out'), findsOneWidget);

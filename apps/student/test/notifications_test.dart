@@ -94,7 +94,8 @@ void main() {
       'o2': 'Physics',
     }).toList();
     final published = notices.where((n) => n.id.startsWith('pub:')).toList();
-    expect(published.first.id, 'pub:p4');
+    expect(published.first.id, 'pub:p3');
+    expect(published.any((n) => n.id == 'pub:p4'), isFalse);
     expect(
       published.firstWhere((n) => n.id == 'pub:p2').tone,
       NoticeTone.warning,

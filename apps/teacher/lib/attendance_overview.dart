@@ -110,7 +110,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     }
 
     final lines = <String>[
-      'Name,Enrolment,Classes conducted,Present,Absent,Unassessed,Percentage',
+      'Name,Enrolment,Classes conducted,Present,Absent,Percentage',
     ];
     for (final s in _students) {
       lines.add([
@@ -119,7 +119,6 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
         esc(s['conducted']),
         esc(s['attended']),
         esc(s['absent']),
-        esc(unassessedCount(s)),
         esc(s['percentage'] == null ? '' : '${s['percentage']}'),
       ].join(','));
     }
@@ -279,7 +278,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
             SingleChildScrollView(
               scrollDirection: Axis.horizontal,
               child: SizedBox(
-                width: _nameW + _enrolW + _numW * 3 + _pctW,
+                width: _nameW + _enrolW + _numW * 2 + _pctW,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -330,7 +329,6 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
         h('Enrolment', 1, _enrolW),
         h('Present', 2, _numW, right: true),
         h('Absent', null, _numW, right: true),
-        h('Unassessed', null, _numW, right: true),
         h('%', 3, _pctW, right: true),
       ],
     );
@@ -354,7 +352,6 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
         cell(_enrolW, '${s['enrollment_number']}'),
         cell(_numW, '${s['attended']}', right: true),
         cell(_numW, '${s['absent']}', right: true),
-        cell(_numW, '${unassessedCount(s)}', right: true),
         SizedBox(
           width: _pctW,
           child: Padding(

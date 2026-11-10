@@ -11929,8 +11929,7 @@
             "type": "string",
             "enum": [
               "present",
-              "absent",
-              "unassessed"
+              "absent"
             ],
             "title": "Status"
           },
@@ -13019,7 +13018,8 @@
           "acknowledge_unassessed": {
             "type": "boolean",
             "title": "Acknowledge Unassessed",
-            "default": false
+            "default": false,
+            "deprecated": true
           }
         },
         "additionalProperties": false,
@@ -13540,8 +13540,7 @@
             "type": "string",
             "enum": [
               "present",
-              "absent",
-              "unassessed"
+              "absent"
             ],
             "title": "Status"
           },

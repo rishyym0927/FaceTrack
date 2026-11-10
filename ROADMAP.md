@@ -28,7 +28,7 @@ Check a milestone only after its required outcomes are verified. Implemented cod
 
 - [ ] **4. Teacher attendance**
 
-  Sessions, frozen rosters, classroom capture and recognition drafts are implemented. One low-light session was human-reviewed and published. Use the [signed Teacher camera check](docs/CAMERA_VALIDATION.md#teacher-android-signed-release-check) to verify preview and tracking on device. Complete better-lit both-known, absent, unknown, mixed, variation and poor/no-face acceptance while leaving failures unassessed.
+  Sessions, frozen rosters, classroom capture and recognition drafts are implemented. One low-light session was human-reviewed and published. Use the [signed Teacher camera check](docs/CAMERA_VALIDATION.md#teacher-android-signed-release-check) to verify preview and tracking on device. Complete better-lit both-known, absent, unknown, mixed, variation and poor/no-face acceptance. Verify unseen students start as draft Absent after usable footage and teachers supply all marks when footage is unusable.
 
 - [ ] **5. Review, history and attendance queries**
 

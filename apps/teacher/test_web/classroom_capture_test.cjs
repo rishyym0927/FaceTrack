@@ -50,3 +50,68 @@ test('external cancellation settles the current part without stopping the shared
   current.stop();
   assert.ok((await part).size > 0);
 });
+
+test('stopping a scan releases the camera before an in-flight upload finishes', async () => {
+  const api = globalThis.FaceTrackClassroom;
+  const nodes = new Map();
+  let removed = false;
+  const root = {
+    setAttribute() {}, addEventListener() {},
+    remove() { removed = true; },
+    querySelector(selector) {
+      if (!nodes.has(selector)) nodes.set(selector, {
+        style: {}, focus() {}, play: async () => {},
+        getContext: () => ({ clearRect() {} }),
+      });
+      return nodes.get(selector);
+    },
+  };
+  const track = {
+    stopped: false,
+    getSettings: () => ({ facingMode: 'environment' }),
+    stop() { this.stopped = true; },
+  };
+  const stream = { getVideoTracks: () => [track], getTracks: () => [track] };
+  const restore = {};
+  for (const [key, value] of Object.entries({
+    document: {
+      createElement: (tag) => tag === 'div' ? root : root.querySelector(tag),
+      body: { append() {} },
+      addEventListener() {}, removeEventListener() {},
+    },
+    window: { addEventListener() {}, removeEventListener() {} },
+    ResizeObserver: class { observe() {} disconnect() {} },
+    navigator: { mediaDevices: {
+      getUserMedia: async () => stream,
+      enumerateDevices: async () => [],
+    } },
+  })) {
+    restore[key] = Object.getOwnPropertyDescriptor(globalThis, key);
+    Object.defineProperty(globalThis, key, { configurable: true, value });
+  }
+  globalThis.MediaRecorder = FakeRecorder;
+  let finishUpload, startedUpload;
+  const uploadStarted = new Promise(resolve => { startedUpload = resolve; });
+  const upload = new Promise(resolve => { finishUpload = resolve; });
+  const scan = api.scan(async () => { startedUpload(); await upload; }, () => {});
+  try {
+    await new Promise(resolve => setImmediate(resolve));
+    root.querySelector('.start').onclick();
+    await new Promise(resolve => setImmediate(resolve));
+    FakeRecorder.instances.at(-1).stop();
+    await uploadStarted;
+    root.querySelector('.stop').onclick();
+    assert.equal(track.stopped, true);
+    assert.equal(root.querySelector('video').srcObject, null);
+    assert.equal(root.querySelector('.stage').hidden, true);
+    assert.equal(removed, false);
+  } finally {
+    finishUpload();
+    await scan;
+    for (const [key, descriptor] of Object.entries(restore)) {
+      if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+      else delete globalThis[key];
+    }
+  }
+  assert.equal(removed, true);
+});

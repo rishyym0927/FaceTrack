@@ -69,10 +69,6 @@ class _TeacherAccountStatsState extends ConsumerState<TeacherAccountStats> {
     final t = DashboardTotals(list);
     final present = list.fold<int>(0, (n, s) => n + s.attended);
     final absent = list.fold<int>(0, (n, s) => n + s.absent);
-    final unassessed = list.fold<num>(
-      0,
-      (n, s) => n + s.students.fold<num>(0, (m, d) => m + unassessedCount(d)),
-    );
     return Panel(
       accent: true,
       child: Column(
@@ -132,7 +128,7 @@ class _TeacherAccountStatsState extends ConsumerState<TeacherAccountStats> {
           ),
           const SizedBox(height: 14),
           Text(
-            'Marked across your subjects: Present $present · Absent $absent · Unassessed $unassessed',
+            'Marked across your subjects: Present $present · Absent $absent',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),

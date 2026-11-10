@@ -21,7 +21,12 @@ class FakeScanCamera extends GuidedCamera {
   @override
   Future<void> stop({int minimumSeconds = 10}) async {
     stops++;
-    finish('end');
+    if (elapsed >= minimumSeconds) {
+      finish('end');
+    } else {
+      recording = false;
+      emit();
+    }
   }
 
   void finish(String path) {
@@ -67,6 +72,8 @@ void main() {
       expect(camera.starts, 2);
       expect(calls, ['first']);
       await scan.stop();
+      expect(camera.ready, false);
+      expect(scan.sending, true);
       first.complete();
       await Future<void>.delayed(const Duration(milliseconds: 50));
       expect(scan.pending, 0);
@@ -94,17 +101,16 @@ void main() {
     expect(calls, ['retained', 'retained']);
     expect(scan.pending, 0);
   });
-  test(
-    'Stop waits for minimum segment duration instead of saving a short clip',
-    () async {
-      final camera = FakeScanCamera();
-      final scan = ClassroomScan(camera, (_) async {});
-      addTearDown(scan.dispose);
-      await scan.start();
-      camera.elapsed = 3;
-      await scan.stop();
-      expect(camera.stops, 0);
-      expect(scan.finishing, true);
-    },
-  );
+  test('Stop closes the camera immediately and drops a short tail', () async {
+    final camera = FakeScanCamera();
+    final scan = ClassroomScan(camera, (_) async {});
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.elapsed = 3;
+    await scan.stop();
+    expect(camera.stops, 1);
+    expect(camera.ready, false);
+    expect(scan.pending, 0);
+    expect(scan.canLeave, true);
+  });
 }

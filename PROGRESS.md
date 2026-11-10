@@ -2,6 +2,16 @@
 
 **Reviewed:** 10 November 2026 (Asia/Kolkata)
 
+## Session workflow and binary attendance — 10 November
+
+- Follow-up requires single-click publication after successful processing. Review now defaults matches to Present and all other roster members to Absent, retains teacher edits, and publishes directly from the review button. This follow-up is local.
+
+- Both signed APKs were installed in place on the connected Samsung SM-M356B while the camera was idle. Android confirmed Student at 21:54 and Teacher at 21:55 IST. The matching API and worker changes still await deployment and a live walkthrough.
+
+- Teacher sessions now separate capture, review and publication. Stop scan finalizes a valid current segment or discards a tail under 10 seconds, releases the camera, and keeps pending uploads in a dedicated progress and retry view. The same separation applies to the browser scanner. Student pages bring published records above optional trends and show Present and Absent only.
+- The full frozen approved roster gets draft Absent after usable footage for anyone without a corroborated match, including unseen students and those without a matchable template. Limited or failed later segments preserve previous evidence. With no usable footage teachers choose the marks manually. Finalize requires a binary mark for every roster row and no pending recognition. Older immutable publications and the attendance denominator policy are preserved.
+- Verified locally with Teacher 79, Student 20, API 58, worker 56 and browser 6 tests. The focused local PostgreSQL scenario covers private capture acceptance, synthetic recognition, an unseen approved student without a template, a later limited clip, teacher publication and both students' own history. Android and browser stop tests cover camera release while uploads remain. Both Flutter analyses were clean and both release web builds and signed arm64 APKs passed. Changes are local. Next check is a consenting real capture on Android and Chrome using the updated API and worker, followed by teacher review and both student accounts. See [camera validation](docs/CAMERA_VALIDATION.md#continuous-scan-acceptance).
+
 ## Teacher Android camera repair — 10 November
 
 - The user's Samsung SM-M356B reproduced sideways Teacher preview and missing tracking boxes. Teacher logs showed CameraX switching from 1280×720 to 720×1280 at recording start with both rear and front cameras, plus missing ML Kit registrar constructors and repeated image conversion failures.

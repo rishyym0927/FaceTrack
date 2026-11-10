@@ -645,7 +645,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   /// Record/upload problems, shown inside the capture panel next to the
   /// button rather than at the top of the page.
   AppFailure? captureError;
-  bool busy = false, ack = false, scanActive = false;
+  bool busy = false, scanActive = false;
   final scanUploads = <String, _ScanUpload>{};
   int webPreviewTurns = 0;
   final decisions = <String, String>{};
@@ -683,6 +683,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   void changed() {
     if (mounted) setState(() {});
+    if (!scanActive && camera.clip != null && camera.ready && !camera.busy) {
+      unawaited(camera.interrupt());
+    }
   }
 
   Future<Json> captureStatus(String id) {
@@ -704,7 +707,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     if (next != null && capture?['status'] != next) {
       setState(() => capture = {...capture!, 'status': next});
       final sessionStatus = (data?['session'] as Json?)?['status'];
-      if (sessionStatus != 'open' && !_captureIsPending(next)) {
+      if (sessionStatus != 'open' && !processingPending) {
         poll?.cancel();
         poll = null;
       }
@@ -766,12 +769,18 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   /// Polls while the session is open or a capture is processing, also after
   /// a failed or skipped refresh, so the page never stops updating.
+  bool get processingPending =>
+      data?['processing_pending'] as bool? ??
+      _captureIsPending(capture?['status']);
+
   void _schedulePoll({bool failed = false}) {
     poll?.cancel();
     if (!mounted) return;
-    if (data?['session']?['status'] == 'open' ||
-        _captureIsPending(capture?['status'])) {
-      poll = Timer(Duration(seconds: failed ? 15 : 5), () => load());
+    if (data?['session']?['status'] == 'open' || processingPending) {
+      poll = Timer(
+        Duration(seconds: failed ? 15 : 5),
+        () => load(keepDecisions: processingPending),
+      );
     }
   }
 
@@ -808,9 +817,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               'review_required',
               'no_data',
             }.contains(result['session']['status']) &&
-            !_captureIsPending(capture?['status'])) {
+            !processingPending) {
           decisions.addAll(
-            draftAbsentDecisions((result['items'] as List).cast<Json>()),
+            draftScanDecisions((result['items'] as List).cast<Json>()),
           );
         }
         final onRoster = {
@@ -877,9 +886,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       final ok = await showDialog<bool>(
         context: context,
         builder: (c) => AlertDialog(
-          title: const Text('Close this session?'),
+          title: const Text('Finish recording and review?'),
           content: const Text(
-            'New uploads will stop. Accepted processing can finish before you publish.',
+            'Finish adding recordings first. Processing can continue while you review attendance.',
           ),
           actions: [
             TextButton(
@@ -888,7 +897,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             ),
             FilledButton(
               onPressed: () => Navigator.pop(c, true),
-              child: const Text('Close session'),
+              child: const Text('Go to review'),
             ),
           ],
         ),
@@ -954,7 +963,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     ];
   }
 
-  Future<void> uploadScanSegment(XFile file) async {
+  Future<void> uploadScanSegment(
+    XFile file, {
+    void Function(String, [double?])? report,
+  }) async {
+    report?.call('Preparing recording…');
     final state = scanUploads.putIfAbsent(file.path, _ScanUpload.new);
     final bytes = await file.length();
     if (bytes > 26214400) {
@@ -980,11 +993,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         );
       } on AppFailure catch (e) {
         if (e.code != 'CAPTURE_LIMIT' || attempt >= 23) rethrow;
-        if (kIsWeb) {
-          updateBrowserClassroomStatus(
-            'Waiting for earlier recognition results…',
-          );
-        }
+        report?.call('Waiting for an upload slot…');
         await Future<void>.delayed(const Duration(seconds: 5));
       }
     }
@@ -1001,13 +1010,14 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         grant,
         services.config.publishableKey,
         resumeUrl: state.resumeUrl,
-        progress: (_) {},
+        progress: (value) => report?.call('Uploading recording…', value),
         checkpoint: (url) async {
           state.resumeUrl = url;
         },
       );
       state.uploaded = true;
     }
+    report?.call('Verifying upload…');
     await services.api.send(
       'POST',
       '/v1/captures/${current['id']}/upload-complete',
@@ -1029,36 +1039,23 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     if (scanActive || busy || camera.recording || camera.clip != null) return;
     setState(() => scanActive = true);
     ClassroomScan? scan;
-    Timer? livePoll;
-    var refreshing = false;
     try {
       await camera.interrupt();
       if (kIsWeb) {
-        Future<void> refreshNames() async {
-          if (refreshing) return;
-          refreshing = true;
-          try {
-            final names = await scanSuggestions();
-            updateBrowserClassroomStatus(
-              '${names.length} students suggested${names.isEmpty ? '' : ': ${names.join(', ')}'}',
-            );
-          } catch (_) {
-            /* Keep latest results during a network retry. */
-          } finally {
-            refreshing = false;
-          }
-        }
-
-        livePoll = Timer.periodic(
-          const Duration(seconds: 5),
-          (_) => refreshNames(),
-        );
         await scanClassroomInBrowser(
-          onSegment: uploadScanSegment,
-          onStarted: () => unawaited(refreshNames()),
+          onSegment: (file) => uploadScanSegment(
+            file,
+            report: (message, [value]) => updateBrowserClassroomStatus(
+              value == null ? message : '$message ${(value * 100).round()}%',
+            ),
+          ),
+          onStarted: () {},
         );
       } else {
-        scan = ClassroomScan(camera, uploadScanSegment);
+        scan = ClassroomScan(
+          camera,
+          (file) => uploadScanSegment(file, report: scan!.reportUpload),
+        );
         if (!mounted) return;
         await Navigator.of(context, rootNavigator: true).push<void>(
           MaterialPageRoute(
@@ -1079,7 +1076,6 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         );
       }
     } finally {
-      livePoll?.cancel();
       scan?.dispose();
       scanUploads.clear();
       await camera.interrupt();
@@ -1190,38 +1186,6 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     await load(keepDecisions: true);
   });
   Future<void> save(bool publish) async {
-    if (publish) {
-      final ok = await showDialog<bool>(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Publish attendance?'),
-          content: Builder(
-            builder: (_) {
-              final c = DecisionCounts.of(
-                (data!['items'] as List).cast<Json>(),
-                decisions,
-              );
-              return Text(
-                '${c.present} present, ${c.absent} absent, ${c.unassessed} unassessed.\n\n'
-                'Students will see these results. Any later change is published as a correction.'
-                '${c.unassessed > 0 ? '\n\nUnassessed students make this publication incomplete.' : ''}',
-              );
-            },
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(c, false),
-              child: const Text('Review again'),
-            ),
-            FilledButton(
-              onPressed: () => Navigator.pop(c, true),
-              child: const Text('Publish'),
-            ),
-          ],
-        ),
-      );
-      if (ok != true) return;
-    }
     await action(() async {
       await services.api.send(
         publish ? 'POST' : 'PUT',
@@ -1233,7 +1197,6 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           'decisions': decisions.entries
               .map((e) => {'student_id': e.key, 'status': e.value})
               .toList(),
-          'acknowledge_unassessed': ack,
         },
       );
       _mutation(publish ? 'publish' : 'draft').reset();
@@ -1241,9 +1204,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     });
   }
 
-  /// One-click: confirm every AI-matched student (proposed_present) as a draft
-  /// Present. Deliberately leaves "Not recognized" and "Unassessed" untouched --
-  /// the teacher must decide those. Reversible before publishing, so no dialog.
+  /// Confirm suggested Present marks. Other rows retain their current choice.
   void approveAllMatched() {
     final rows = (data?['items'] as List?)?.cast<Json>() ?? const <Json>[];
     setState(() {
@@ -1259,7 +1220,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   Future<void> correct(Json row) async {
     // Older publications may hold late/excused; offer the folded state.
-    String status = finalStatus(row['status'] as String?);
+    final original = finalStatus(row['status'] as String?);
+    String? status = finalStatuses.contains(original) ? original : null;
     final reason = TextEditingController();
     await showDialog<bool>(
       context: context,
@@ -1276,7 +1238,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                 for (final s in finalStatuses)
                   DropdownMenuItem(value: s, child: Text(attendanceLabel(s))),
               ],
-              onChanged: (v) => status = v!,
+              validator: (v) => v == null ? 'Choose Present or Absent' : null,
+              onChanged: (v) => status = v,
             ),
             TextFormField(
               controller: reason,
@@ -1336,19 +1299,20 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     final s = data!['session'] as Json;
     final rows = (data!['items'] as List).cast<Json>();
     final finalised = s['status'] == 'finalized';
-    final hasUnconfirmedProposal = rows.any(
-      (row) => [
-        'proposed_present',
-        'proposed_absent',
-      ].contains(decisions[row['student_id']] ?? row['status']),
-    );
     final editable = ![
+      'open',
       'scheduled',
       'cancelled',
       'finalized',
     ].contains(s['status']);
     final status = s['status'] as String;
-    final captured = captureCoverage(rows) != null;
+    final captured =
+        capture != null ||
+        rows.any(
+          (row) =>
+              row['assessment_code'] != null &&
+              row['assessment_code'] != 'template_ineligible',
+        );
     final counts = DecisionCounts.of(rows, decisions);
     final page = ContentPage(
       children: [
@@ -1403,11 +1367,16 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                       ),
                     if (status == 'open')
                       (captured ? FilledButton.icon : OutlinedButton.icon)(
-                        onPressed: busy || camera.busy || camera.recording
+                        onPressed:
+                            busy ||
+                                camera.busy ||
+                                camera.recording ||
+                                scanActive ||
+                                camera.clip != null
                             ? null
                             : () => transition('close'),
                         icon: const Icon(Icons.lock_outline),
-                        label: const Text('Close session'),
+                        label: const Text('Go to review'),
                       ),
                     TextButton(
                       onPressed: busy || camera.busy || camera.recording
@@ -1431,167 +1400,194 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                   'Classroom capture',
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
-                const RecordingTips(),
+                const SizedBox(height: 8),
+                const Text(
+                  'Scan the room, then tap Stop scan. The camera closes while uploads finish.',
+                ),
+                const SizedBox(height: 12),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FilledButton.icon(
+                    onPressed:
+                        busy ||
+                            camera.busy ||
+                            scanActive ||
+                            camera.recording ||
+                            camera.clip != null
+                        ? null
+                        : openClassroomScan,
+                    icon: const Icon(Icons.videocam_outlined),
+                    label: const Text('Scan classroom'),
+                  ),
+                ),
+                ExpansionTile(
+                  title: const Text('Recording tips'),
+                  children: const [RecordingTips()],
+                ),
                 if (captureCoverage(rows) case final coverage?)
                   CaptureQualityNote(coverage),
-                if (camera.cameras.length > 1 && camera.clip == null)
-                  DropdownButtonFormField<String>(
-                    key: ValueKey(camera.selectedCamera?.name),
-                    initialValue: camera.selectedCamera?.name,
-                    decoration: const InputDecoration(labelText: 'Camera'),
-                    items: [
-                      for (final device in camera.cameras)
-                        DropdownMenuItem(
-                          value: device.name,
-                          child: Text(
-                            '${device.lensDirection.name} · ${device.name}',
-                          ),
-                        ),
-                    ],
-                    onChanged: busy || camera.busy || camera.recording
-                        ? null
-                        : (name) {
-                            for (final device in camera.cameras) {
-                              if (device.name == name) {
-                                camera.selectCamera(device);
-                                break;
-                              }
-                            }
-                          },
-                  ),
-                if (!scanActive &&
-                    camera.controller != null &&
-                    camera.clip == null) ...[
-                  const SizedBox(height: 12),
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      final width = constraints.maxWidth.clamp(0.0, 720.0);
-                      final height = (width * .6).clamp(220.0, 420.0);
-                      return Align(
-                        alignment: Alignment.centerLeft,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(18),
-                          child: SizedBox(
-                            width: width,
-                            height: height,
-                            child: ColoredBox(
-                              color: Colors.black,
-                              child: ListenableBuilder(
-                                listenable: camera.faceTracker,
-                                builder: (context, _) => RotatedBox(
-                                  quarterTurns: kIsWeb ? webPreviewTurns : 0,
-                                  child: LiveCameraPreview(
-                                    camera: camera.controller!,
-                                    faces: camera.faceTracker.faces,
-                                    onFocus: (point) =>
-                                        unawaited(camera.focus(point)),
+                ExpansionTile(
+                  title: const Text('Record a single clip'),
+                  children: [
+                    if (camera.cameras.length > 1 && camera.clip == null)
+                      DropdownButtonFormField<String>(
+                        key: ValueKey(camera.selectedCamera?.name),
+                        initialValue: camera.selectedCamera?.name,
+                        decoration: const InputDecoration(labelText: 'Camera'),
+                        items: [
+                          for (final device in camera.cameras)
+                            DropdownMenuItem(
+                              value: device.name,
+                              child: Text(
+                                '${device.lensDirection.name} · ${device.name}',
+                              ),
+                            ),
+                        ],
+                        onChanged: busy || camera.busy || camera.recording
+                            ? null
+                            : (name) {
+                                for (final device in camera.cameras) {
+                                  if (device.name == name) {
+                                    camera.selectCamera(device);
+                                    break;
+                                  }
+                                }
+                              },
+                      ),
+                    if (!scanActive &&
+                        camera.controller != null &&
+                        camera.clip == null) ...[
+                      const SizedBox(height: 12),
+                      LayoutBuilder(
+                        builder: (context, constraints) {
+                          final width = constraints.maxWidth.clamp(0.0, 720.0);
+                          final height = (width * .6).clamp(220.0, 420.0);
+                          return Align(
+                            alignment: Alignment.centerLeft,
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(18),
+                              child: SizedBox(
+                                width: width,
+                                height: height,
+                                child: ColoredBox(
+                                  color: Colors.black,
+                                  child: ListenableBuilder(
+                                    listenable: camera.faceTracker,
+                                    builder: (context, _) => RotatedBox(
+                                      quarterTurns: kIsWeb
+                                          ? webPreviewTurns
+                                          : 0,
+                                      child: LiveCameraPreview(
+                                        camera: camera.controller!,
+                                        faces: camera.faceTracker.faces,
+                                        onFocus: (point) =>
+                                            unawaited(camera.focus(point)),
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
                             ),
+                          );
+                        },
+                      ),
+                      if (camera.controller!.value.focusPointSupported)
+                        const Text('Tap the preview to focus.'),
+                      Wrap(
+                        spacing: 8,
+                        children: [
+                          if (kIsWeb)
+                            TextButton.icon(
+                              onPressed: () => setState(
+                                () =>
+                                    webPreviewTurns = (webPreviewTurns + 1) % 4,
+                              ),
+                              icon: const Icon(Icons.rotate_right),
+                              label: const Text('Rotate preview'),
+                            ),
+                          TextButton.icon(
+                            onPressed: camera.busy ? null : camera.toggleTorch,
+                            icon: const Icon(Icons.flashlight_on),
+                            label: Text(
+                              camera.controller!.value.flashMode ==
+                                      FlashMode.torch
+                                  ? 'Turn torch off'
+                                  : 'Turn torch on',
+                            ),
+                          ),
+                          if (!camera.recording)
+                            TextButton(
+                              onPressed: camera.busy ? null : camera.interrupt,
+                              child: const Text('Close camera'),
+                            ),
+                        ],
+                      ),
+                      if (camera.controlMessage != null)
+                        Text(camera.controlMessage!),
+                      if (camera.recording && !kIsWeb)
+                        ListenableBuilder(
+                          listenable: camera.faceTracker,
+                          builder: (context, _) => Text(
+                            camera.faceTracker.available
+                                ? camera.faceTracker.faces.isEmpty
+                                      ? 'No faces in view. Aim the camera toward the class.'
+                                      : 'Green outlines show faces that are well framed.'
+                                : 'Live face guidance is currently unavailable. Recording continues.',
                           ),
                         ),
-                      );
-                    },
-                  ),
-                  if (camera.controller!.value.focusPointSupported)
-                    const Text('Tap the preview to focus.'),
-                  Wrap(
-                    spacing: 8,
-                    children: [
-                      if (kIsWeb)
-                        TextButton.icon(
-                          onPressed: () => setState(
-                            () => webPreviewTurns = (webPreviewTurns + 1) % 4,
+                    ],
+                    if (camera.error != null) Text(camera.error!),
+                    if (camera.recording)
+                      Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        child: Row(
+                          children: [
+                            const Icon(
+                              Icons.fiber_manual_record,
+                              color: Color(0xffc62828),
+                              size: 16,
+                            ),
+                            const SizedBox(width: 6),
+                            Text('Recording ${camera.elapsed} / 15 seconds'),
+                          ],
+                        ),
+                      ),
+                    if (camera.clip != null) ...[
+                      ClipPlayback(file: camera.clip!),
+                      if (progress != null)
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 8),
+                          child: LinearProgressIndicator(value: progress),
+                        ),
+                      const SizedBox(height: 8),
+                      Wrap(
+                        spacing: 12,
+                        runSpacing: 8,
+                        children: [
+                          FilledButton.icon(
+                            onPressed: busy ? null : upload,
+                            icon: const Icon(Icons.cloud_upload_outlined),
+                            label: Text(
+                              busy ? 'Uploading…' : 'Upload classroom capture',
+                            ),
                           ),
-                          icon: const Icon(Icons.rotate_right),
-                          label: const Text('Rotate preview'),
-                        ),
-                      TextButton.icon(
-                        onPressed: camera.busy ? null : camera.toggleTorch,
-                        icon: const Icon(Icons.flashlight_on),
-                        label: Text(
-                          camera.controller!.value.flashMode == FlashMode.torch
-                              ? 'Turn torch off'
-                              : 'Turn torch on',
-                        ),
-                      ),
-                      if (!camera.recording)
-                        TextButton(
-                          onPressed: camera.busy ? null : camera.interrupt,
-                          child: const Text('Close camera'),
-                        ),
-                    ],
-                  ),
-                  if (camera.controlMessage != null)
-                    Text(camera.controlMessage!),
-                  if (camera.recording && !kIsWeb)
-                    ListenableBuilder(
-                      listenable: camera.faceTracker,
-                      builder: (context, _) => Text(
-                        camera.faceTracker.available
-                            ? camera.faceTracker.faces.isEmpty
-                                  ? 'No faces in view. Aim the camera toward the class.'
-                                  : 'Green outlines show faces that are well framed.'
-                            : 'Live face guidance is currently unavailable. Recording continues.',
-                      ),
-                    ),
-                ],
-                if (camera.error != null) Text(camera.error!),
-                if (camera.recording)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 8),
-                    child: Row(
-                      children: [
-                        const Icon(
-                          Icons.fiber_manual_record,
-                          color: Color(0xffc62828),
-                          size: 16,
-                        ),
-                        const SizedBox(width: 6),
-                        Text('Recording ${camera.elapsed} / 15 seconds'),
-                      ],
-                    ),
-                  ),
-                if (camera.clip != null) ...[
-                  ClipPlayback(file: camera.clip!),
-                  if (progress != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 8),
-                      child: LinearProgressIndicator(value: progress),
-                    ),
-                  const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 12,
-                    runSpacing: 8,
-                    children: [
-                      FilledButton.icon(
-                        onPressed: busy ? null : upload,
-                        icon: const Icon(Icons.cloud_upload_outlined),
-                        label: Text(
-                          busy ? 'Uploading…' : 'Upload classroom capture',
-                        ),
-                      ),
-                      TextButton(
-                        onPressed: busy || camera.busy ? null : camera.retake,
-                        child: const Text('Retake recording'),
+                          TextButton(
+                            onPressed: busy || camera.busy
+                                ? null
+                                : camera.retake,
+                            child: const Text('Retake recording'),
+                          ),
+                          TextButton(
+                            onPressed: busy || camera.busy
+                                ? null
+                                : camera.discard,
+                            child: const Text('Discard clip'),
+                          ),
+                        ],
                       ),
                     ],
-                  ),
-                ] else if (!camera.recording)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 8),
-                    child: Align(
-                      alignment: Alignment.centerLeft,
-                      child: FilledButton.icon(
-                        onPressed: busy || camera.busy || scanActive
-                            ? null
-                            : openClassroomScan,
-                        icon: const Icon(Icons.videocam_outlined),
-                        label: const Text('Scan classroom'),
-                      ),
-                    ),
-                  ),
+                  ],
+                ),
                 if (captureError != null)
                   CaptureProblem(
                     failure: captureError!,
@@ -1602,6 +1598,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           ),
           const SizedBox(height: 16),
         ],
+        if (processingPending && capture == null)
+          const Panel(
+            child: Text('Recording is processing. Results will update here.'),
+          ),
         if (capture != null) ...[
           FutureBuilder<Json>(
             future: captureStatus(capture!['id'] as String),
@@ -1641,20 +1641,19 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           ),
           const SizedBox(height: 16),
         ],
-        if (rows.isEmpty)
+        if ((editable || finalised) && rows.isEmpty)
           const Panel(
             child: Text(
               'No students on this roster. Approve subject membership before opening a new session.',
             ),
           )
-        else
+        else if (editable || finalised)
           AttendanceReviewTable(
             rows: rows,
             decisions: decisions,
             editable: editable,
             finalised: finalised,
             busy: busy,
-            sessionLabel: sessionLabel(status),
             onChanged: (id, status) => setState(() {
               decisions[id] = status;
               syncExitGuard();
@@ -1662,41 +1661,13 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             onApproveAllMatched: approveAllMatched,
             onCorrect: correct,
           ),
-        if (editable) ...[
-          const SizedBox(height: 12),
-          if (status != 'open' &&
-              rows.any(
-                (row) =>
-                    row['status'] == 'proposed_absent' &&
-                    decisions[row['student_id']] == 'absent',
-              ))
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '${rows.where((row) => row['status'] == 'proposed_absent' && decisions[row['student_id']] == 'absent').length} '
-                'students not recognized are set to Absent. Change anyone who was actually present before publishing.',
-                style: TextStyle(color: Theme.of(context).colorScheme.primary),
-              ),
+        if (editable && counts.toCheck > 0)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            child: Text(
+              'Choose Present or Absent for ${counts.toCheck} more students.',
             ),
-          if (hasUnconfirmedProposal && status != 'open')
-            Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                'Resolve every matched and not-recognized row before publishing. Use the filters above to find them quickly.',
-                style: TextStyle(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          if (status != 'open')
-            CheckboxListTile(
-              value: ack,
-              onChanged: (v) => setState(() => ack = v ?? false),
-              title: const Text(
-                'I understand that any unassessed students make this publication incomplete.',
-              ),
-            ),
-        ],
+          ),
         if (finalised) ...[
           const SizedBox(height: 16),
           Panel(
@@ -1740,7 +1711,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         DecisionBar(
           counts: counts,
           busy: busy,
-          canPublish: status != 'open' && !hasUnconfirmedProposal,
+          canPublish:
+              counts.toCheck == 0 && rows.isNotEmpty && !processingPending,
           showPublish: status != 'open',
           onSave: () => save(false),
           onPublish: () => save(true),
@@ -1750,29 +1722,25 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   }
 }
 
-/// Live Present / Absent / Unassessed / to-check counts for a review.
+/// Counts marks and the remaining review work.
 class DecisionCounts {
-  DecisionCounts(this.present, this.absent, this.unassessed, this.toCheck);
+  DecisionCounts(this.present, this.absent, this.toCheck);
   factory DecisionCounts.of(List<Json> rows, Map<String, String> decisions) {
-    var p = 0, a = 0, u = 0, t = 0;
+    var p = 0, a = 0, t = 0;
     for (final r in rows) {
       final v = decisions[r['student_id']] ?? r['status'] as String?;
-      if (v == 'proposed_present' || v == 'proposed_absent') {
-        t++;
-      } else {
-        switch (finalStatus(v)) {
-          case 'present':
-            p++;
-          case 'absent':
-            a++;
-          default:
-            u++;
-        }
+      switch (finalStatus(v)) {
+        case 'present':
+          p++;
+        case 'absent':
+          a++;
+        default:
+          t++;
       }
     }
-    return DecisionCounts(p, a, u, t);
+    return DecisionCounts(p, a, t);
   }
-  final int present, absent, unassessed, toCheck;
+  final int present, absent, toCheck;
 }
 
 String publishedNote(int revision) {
@@ -1787,10 +1755,10 @@ String sessionStepHint(
   required bool captured,
 }) => switch (status) {
   'scheduled' => 'Open the session at the start of class. This freezes the approved student list.',
-  'open' when !captured => 'Record the classroom. Each clip adds recognised students; you can record more than one.',
-  'open' =>
-    'When the last clip has processed, close the session to review attendance.',
-  'closed' || 'review_required' || 'no_data' => 'Check each student, then publish. Not-recognised students start as Absent for you to confirm.',
+  'open' when !captured =>
+    'Scan the classroom, or go straight to review to mark attendance manually.',
+  'open' => 'Add another scan if needed, then go to review. Uploads already accepted can finish processing there.',
+  'closed' || 'review_required' || 'no_data' => 'Review the suggested marks, choose Present or Absent for the remaining students, then publish.',
   'finalized' =>
     'Attendance is published. Use Correct on a row to fix a mistake.',
   _ => 'This session was cancelled. Nothing was recorded.',
@@ -1801,7 +1769,13 @@ class SessionSteps extends StatelessWidget {
   const SessionSteps({super.key, required this.status, required this.captured});
   final String status;
   final bool captured;
-  static const steps = ['Open', 'Record', 'Close', 'Review', 'Publish'];
+  static const steps = [
+    'Open session',
+    'Record classroom',
+    'Finish capture',
+    'Review marks',
+    'Publish',
+  ];
 
   /// Index of the current step; [steps.length] when everything is done.
   static int current(String status, bool captured) => switch (status) {
@@ -1815,125 +1789,12 @@ class SessionSteps extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final at = current(status, captured);
-    final scheme = Theme.of(context).colorScheme;
-    if (at < 0) {
-      return Row(
-        children: [
-          Icon(Icons.event_busy_outlined, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 8),
-          const Text(
-            'Cancelled',
-            style: TextStyle(fontWeight: FontWeight.w700),
-          ),
-        ],
-      );
-    }
-    Widget dot(int i) {
-      final done = i < at, now = i == at;
-      return Semantics(
-        label:
-            '${steps[i]}: ${done
-                ? 'done'
-                : now
-                ? 'current step'
-                : 'to do'}',
-        child: ExcludeSemantics(
-          child: AnimatedContainer(
-            duration: const Duration(milliseconds: 250),
-            width: 30,
-            height: 30,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: done
-                  ? const Color(0xff176451)
-                  : now
-                  ? scheme.primary
-                  : Colors.transparent,
-              border: Border.all(
-                color: done || now ? Colors.transparent : scheme.outlineVariant,
-                width: 2,
-              ),
-            ),
-            child: Center(
-              child: done
-                  ? const Icon(Icons.check, size: 16, color: Colors.white)
-                  : Text(
-                      '${i + 1}',
-                      style: TextStyle(
-                        fontWeight: FontWeight.w800,
-                        color: now ? Colors.white : scheme.onSurfaceVariant,
-                      ),
-                    ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    Text label(int i) => Text(
-      steps[i],
-      style: TextStyle(
-        fontSize: 13,
-        fontWeight: i == at ? FontWeight.w800 : FontWeight.w600,
-        color: i <= at ? scheme.onSurface : scheme.onSurfaceVariant,
-      ),
-    );
-    return LayoutBuilder(
-      builder: (context, box) {
-        // Large text needs the compact form sooner.
-        if (box.maxWidth < 420 * MediaQuery.textScalerOf(context).scale(1)) {
-          // Narrow: dots in a row, only the current label spelled out.
-          return Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  for (var i = 0; i < steps.length; i++) ...[
-                    dot(i),
-                    if (i < steps.length - 1)
-                      Expanded(
-                        child: Container(
-                          height: 2,
-                          color: i < at
-                              ? const Color(0xff176451)
-                              : scheme.outlineVariant,
-                        ),
-                      ),
-                  ],
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                at >= steps.length
-                    ? 'All steps done'
-                    : 'Step ${at + 1} of ${steps.length}: ${steps[at]}',
-                style: const TextStyle(fontWeight: FontWeight.w700),
-              ),
-            ],
-          );
-        }
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            for (var i = 0; i < steps.length; i++) ...[
-              Column(children: [dot(i), const SizedBox(height: 6), label(i)]),
-              if (i < steps.length - 1)
-                Expanded(
-                  child: Padding(
-                    padding: const EdgeInsets.only(top: 14, left: 4, right: 4),
-                    child: Container(
-                      height: 2,
-                      color: i < at
-                          ? const Color(0xff176451)
-                          : scheme.outlineVariant,
-                    ),
-                  ),
-                ),
-            ],
-          ],
-        );
-      },
-    );
+    final label = at < 0
+        ? 'Cancelled'
+        : at == steps.length
+        ? 'Published'
+        : 'Step ${at + 1} of ${steps.length} · ${steps[at]}';
+    return Text(label, style: Theme.of(context).textTheme.titleMedium);
   }
 }
 
@@ -2157,11 +2018,6 @@ class DecisionBar extends StatelessWidget {
                           const Color(0xff176451),
                         ),
                         count('Absent', counts.absent, const Color(0xffa22f2f)),
-                        count(
-                          'Unassessed',
-                          counts.unassessed,
-                          const Color(0xff9a6a00),
-                        ),
                         if (counts.toCheck > 0)
                           count('To check', counts.toCheck, scheme.primary),
                       ],
@@ -2262,7 +2118,8 @@ CaptureQuality? captureCoverage(List<Json> rows) {
       'Recognised so far: $found of ${eligible.length} students with face enrolment.',
     if (eligible.isNotEmpty && missing > 0)
       '$missing not seen yet: record another clip covering them.',
-    if (noFace > 0) '$noFace without face enrolment must be marked manually.',
+    if (noFace > 0)
+      '$noFace without face enrolment. Check their marks manually.',
   ];
   return CaptureQuality(parts.join(' '), poor: eligible.isEmpty || missing > 0);
 }
@@ -2295,7 +2152,7 @@ CaptureQuality? captureQuality(Json capture) {
   }
   if (usable * 2 < faces) {
     return CaptureQuality(
-      'Only $usable of $faces faces found were clear enough to use, so most students stay Unassessed. $_retakeTips',
+      'Only $usable of $faces detected faces were clear enough. Review the remaining students manually. $_retakeTips',
       poor: true,
     );
   }

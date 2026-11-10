@@ -121,11 +121,12 @@ void main() {
         findsOneWidget,
       );
       expect(find.text('50%'), findsOneWidget);
+      expect(find.text('Unassessed'), findsNothing);
       // The status chips filter the record list.
       await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Absent'));
       await tester.tap(find.widgetWithText(ChoiceChip, 'Absent'));
       await tester.pumpAndSettle();
-      expect(find.byType(ListTile), findsNWidgets(2));
+      expect(find.widgetWithText(ListTile, 'Absent'), findsNWidgets(2));
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     });

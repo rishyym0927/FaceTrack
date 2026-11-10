@@ -128,12 +128,6 @@ class _StudentAccountStatsState extends ConsumerState<StudentAccountStats> {
                       accent: const Color(0xffa22f2f),
                       icon: Icons.cancel_outlined,
                     ),
-                    StatTile(
-                      label: 'Unassessed',
-                      value: s?.unassessed ?? 0,
-                      accent: const Color(0xff9a6a00),
-                      icon: Icons.help_outline,
-                    ),
                   ],
                 ),
               ),

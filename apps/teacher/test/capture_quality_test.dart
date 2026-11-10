@@ -18,7 +18,7 @@ void main() {
   test('Explains the real poor capture: 1 of 12 faces usable', () {
     final q = captureQuality(capture(12, 12, 11))!;
     expect(q.poor, isTrue);
-    expect(q.text, startsWith('Only 1 of 12 faces found were clear enough'));
+    expect(q.text, startsWith('Only 1 of 12 detected faces were clear enough'));
     expect(q.text, contains('0.5–1 m'));
   });
 
@@ -92,7 +92,7 @@ void main() {
         partial.text,
         'Recognised so far: 1 of 3 students with face enrolment. '
         '2 not seen yet: record another clip covering them. '
-        '1 without face enrolment must be marked manually.',
+        '1 without face enrolment. Check their marks manually.',
       );
       final none = captureCoverage([row('template_ineligible')])!;
       expect(

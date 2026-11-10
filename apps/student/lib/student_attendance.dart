@@ -6,9 +6,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 
 import 'student_notifications.dart' show attendanceThreshold;
 
-const _present = Color(0xff176451),
-    _absent = Color(0xffa22f2f),
-    _unassessed = Color(0xff9a6a00);
+const _present = Color(0xff176451), _absent = Color(0xffa22f2f);
 
 /// Present / Absent / Unassessed counts over published records, with the
 /// session-v1 percentage (unassessed never counts).
@@ -244,7 +242,13 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         ],
       );
     }
-    final scoped = filterRecords(records, subject: subject, range: range);
+    final marked = records
+        .where(
+          (row) =>
+              finalStatuses.contains(finalStatus(row['status'] as String?)),
+        )
+        .toList();
+    final scoped = filterRecords(marked, subject: subject, range: range);
     final listed = filterRecords(scoped, status: status);
     return ContentPage(
       onRefresh: load,
@@ -261,14 +265,15 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         _filters(context),
         const SizedBox(height: 16),
         _overview(context, AttendanceStats(scoped)),
-        if (subject == null) ...[
-          const SizedBox(height: 20),
-          _bySubject(context, scoped),
-        ],
-        const SizedBox(height: 20),
-        _trend(context, scoped),
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
         _records(context, listed),
+        ExpansionTile(
+          title: const Text('Attendance trends'),
+          children: [
+            if (subject == null) _bySubject(context, scoped),
+            _trend(context, scoped),
+          ],
+        ),
       ],
     );
   }
@@ -347,12 +352,6 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
           accent: _absent,
           icon: Icons.cancel_outlined,
         ),
-        StatTile(
-          label: 'Unassessed',
-          value: s.unassessed,
-          accent: _unassessed,
-          icon: Icons.help_outline,
-        ),
       ],
     );
     return Panel(
@@ -398,11 +397,6 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
               const SizedBox(width: 10),
               Expanded(child: Text(advice)),
             ],
-          ),
-          const SizedBox(height: 8),
-          Text(
-            'Unassessed classes are not counted in the percentage.',
-            style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -491,7 +485,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Present ${s.present} · Absent ${s.absent} · Unassessed ${s.unassessed}',
+                          'Present ${s.present} · Absent ${s.absent}',
                           style: TextStyle(
                             fontSize: 12,
                             color: scheme.onSurfaceVariant,
@@ -539,7 +533,6 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
             children: [
               _Legend(_present, 'Present'),
               _Legend(_absent, 'Absent'),
-              _Legend(_unassessed, 'Unassessed'),
             ],
           ),
         ],
@@ -623,7 +616,6 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
                 (null, 'All'),
                 ('present', 'Present'),
                 ('absent', 'Absent'),
-                ('unassessed', 'Unassessed'),
               ])
                 ChoiceChip(
                   label: Text(label),
@@ -677,7 +669,7 @@ class MonthlyBars extends StatelessWidget {
   Widget build(BuildContext context) {
     final most = months.fold<int>(
       1,
-      (m, b) => b.stats.total > m ? b.stats.total : m,
+      (m, b) => b.stats.assessed > m ? b.stats.assessed : m,
     );
     final scheme = Theme.of(context).colorScheme;
     return Row(
@@ -687,11 +679,11 @@ class MonthlyBars extends StatelessWidget {
           Expanded(
             child: Semantics(
               label:
-                  '${b.label}: ${b.stats.present} present, ${b.stats.absent} absent, ${b.stats.unassessed} unassessed',
+                  '${b.label}: ${b.stats.present} present, ${b.stats.absent} absent',
               child: Column(
                 children: [
                   Text(
-                    '${b.stats.total}',
+                    '${b.stats.assessed}',
                     style: TextStyle(
                       fontSize: 11,
                       color: scheme.onSurfaceVariant,
@@ -708,7 +700,6 @@ class MonthlyBars extends StatelessWidget {
                           mainAxisAlignment: MainAxisAlignment.end,
                           children: [
                             for (final (n, c) in [
-                              (b.stats.unassessed, _unassessed),
                               (b.stats.absent, _absent),
                               (b.stats.present, _present),
                             ])

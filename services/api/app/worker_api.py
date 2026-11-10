@@ -438,7 +438,7 @@ async def fail(conn, worker, identifier, body):
                 assessment_code='processing_failed',evidence_summary=CAST(:summary AS jsonb),version=version+1
                 FROM app.captures c WHERE c.institute_id=a.institute_id AND c.session_id=a.session_id
                 AND c.institute_id=:i AND c.id=:capture AND NOT a.manual_lock
-                AND a.status NOT IN ('proposed_present','present','absent','late','excused')"""
+                AND a.status NOT IN ('proposed_present','proposed_absent','present','absent','late','excused')"""
             ),
             {
                 "i": worker["institute_id"],

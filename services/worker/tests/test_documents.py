@@ -56,13 +56,13 @@ def test_csv_parser_enforces_contract_and_size(tmp_path):
         parse_csv(path)
 
 
-def test_reports_use_three_final_attendance_states():
+def test_reports_show_binary_marks_and_leave_legacy_unmarked_rows_blank():
     assert [attendance_label(s) for s in ("present", "late", "absent", "excused", "unassessed")] == [
         "Present",
         "Present",
         "Absent",
-        "Unassessed",
-        "Unassessed",
+        "",
+        "",
     ]
 
 

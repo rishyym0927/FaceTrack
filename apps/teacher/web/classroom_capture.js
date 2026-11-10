@@ -71,6 +71,7 @@
       let stream, detector, recorder, detectorTimer, expiryTimer, retryResolve;
       let cancelled = false, finishing = false, scanning = false, mirrored = false, torchOn = false;
       let pendingPart = false;
+      let segmentStartedAt = 0, shortTail = false;
       let lastVideoTime = -1, lastDetection = 0, detectorBusy = false, detectorClosed = false;
       const tracker = new FaceTracker(), analysis = document.createElement('canvas');
       const analysisContext = analysis.getContext('2d', { willReadFrequently: true });
@@ -78,18 +79,41 @@
       const ready = new Promise(resolve => { wake = resolve; });
       const clearOverlay = () => overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
       const releaseStream = async () => {
-        const track = stream?.getVideoTracks()[0];
-        if (torchOn) { try { await track?.applyConstraints({ advanced: [{ torch: false }] }); } catch (_) {} }
         torchOn = false;
         stream?.getTracks().forEach(t => t.stop());
+        stream = null;
+        video.srcObject = null;
+      };
+      const closePreview = async () => {
+        detectorClosed = true;
+        clearInterval(detectorTimer); clearInterval(expiryTimer);
+        detector?.close();
+        detector = null;
+        stage.hidden = true;
+        select.hidden = true; torch.hidden = true; stop.hidden = true;
+        root.querySelector('.hint').hidden = true;
+        close.disabled = !retryResolve;
+        guidance.textContent = 'Camera closed';
+        root.setAttribute('aria-label', 'Classroom upload');
+        root.querySelector('h2').textContent = 'Classroom upload';
+        await releaseStream();
+      };
+      const finish = () => {
+        if (finishing) return;
+        finishing = true;
+        stop.disabled = true;
+        if (recorder?.state === 'recording') {
+          shortTail = performance.now() - segmentStartedAt < 10000;
+          recorder.stop();
+        } else {
+          void closePreview();
+        }
       };
       const cancel = ({ discard = false } = {}) => {
         // Lifecycle interruption must not silently delete a failed upload.
         // Keep its bounded in-memory blob and retry UI until explicit discard.
         if (pendingPart && !discard) {
-          finishing = true;
-          stop.disabled = true; stop.textContent = 'Finishing scan…';
-          void releaseStream();
+          finish();
           return;
         }
         cancelled = true; finishing = true; wake(); retryResolve?.(false);
@@ -98,9 +122,8 @@
       active = { cancel, result };
       close.onclick = () => {
         if (!scanning) cancel();
-        else if (window.confirm(pendingPart
-          ? 'A recorded part has not finished uploading. Close and discard that part? Saved parts remain available for review.'
-          : 'End this scan? Saved parts remain available for review; the unfinished part will be discarded.')) cancel({ discard: true });
+        else if (!finishing) finish();
+        else if (retryResolve && window.confirm('Discard this unsent segment? Uploaded segments stay in the session.')) cancel({ discard: true });
       };
       const keydown = event => {
         if (event.key === 'Escape') { event.preventDefault(); close.click(); }
@@ -158,7 +181,7 @@
             runningMode: 'VIDEO', minDetectionConfidence: .5,
           });
           if (cancelled || detectorClosed) loaded.close(); else detector = loaded;
-        } catch (_) { if (!cancelled) guidance.textContent = 'Live framing unavailable. You can still scan and review recognition results.'; }
+        } catch (_) { if (!cancelled && !finishing) guidance.textContent = 'Live framing unavailable. You can still scan and review recognition results.'; }
       };
       try {
         await openCamera(); if (cancelled) return;
@@ -199,29 +222,50 @@
         }, 200);
         start.disabled = false;
         start.onclick = wake;
-        stop.onclick = () => { finishing = true; stop.disabled = true; stop.textContent = 'Finishing scan…'; };
+        stop.onclick = finish;
         await ready; if (cancelled) return;
         scanning = true; start.hidden = true; select.disabled = true; stop.hidden = false; onStarted();
+        let submitted = 0;
         while (!cancelled && !finishing) {
           result.textContent = 'Scanning · audio off';
-          const blob = await recordPart(stream, value => { recorder = value; });
+          const blob = await recordPart(stream, value => {
+            recorder = value;
+            segmentStartedAt = performance.now();
+          });
+          recorder = null;
+          if (finishing) await closePreview();
           if (cancelled) break;
+          if (shortTail) break;
           if (!blob.size || blob.size > 25 * 1024 * 1024) throw new Error('This part could not be saved. Try again with a lower camera resolution.');
           const url = URL.createObjectURL(blob);
           pendingPart = true;
           try {
             let uploaded = false;
             while (!uploaded && !cancelled) {
-              try { result.textContent = 'Sending this part securely… Preview stays live.'; await onSegment(url); uploaded = true; }
+              try {
+                result.textContent = 'Uploading recording…';
+                await onSegment(url);
+                uploaded = true;
+                submitted++;
+              }
               catch (_) {
+                finish();
+                await closePreview();
                 result.textContent = 'Upload failed. This part is kept here; retry before closing.';
+                close.disabled = false;
                 retry.hidden = false; retry.focus();
                 const again = await new Promise(resolve => { retryResolve = resolve; retry.onclick = () => resolve(true); });
                 retry.hidden = true; retryResolve = null;
+                close.disabled = true;
                 if (!again) break;
               }
             }
           } finally { pendingPart = false; URL.revokeObjectURL(url); }
+        }
+        if (shortTail && submitted === 0) {
+          result.textContent = 'No clip was saved. Record at least 10 seconds per segment.';
+          close.disabled = false; close.textContent = 'Back to session'; close.focus();
+          if (!cancelled) await new Promise(resolve => { wake = resolve; close.onclick = resolve; });
         }
       } finally {
         detectorClosed = true; cancelled = true;

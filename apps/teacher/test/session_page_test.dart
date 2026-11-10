@@ -38,15 +38,9 @@ void main() {
       _row('4', 'late'),
     ];
     final before = DecisionCounts.of(rows, {});
-    expect(
-      [before.present, before.absent, before.unassessed, before.toCheck],
-      [1, 0, 1, 2],
-    );
+    expect([before.present, before.absent, before.toCheck], [1, 0, 3]);
     final after = DecisionCounts.of(rows, {'1': 'present', '2': 'absent'});
-    expect(
-      [after.present, after.absent, after.unassessed, after.toCheck],
-      [2, 1, 1, 0],
-    );
+    expect([after.present, after.absent, after.toCheck], [2, 1, 1]);
   });
 
   test('Published note says corrections, not revision numbers', () {
@@ -66,6 +60,7 @@ void main() {
           () => harness(role: AppRole.teacher, profileRole: 'teacher'),
         ))!;
         addTearDown(() => tester.runAsync(h.dispose));
+        Map<String, String>? submitted;
         h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
           if (r.path == '/v1/me') return jsonResponse(h.account);
           if (r.path == '/v1/offerings/class') {
@@ -81,21 +76,41 @@ void main() {
               'status': 'active',
             });
           }
+          if (r.path == '/v1/sessions/session/finalize') {
+            submitted = {
+              for (final mark in (r.data as Json)['decisions'] as List)
+                mark['student_id'] as String: mark['status'] as String,
+            };
+            return jsonResponse({'id': 'publication'});
+          }
           if (r.path == '/v1/sessions/session/attendance') {
             return jsonResponse({
               'session': {
                 'id': 'session',
                 'offering_id': 'class',
-                'status': 'review_required',
+                'status': submitted == null ? 'review_required' : 'finalized',
                 'starts_at': '2026-10-30T05:00:00Z',
                 'ends_at': '2026-10-30T06:00:00Z',
                 'room_label': 'E301',
                 'version': 1,
-                'attendance_revision': 0,
+                'attendance_revision': submitted == null ? 0 : 1,
               },
               'items': [
-                _row('1', 'proposed_present', code: 'matched'),
-                _row('2', 'unassessed', code: 'limited_capture'),
+                _row(
+                  '1',
+                  submitted?['1'] ?? 'proposed_present',
+                  code: 'matched',
+                ),
+                _row(
+                  '2',
+                  submitted?['2'] ?? 'unassessed',
+                  code: 'limited_capture',
+                ),
+                _row(
+                  '3',
+                  submitted?['3'] ?? 'proposed_absent',
+                  code: 'not_recognized',
+                ),
               ],
             });
           }
@@ -126,9 +141,10 @@ void main() {
         final publish = find.widgetWithText(FilledButton, 'Publish attendance');
         expect(publish, findsOneWidget);
         expect(tester.getRect(publish).bottom, lessThanOrEqualTo(2400));
-        expect(find.text('To check 1'), findsOneWidget);
-        // An unresolved suggestion blocks publishing.
-        expect(tester.widget<FilledButton>(publish).onPressed, isNull);
+        expect(tester.widget<FilledButton>(publish).onPressed, isNotNull);
+        await tester.tap(publish);
+        await tester.pumpAndSettle();
+        expect(submitted, {'1': 'present', '2': 'absent', '3': 'absent'});
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },
@@ -181,7 +197,7 @@ void main() {
     expect(find.text('All caught up'), findsOneWidget);
   });
 
-  testWidgets('Publishing asks for confirmation with the counts', (
+  testWidgets('Manual review requires a mark for every student', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(1280, 2400);
@@ -230,18 +246,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Open session fixture'));
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'Publish attendance'));
+    final publish = find.widgetWithText(FilledButton, 'Publish attendance');
+    expect(tester.widget<FilledButton>(publish).onPressed, isNull);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Absent').at(2));
     await tester.pumpAndSettle();
-    expect(
-      find.textContaining('1 present, 1 absent, 1 unassessed'),
-      findsOneWidget,
-    );
-    expect(
-      find.textContaining('make this publication incomplete'),
-      findsWidgets,
-    );
-    await tester.tap(find.text('Review again'));
-    await tester.pumpAndSettle();
+    expect(tester.widget<FilledButton>(publish).onPressed, isNotNull);
     await tester.pumpWidget(const SizedBox());
   });
 }

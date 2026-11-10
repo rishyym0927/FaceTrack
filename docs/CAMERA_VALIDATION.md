@@ -45,7 +45,7 @@ Use a signed release APK and a consenting test session on a physical phone after
 
 1. Open **Scan classroom**. Use the rear camera in portrait and check that a nearby, well-lit face gets a box before recording starts.
 2. Start the scan without moving the phone. Check that the preview stays upright and the box stays aligned, follows slow movement and turns green when the face holds steady in frame. Green indicates framing quality. Recognition suggestions arrive separately after a segment is processed.
-3. Keep a face in view across one segment transition, then move it out of frame and verify the box clears. Stop the scan, verify the clip plays upright, and repeat with the front camera and in landscape where supported.
+3. Keep a face in view across one segment transition, then move it out of frame and verify the box clears. Tap **Stop scan** while a segment is uploading. The preview and camera indicator should close promptly while upload progress remains visible. Verify the clip plays upright, then repeat with the front camera and in landscape where supported.
 4. Filter Logcat as above using `dev.facetrack.teacher`. Check that ML Kit is called during the recording and that the earlier initialization and frame conversion errors are absent. Record each device and build result in [PROGRESS.md](../PROGRESS.md).
 
 ## Check in Chrome or Edge
@@ -62,3 +62,5 @@ These are hands-on acceptance steps. Flutter tests and browser JavaScript syntax
 Open Student capture before recording and verify the guide appears upright in portrait and landscape and reacts to a visible face. Start recording and confirm pose progress begins with the server challenge, not the earlier preview.
 
 Open Teacher **Scan classroom** on Android and Chrome. Check rear camera preference, full-screen controls, tracking boxes during a slow pan, green framing only after a stable hold, stale boxes clearing within one second, and one Start/Stop scan. Watch suggestions arrive after each private segment processes; verify previously recognized students stay suggested after later segments, manual choices stay locked, and publication remains explicit. Test network interruption and retry of the same kept part, queue backpressure, and closing after all uploads. Measure live analysis cadence, preview stutter, upload and suggestion delays on a consenting group. Check recorded file orientation and actual decoder compatibility; automated fake-recorder tests do not establish codec acceptance.
+
+For a disposable test session, leave one approved participant outside the camera view. After a usable scan, go to review and confirm the unseen participant starts as draft Absent. Confirm or change the marks and publish the test session. In Student, verify both the Present and Absent results are visible only to their respective accounts. Repeat with unusable footage and confirm publishing requires a teacher choice for every student.

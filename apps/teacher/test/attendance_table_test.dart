@@ -33,12 +33,13 @@ class _HostState extends State<_Host> {
           editable: widget.editable,
           finalised: false,
           busy: false,
-          sessionLabel: 'Ready for review',
           onChanged: (id, status) => setState(() => decisions[id] = status),
           onApproveAllMatched: () => setState(() {
             for (final r in widget.rows) {
               final v = decisions[r['student_id']] ?? r['status'];
-              if (v == 'proposed_present') decisions[r['student_id']] = 'present';
+              if (v == 'proposed_present') {
+                decisions[r['student_id']] = 'present';
+              }
             }
           }),
           onCorrect: (_) {},
@@ -59,59 +60,30 @@ void main() {
     // Generous surface so the whole table is laid out without scrolling.
   });
 
-  testWidgets('Shows AI status per row and the matched count', (tester) async {
-    tester.view.physicalSize = const Size(1100, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets('Offers only binary marks and confirms suggested Present', (
+    tester,
+  ) async {
     await tester.pumpWidget(_Host(_rows));
+    expect(find.text('Not recognized'), findsNothing);
+    expect(find.text('Unassessed'), findsNothing);
+    expect(find.text('Present'), findsNWidgets(3));
+    expect(find.text('Absent'), findsNWidgets(3));
+    await tester.tap(find.text('Confirm suggested Present (1)'));
     await tester.pumpAndSettle();
-    // Labels appear as the row AI chip, the filter chip, and (for unassessed)
-    // the decision label too — assert presence, and the precise matched count.
-    expect(find.text('Matched'), findsWidgets);
-    expect(find.text('Not recognized'), findsWidgets);
-    expect(find.text('Unassessed'), findsWidgets);
-    expect(find.textContaining('Approve all matched (1)'), findsOneWidget);
+    final present = tester.widgetList<ChoiceChip>(
+      find.widgetWithText(ChoiceChip, 'Present'),
+    );
+    expect(present.map((chip) => chip.selected), [true, false, false]);
   });
 
-  testWidgets('Approve-all confirms only matched, never not-recognized/unassessed',
-      (tester) async {
-    tester.view.physicalSize = const Size(1100, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
+  testWidgets('Still to review hides marked students', (tester) async {
     await tester.pumpWidget(_Host(_rows));
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Absent').at(1));
+    await tester.tap(find.widgetWithText(FilterChip, 'Still to review'));
     await tester.pumpAndSettle();
-    await tester.tap(find.textContaining('Approve all matched'));
-    await tester.pumpAndSettle();
-    // Exactly one student (Alice, matched) is now approved present.
-    expect(find.byIcon(Icons.check_circle), findsOneWidget);
-    // The other two keep an unselected approve control (not auto-approved).
-    expect(find.byIcon(Icons.check_circle_outline), findsNWidgets(2));
-    expect(find.textContaining('All matched approved'), findsOneWidget);
-  });
-
-  testWidgets('Individual disapprove marks one student absent', (tester) async {
-    tester.view.physicalSize = const Size(1100, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    await tester.pumpWidget(_Host(_rows));
-    await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.cancel), findsNothing);
-    await tester.tap(find.byTooltip('Disapprove (absent)').first);
-    await tester.pumpAndSettle();
-    expect(find.byIcon(Icons.cancel), findsOneWidget);
-  });
-
-  testWidgets('Filter shows only the chosen AI status', (tester) async {
-    tester.view.physicalSize = const Size(1100, 1400);
-    tester.view.devicePixelRatio = 1;
-    addTearDown(tester.view.resetPhysicalSize);
-    await tester.pumpWidget(_Host(_rows));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilterChip, 'Not recognized'));
-    await tester.pumpAndSettle();
-    expect(find.text('Bob'), findsOneWidget);
-    expect(find.text('Alice'), findsNothing);
-    expect(find.text('Cara'), findsNothing);
+    expect(find.text('Bob'), findsNothing);
+    expect(find.text('Alice'), findsOneWidget);
+    expect(find.text('Cara'), findsOneWidget);
   });
 
   testWidgets('Search filters by enrolment number', (tester) async {
@@ -127,24 +99,30 @@ void main() {
     expect(find.text('Bob'), findsNothing);
   });
 
-  testWidgets('Non-editable view shows no approve/disapprove controls',
-      (tester) async {
+  testWidgets('Non-editable view shows no approve/disapprove controls', (
+    tester,
+  ) async {
     tester.view.physicalSize = const Size(1100, 1400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     await tester.pumpWidget(_Host(_rows, editable: false));
     await tester.pumpAndSettle();
-    expect(find.byTooltip('Approve (present)'), findsNothing);
-    expect(find.textContaining('Approve all matched'), findsNothing);
+    expect(find.widgetWithText(ChoiceChip, 'Present'), findsNothing);
+    expect(find.textContaining('Confirm suggested Present'), findsNothing);
   });
 
-  test('Review starts with only not-recognized students as Absent', () {
+  test('Processed scan defaults matched students to Present and all others to Absent', () {
     final rows = [
       ..._rows,
       student('d', 'Dev', 'EN004', 'proposed_absent'),
       student('e', 'Esha', 'EN005', 'present'),
     ];
-    expect(draftAbsentDecisions(rows), {'b': 'absent', 'd': 'absent'});
-    expect(draftAbsentDecisions(const []), isEmpty);
+    expect(draftScanDecisions(rows), {
+      'a': 'present',
+      'b': 'absent',
+      'c': 'absent',
+      'd': 'absent',
+    });
+    expect(draftScanDecisions(const []), isEmpty);
   });
 }
