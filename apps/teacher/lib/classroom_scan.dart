@@ -271,19 +271,44 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                     constraints: BoxConstraints(
                       maxHeight: MediaQuery.sizeOf(context).height * .45,
                     ),
-                    padding: const EdgeInsets.all(16),
-                    color: Colors.black.withValues(alpha: .8),
+                    padding: const EdgeInsets.fromLTRB(20, 14, 20, 20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xff102e28).withValues(alpha: .94),
+                      borderRadius: const BorderRadius.vertical(
+                        top: Radius.circular(28),
+                      ),
+                      border: Border(
+                        top: BorderSide(
+                          color: Colors.white.withValues(alpha: .12),
+                        ),
+                      ),
+                    ),
                     child: SingleChildScrollView(
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          Text(
-                            '${names.length} students suggested',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 20,
+                          Container(
+                            width: 42,
+                            height: 4,
+                            margin: const EdgeInsets.only(bottom: 14),
+                            decoration: BoxDecoration(
+                              color: Colors.white38,
+                              borderRadius: BorderRadius.circular(20),
                             ),
                           ),
+                          Text(
+                            names.isEmpty
+                                ? scan.scanning
+                                      ? 'Scanning the room'
+                                      : 'Ready to scan your classroom'
+                                : '${names.length} students suggested',
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 21,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                          const SizedBox(height: 6),
                           if (names.isNotEmpty)
                             Text(
                               names.join(', '),
@@ -292,9 +317,35 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                               style: const TextStyle(color: Colors.white),
                             ),
                           const Text(
-                            'Green boxes mean well framed. Names appear after server processing; faculty reviews attendance.',
+                            'Move across the room, then tap Stop scan. Green boxes mean well framed. Student suggestions appear after each short segment is processed; review them before publishing.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.white70),
+                          ),
+                          const SizedBox(height: 10),
+                          Wrap(
+                            alignment: WrapAlignment.center,
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              _ScanStatusPill(
+                                icon: camera.recording
+                                    ? Icons.videocam_outlined
+                                    : Icons.videocam_off_outlined,
+                                label: camera.recording
+                                    ? 'Recording · ${camera.elapsed} / 15 sec segment'
+                                    : scan.scanning
+                                    ? 'Waiting for uploads'
+                                    : scan.finishing
+                                    ? 'Finishing segment'
+                                    : 'Camera ready',
+                              ),
+                              _ScanStatusPill(
+                                icon: Icons.cloud_upload_outlined,
+                                label: scan.pending == 0
+                                    ? 'No queued uploads'
+                                    : '${scan.pending} segment${scan.pending == 1 ? '' : 's'} waiting',
+                              ),
+                            ],
                           ),
                           if (scan.pending > 0)
                             Text(
@@ -426,5 +477,31 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
         ),
       );
     },
+  );
+}
+
+class _ScanStatusPill extends StatelessWidget {
+  const _ScanStatusPill({required this.icon, required this.label});
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: label,
+    child: Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(100),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 16, color: Colors.white),
+          const SizedBox(width: 6),
+          Text(label, style: const TextStyle(color: Colors.white)),
+        ],
+      ),
+    ),
   );
 }

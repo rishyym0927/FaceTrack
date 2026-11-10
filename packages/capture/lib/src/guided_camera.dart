@@ -2,8 +2,7 @@ import 'dart:async';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
-
-import 'dart:ui' show Offset, Rect;
+import 'package:flutter/services.dart';
 
 import 'browser_capture_stub.dart'
     if (dart.library.js_interop) 'browser_capture_web.dart'
@@ -117,6 +116,30 @@ class GuidedCamera extends ChangeNotifier {
     if (identical(controller, current)) emit();
   }
 
+  /// Student enrolment is portrait-first. Locking the capture orientation
+  /// gives CameraX one stable preview/recording convention without rotating
+  /// the raw frames used by ML Kit.
+  Future<void> lockPortraitCapture() async {
+    final current = controller;
+    if (current == null || kIsWeb) return;
+    try {
+      await current.lockCaptureOrientation(DeviceOrientation.portraitUp);
+    } catch (_) {
+      controlMessage = 'Camera orientation could not be locked.';
+      emit();
+    }
+  }
+
+  Future<void> unlockCaptureOrientation() async {
+    final current = controller;
+    if (current == null || kIsWeb) return;
+    try {
+      await current.unlockCaptureOrientation();
+    } catch (_) {
+      // Disposal still releases the camera when a device rejects unlocking.
+    }
+  }
+
   Future<void> _closeAnalyzer(PoseFrameAnalyzer? old) async {
     try {
       await old?.close();
@@ -202,14 +225,20 @@ class GuidedCamera extends ChangeNotifier {
   /// Framing feedback before recording never completes challenge poses.
   Future<void> startPreviewAnalysis() async {
     final current = controller;
-    if (kIsWeb || current == null || analyzerFactory == null || recording ||
-        _previewAnalyzing || disposed) return;
+    if (kIsWeb ||
+        current == null ||
+        analyzerFactory == null ||
+        recording ||
+        _previewAnalyzing ||
+        disposed)
+      return;
     final generation = epoch;
     try {
       guidance?.removeListener(emit);
       guidance?.dispose();
       guidance = enrollmentGuidance
-          ? (PoseGuidance(order: const ['front'])..addListener(emit)) : null;
+          ? (PoseGuidance(order: const ['front'])..addListener(emit))
+          : null;
       analyzer = analyzerFactory!(current);
       _previewAnalyzing = true;
       _lastAnalysis = null;
@@ -234,7 +263,8 @@ class GuidedCamera extends ChangeNotifier {
     final old = analyzer;
     analyzer = null;
     try {
-      if (current?.value.isStreamingImages == true) await current!.stopImageStream();
+      if (current?.value.isStreamingImages == true)
+        await current!.stopImageStream();
     } catch (_) {
       // The platform may already have stopped its stream on backgrounding.
     }
@@ -313,7 +343,9 @@ class GuidedCamera extends ChangeNotifier {
             analyzer = null;
             await _closeAnalyzer(failed);
             if (!disposed && generation == epoch) {
-              guidance?.unavailable(DateTime.now());
+              // Preview observations are no longer receiving frames. Do not
+              // leave a recently-green guide frozen while recording continues.
+              guidance?.unavailable(DateTime.now(), force: true);
             }
           }
         }
@@ -362,7 +394,8 @@ class GuidedCamera extends ChangeNotifier {
   }
 
   void _analyzeFrame(CameraImage frame) {
-    if ((!recording && !_previewAnalyzing) || _analysisBusy || analyzer == null) return;
+    if ((!recording && !_previewAnalyzing) || _analysisBusy || analyzer == null)
+      return;
     final now = DateTime.now();
     final active = analyzer!;
     final generation = epoch;
@@ -390,7 +423,9 @@ class GuidedCamera extends ChangeNotifier {
           _faceExpiry = Timer(remaining, faceTracker.clear);
         }
       } catch (_) {
-        if ((recording || _previewAnalyzing) && epoch == generation && identical(active, analyzer)) {
+        if ((recording || _previewAnalyzing) &&
+            epoch == generation &&
+            identical(active, analyzer)) {
           guidance?.unavailable(DateTime.now().add(const Duration(seconds: 3)));
         }
       } finally {
@@ -434,6 +469,11 @@ class GuidedCamera extends ChangeNotifier {
         if (generation == epoch) {
           busy = false;
           emit();
+          // Keep classroom framing feedback alive while upload backpressure
+          // pauses the next segment. Student challenge analysis stays stopped.
+          if (!enrollmentGuidance && ready && !disposed) {
+            await startPreviewAnalysis();
+          }
         }
       }
     }

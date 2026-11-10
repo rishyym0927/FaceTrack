@@ -44,6 +44,8 @@ void main() {
     expect(guide.current, 'front');
     guide.observe(observation(500));
     expect(guide.current, 'left');
+    expect(guide.completed, contains('front'));
+    expect(guide.state, GuidanceState.pose);
     guide.observe(observation(1000, yaw: -24));
     guide.observe(observation(1500, yaw: -24));
     expect(guide.current, 'down');
@@ -91,6 +93,32 @@ void main() {
       expect(guide.completed, isEmpty);
     },
   );
+
+  test('forced recording fallback clears a recent preview success', () {
+    final guide = PoseGuidance(order: ['front']);
+    guide.observe(observation(0), allowCompletion: false);
+    expect(guide.faceFramed, isTrue);
+    guide.unavailable(start.add(const Duration(milliseconds: 1)), force: true);
+    expect(guide.state, GuidanceState.unavailable);
+    expect(guide.faceBounds, isNull);
+    expect(guide.completed, isEmpty);
+  });
+
+  test('guidance states explain face, framing and pose feedback', () {
+    final guide = PoseGuidance(order: ['front']);
+    guide.observe(observation(0, faces: 0, bounds: null));
+    expect(guide.state, GuidanceState.noFace);
+    guide.observe(observation(100, faces: 2));
+    expect(guide.state, GuidanceState.multipleFaces);
+    guide.observe(
+      observation(200, bounds: const Rect.fromLTRB(.45, .4, .55, .6)),
+    );
+    expect(guide.state, GuidanceState.framing);
+    guide.observe(observation(300, yaw: 24));
+    expect(guide.state, GuidanceState.pose);
+    guide.observe(observation(800));
+    expect(guide.state, GuidanceState.holding);
+  });
 
   test(
     'pending recording retains advisory missing poses across native recovery',

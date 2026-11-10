@@ -24,6 +24,20 @@ class PoseObservation {
   final double? luminance; // 0..255 approximate frame brightness.
 }
 
+/// The local capture state shown to the student. It never establishes identity
+/// or changes the server's supervised pose review.
+enum GuidanceState {
+  opening,
+  unavailable,
+  noFace,
+  multipleFaces,
+  framing,
+  lighting,
+  pose,
+  holding,
+  completed,
+}
+
 class PoseGuidance extends ChangeNotifier {
   PoseGuidance({required List<String> order})
     : order = List.unmodifiable(order);
@@ -31,6 +45,7 @@ class PoseGuidance extends ChangeNotifier {
   final List<String> order;
   final Set<String> completed = {};
   String hint = 'Position your face inside the guide';
+  GuidanceState state = GuidanceState.opening;
   Rect? faceBounds;
   bool faceFramed = false;
   DateTime? _holdStarted;
@@ -39,8 +54,8 @@ class PoseGuidance extends ChangeNotifier {
 
   String? get current =>
       completed.length < order.length ? order[completed.length] : null;
-  bool get analysisUnavailable => hint.startsWith('Live guidance unavailable');
-  bool get poseAligned => hint == 'Hold still…';
+  bool get analysisUnavailable => state == GuidanceState.unavailable;
+  bool get poseAligned => state == GuidanceState.holding;
   bool get allCaptured => completed.length == order.length;
 
   void observe(PoseObservation value, {bool allowCompletion = true}) {
@@ -56,10 +71,13 @@ class PoseGuidance extends ChangeNotifier {
         bounds.center.dy <= .80 &&
         (value.luminance == null || value.luminance! >= 45);
     String nextHint;
+    GuidanceState nextState;
     if (value.faceCount == 0) {
       nextHint = 'Move your face into view';
+      nextState = GuidanceState.noFace;
     } else if (value.faceCount > 1) {
       nextHint = 'Only one person should be visible';
+      nextState = GuidanceState.multipleFaces;
     } else if (bounds == null ||
         bounds.width < .20 ||
         bounds.center.dx < .23 ||
@@ -67,18 +85,25 @@ class PoseGuidance extends ChangeNotifier {
         bounds.center.dy < .20 ||
         bounds.center.dy > .80) {
       nextHint = 'Move closer and center your face';
+      nextState = GuidanceState.framing;
     } else if (value.luminance != null && value.luminance! < 45) {
       nextHint = 'Improve lighting on your face';
+      nextState = GuidanceState.lighting;
     } else if (!allowCompletion) {
       nextHint = 'Face in position. Start recording when ready.';
+      nextState = GuidanceState.framing;
     } else if (current == null) {
       nextHint = 'All directions captured';
+      nextState = GuidanceState.completed;
     } else if (value.yaw == null || value.pitch == null) {
       nextHint = 'Keep your face visible';
+      nextState = GuidanceState.pose;
     } else if (!_matches(current!, value.yaw!, value.pitch!)) {
       nextHint = 'Look $current';
+      nextState = GuidanceState.pose;
     } else {
       nextHint = 'Hold still…';
+      nextState = GuidanceState.holding;
     }
 
     if (nextHint == 'Hold still…') {
@@ -98,17 +123,22 @@ class PoseGuidance extends ChangeNotifier {
         nextHint = current == null
             ? 'All directions captured'
             : 'Pose captured. Look $current';
+        nextState = current == null
+            ? GuidanceState.completed
+            : GuidanceState.pose;
       }
     } else {
       _holdStarted = null;
       _acceptedFrames = 0;
     }
     hint = nextHint;
+    state = nextState;
     notifyListeners();
   }
 
-  void unavailable(DateTime now) {
+  void unavailable(DateTime now, {bool force = false}) {
     if (_lastObservation == null ||
+        force ||
         now.difference(_lastObservation!) > const Duration(seconds: 2)) {
       if (analysisUnavailable) return;
       _holdStarted = null;
@@ -117,6 +147,7 @@ class PoseGuidance extends ChangeNotifier {
       faceFramed = false;
       hint =
           'Live guidance unavailable; follow the prompts and review your video';
+      state = GuidanceState.unavailable;
       notifyListeners();
     }
   }
