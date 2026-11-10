@@ -43,7 +43,7 @@ class PoseGuidance extends ChangeNotifier {
   bool get poseAligned => hint == 'Hold still…';
   bool get allCaptured => completed.length == order.length;
 
-  void observe(PoseObservation value) {
+  void observe(PoseObservation value, {bool allowCompletion = true}) {
     _lastObservation = value.timestamp;
     faceBounds = value.faceCount == 1 ? value.bounds : null;
     final bounds = faceBounds;
@@ -69,6 +69,8 @@ class PoseGuidance extends ChangeNotifier {
       nextHint = 'Move closer and center your face';
     } else if (value.luminance != null && value.luminance! < 45) {
       nextHint = 'Improve lighting on your face';
+    } else if (!allowCompletion) {
+      nextHint = 'Face in position. Start recording when ready.';
     } else if (current == null) {
       nextHint = 'All directions captured';
     } else if (value.yaw == null || value.pitch == null) {

@@ -225,10 +225,10 @@ async def recognition_ready(b):
     return await open_session(b)
 
 
-async def captured(b, s):
+async def captured(b, s, key="capture"):
     r = await b.client.post(
         f"/v1/sessions/{s['id']}/captures",
-        headers=b.headers("teacher", key="capture"),
+        headers=b.headers("teacher", key=key),
         json={
             "source_type": "webcam",
             "recorded_at": datetime.now(timezone.utc).isoformat(),
@@ -243,7 +243,7 @@ async def captured(b, s):
     body = {"asset_id": cap["asset_id"], "byte_size": 256, "sha256": "c" * 64}
     r = await b.client.post(
         f"/v1/captures/{cap['id']}/upload-complete",
-        headers=b.headers("teacher", key="completecapture"),
+        headers=b.headers("teacher", key="complete" + key),
         json=body,
     )
     assert r.status_code == 202, r.text
@@ -648,3 +648,35 @@ async def test_own_attendance_paging_survives_correction_and_keeps_class_order(b
     everything = (await b.client.get("/v1/me/attendance", headers=b.headers("student1"))).json()
     assert [x["session_id"] for x in everything["items"]] == sids
     assert everything["items"][0]["revision"] == 2
+
+
+async def test_sequential_scan_segments_preserve_earlier_recognition(bio):
+    b = bio
+    session = await recognition_ready(b)
+    for index in range(2):
+        _, job, epoch, data = await captured(b, session, key=f"scan-{index}")
+        person = data["roster"][index]
+        body = {key: data[key] for key in (
+            "generation", "source_sha256", "model_hash", "profile_hash", "roster_hash"
+        )}
+        body.update(
+            epoch=epoch, processed_sha256="d" * 64,
+            proposals=[{
+                "student_id": person["student_id"],
+                "template_set_id": person["template_set_id"],
+                "template_epoch": person["template_epoch"],
+                "hits": 2, "span_ms": 600, "similarity": 0.9,
+            }],
+            unknown_observations=0,
+            quality={"sampled_frames": 4, "detections": 4, "quality_rejects": 0},
+            timings={"processing_total_ms": 2},
+        )
+        response = await b.client.post(
+            f"/internal/v1/jobs/{job}/complete", headers=b.wh, json=body
+        )
+        assert response.status_code == 200, response.text
+    rows = (await b.client.get(
+        f"/v1/sessions/{session['id']}/attendance", headers=b.headers("teacher")
+    )).json()["items"]
+    assert len(rows) == 2
+    assert all(row["status"] == "proposed_present" for row in rows)

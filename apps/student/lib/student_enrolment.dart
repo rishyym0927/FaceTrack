@@ -354,7 +354,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
       return;
     }
     try {
-      await Navigator.of(context).push<void>(
+      await Navigator.of(context, rootNavigator: true).push<void>(
         MaterialPageRoute<void>(
           fullscreenDialog: true,
           builder: (_) =>

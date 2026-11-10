@@ -136,7 +136,9 @@ class GuidedCamera extends ChangeNotifier {
   }
 
   bool recording = false, busy = false, disposed = false, ready = false;
-  bool _analysisBusy = false;
+  bool _analysisBusy = false, _previewAnalyzing = false;
+  Future<void>? _pendingAnalysis;
+  Timer? _previewExpiry;
   DateTime? _lastAnalysis;
   int elapsed = 0, epoch = 0;
   List<String> poses = [];
@@ -187,6 +189,7 @@ class GuidedCamera extends ChangeNotifier {
       }
       controller = next;
       ready = true;
+      await startPreviewAnalysis();
     } catch (_) {
       await next?.dispose();
       if (!disposed && generation == epoch) error = 'Camera unavailable. Allow camera access, close other camera apps and retry.';
@@ -194,6 +197,49 @@ class GuidedCamera extends ChangeNotifier {
       if (generation == epoch) busy = false;
       emit();
     }
+  }
+
+  /// Framing feedback before recording never completes challenge poses.
+  Future<void> startPreviewAnalysis() async {
+    final current = controller;
+    if (kIsWeb || current == null || analyzerFactory == null || recording ||
+        _previewAnalyzing || disposed) return;
+    final generation = epoch;
+    try {
+      guidance?.removeListener(emit);
+      guidance?.dispose();
+      guidance = enrollmentGuidance
+          ? (PoseGuidance(order: const ['front'])..addListener(emit)) : null;
+      analyzer = analyzerFactory!(current);
+      _previewAnalyzing = true;
+      _lastAnalysis = null;
+      await current.startImageStream(_analyzeFrame);
+      if (generation != epoch || disposed) return;
+      _previewExpiry = Timer.periodic(const Duration(milliseconds: 500), (_) {
+        guidance?.unavailable(DateTime.now());
+        faceTracker.expire(DateTime.now());
+      });
+    } catch (_) {
+      if (generation == epoch) {
+        await _stopPreviewAnalysis(current);
+        guidance?.unavailable(DateTime.now());
+      }
+    }
+  }
+
+  Future<void> _stopPreviewAnalysis(CameraController? current) async {
+    if (!_previewAnalyzing) return;
+    _previewAnalyzing = false;
+    _previewExpiry?.cancel();
+    final old = analyzer;
+    analyzer = null;
+    try {
+      if (current?.value.isStreamingImages == true) await current!.stopImageStream();
+    } catch (_) {
+      // The platform may already have stopped its stream on backgrounding.
+    }
+    await _pendingAnalysis;
+    await _closeAnalyzer(old);
   }
 
   Future<void> selectCamera(CameraDescription choice) async {
@@ -213,6 +259,7 @@ class GuidedCamera extends ChangeNotifier {
     emit();
     final generation = epoch;
     try {
+      await _stopPreviewAnalysis(old);
       await _release(old);
     } finally {
       if (epoch == generation) busy = false;
@@ -226,6 +273,7 @@ class GuidedCamera extends ChangeNotifier {
     busy = true;
     emit();
     try {
+      await _stopPreviewAnalysis(controller);
       await discard();
       if (disposed || generation != epoch) return;
       guidance?.removeListener(emit);
@@ -314,7 +362,7 @@ class GuidedCamera extends ChangeNotifier {
   }
 
   void _analyzeFrame(CameraImage frame) {
-    if (!recording || _analysisBusy || analyzer == null) return;
+    if ((!recording && !_previewAnalyzing) || _analysisBusy || analyzer == null) return;
     final now = DateTime.now();
     final active = analyzer!;
     final generation = epoch;
@@ -323,15 +371,15 @@ class GuidedCamera extends ChangeNotifier {
       return;
     _lastAnalysis = now;
     _analysisBusy = true;
-    unawaited(() async {
+    _pendingAnalysis = () async {
       try {
         final result = await active.analyze(frame);
         if (result == null ||
-            !recording ||
+            (!recording && !_previewAnalyzing) ||
             epoch != generation ||
             !identical(active, analyzer))
           return;
-        guidance?.observe(result);
+        guidance?.observe(result, allowCompletion: recording);
         if (!enrollmentGuidance) {
           final remaining =
               const Duration(seconds: 1) -
@@ -342,16 +390,17 @@ class GuidedCamera extends ChangeNotifier {
           _faceExpiry = Timer(remaining, faceTracker.clear);
         }
       } catch (_) {
-        if (recording && epoch == generation && identical(active, analyzer)) {
+        if ((recording || _previewAnalyzing) && epoch == generation && identical(active, analyzer)) {
           guidance?.unavailable(DateTime.now().add(const Duration(seconds: 3)));
         }
       } finally {
         _analysisBusy = false;
       }
-    }());
+    }();
+    unawaited(_pendingAnalysis);
   }
 
-  Future<void> stop() async {
+  Future<void> stop({int minimumSeconds = 10}) async {
     if (!recording || busy || (kIsWeb && enrollmentGuidance)) return;
     timer?.cancel();
     _faceExpiry?.cancel();
@@ -369,7 +418,7 @@ class GuidedCamera extends ChangeNotifier {
           await current.setFlashMode(FlashMode.off);
         } catch (_) {}
       }
-      if (disposed || generation != epoch || elapsed < 10) {
+      if (disposed || generation != epoch || elapsed < minimumSeconds) {
         await files.remove(value.path);
         error = 'Record the full guided video.';
       } else {
@@ -379,6 +428,7 @@ class GuidedCamera extends ChangeNotifier {
       error = 'Recording was interrupted. Please record again.';
     } finally {
       try {
+        await _pendingAnalysis;
         await _closeAnalyzer(oldAnalyzer);
       } finally {
         if (generation == epoch) {
@@ -387,6 +437,13 @@ class GuidedCamera extends ChangeNotifier {
         }
       }
     }
+  }
+
+  /// Transfer ownership to a bounded upload queue without deleting the file.
+  XFile? takeClip() {
+    final value = clip;
+    clip = null;
+    return value;
   }
 
   Future<void> discard() async {
@@ -412,6 +469,10 @@ class GuidedCamera extends ChangeNotifier {
     faceTracker.clear();
     final old = controller;
     final wasRecording = recording;
+    busy = true;
+    ready = false;
+    recording = false;
+    await _stopPreviewAnalysis(old);
     final oldAnalyzer = analyzer;
     controller = null;
     analyzer = null;
@@ -431,6 +492,7 @@ class GuidedCamera extends ChangeNotifier {
         } catch (_) {}
       }
       try {
+        await _pendingAnalysis;
         await _closeAnalyzer(oldAnalyzer);
       } finally {
         await _release(old);

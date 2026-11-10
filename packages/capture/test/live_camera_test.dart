@@ -94,6 +94,32 @@ void main() {
     },
   );
 
+  test('Preview analysis stops before recording and resets challenge progress', () async {
+    final controller = _RecordingOnlyCamera(front);
+    final camera = GuidedCamera(enrollmentGuidance: true,
+        analyzerFactory: (_) => _UnusedAnalyzer())
+      ..controller = controller
+      ..ready = true;
+    addTearDown(camera.dispose);
+    await camera.startPreviewAnalysis();
+    expect(controller.value.isStreamingImages, true);
+    final before = camera.guidance!;
+    final now = DateTime.now();
+    for (final ms in [0, 500, 1000]) {
+      before.observe(PoseObservation(timestamp: now.add(Duration(milliseconds: ms)),
+          faceCount: 1, bounds: const Rect.fromLTWH(.3, .2, .4, .6),
+          yaw: 0, pitch: 0), allowCompletion: false);
+    }
+    expect(before.faceFramed, true);
+    expect(before.completed, isEmpty);
+    await camera.start(const ['front', 'left']);
+    expect(controller.value.isStreamingImages, false);
+    expect(camera.guidance, isNot(same(before)));
+    expect(camera.guidance!.completed, isEmpty);
+    expect(camera.recording, true);
+    await camera.interrupt();
+  });
+
   test('Classroom prefers the rear camera and falls back when absent', () {
     expect(preferredCamera([front, back], enrollment: false), back);
     expect(preferredCamera([front], enrollment: false), front);
@@ -115,7 +141,7 @@ void main() {
     },
   );
 
-  testWidgets('Portrait preview applies sensor rotation and fits the overlay', (
+  testWidgets('Portrait preview delegates sensor rotation and fits the overlay', (
     tester,
   ) async {
     final controller = _RecordingOnlyCamera(front);
@@ -140,8 +166,15 @@ void main() {
       ),
     );
     final preview = tester.getRect(find.byType(AspectRatio));
-    expect(tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns, 3);
+    expect(tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns, 0);
     expect(preview.width, lessThan(preview.height));
+    controller.value = controller.value.copyWith(
+      isRecordingVideo: true,
+      recordingOrientation: const Optional.of(DeviceOrientation.portraitUp),
+    );
+    await tester.pump();
+    expect(tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns, 0);
+    expect(tester.getRect(find.byType(AspectRatio)), preview);
     final box = tester.getRect(find.byType(Positioned));
     expect(
       box,
@@ -222,6 +255,16 @@ class _RecordingOnlyCamera extends CameraController {
   int frameRequests = 0, plainRequests = 0;
 
   @override
+  Future<void> startImageStream(void Function(CameraImage) onAvailable) async {
+    value = value.copyWith(isStreamingImages: true);
+  }
+
+  @override
+  Future<void> stopImageStream() async {
+    value = value.copyWith(isStreamingImages: false);
+  }
+
+  @override
   Widget buildPreview() => const SizedBox.expand();
 
   @override
@@ -229,6 +272,7 @@ class _RecordingOnlyCamera extends CameraController {
     void Function(CameraImage)? onAvailable,
     bool enablePersistentRecording = true,
   }) async {
+    if (value.isStreamingImages) throw StateError('Preview stream still active');
     if (onAvailable != null) {
       frameRequests++;
       throw CameraException(

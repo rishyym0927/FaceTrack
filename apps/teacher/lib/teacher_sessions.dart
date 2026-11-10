@@ -11,6 +11,7 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'attendance_table.dart';
+import 'classroom_scan.dart';
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
 
@@ -644,7 +645,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   /// Record/upload problems, shown inside the capture panel next to the
   /// button rather than at the top of the page.
   AppFailure? captureError;
-  bool busy = false, ack = false;
+  bool busy = false, ack = false, scanActive = false;
+  final scanUploads = <String, _ScanUpload>{};
   int webPreviewTurns = 0;
   final decisions = <String, String>{};
   final camera = GuidedCamera(
@@ -671,7 +673,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     exitGuard = ref.read(sessionExitGuardProvider)..enter(widget.id);
     camera.addListener(changed);
     lifecycle = AppLifecycleListener(
-      onPause: () => camera.interrupt(),
+      onPause: () {
+        if (!scanActive) unawaited(camera.interrupt());
+      },
       onResume: load,
     );
     load();
@@ -937,6 +941,155 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     }
   }
 
+  Future<List<String>> scanSuggestions() async {
+    final result = await services.api.send(
+      'GET',
+      '/v1/sessions/${widget.id}/attendance',
+      institute: institute,
+    );
+    return [
+      for (final row in (result['items'] as List).cast<Json>())
+        if (row['status'] == 'proposed_present')
+          row['official_name'] as String? ?? 'Enrolled student',
+    ];
+  }
+
+  Future<void> uploadScanSegment(XFile file) async {
+    final state = scanUploads.putIfAbsent(file.path, _ScanUpload.new);
+    final bytes = await file.length();
+    if (bytes > 26214400) {
+      throw const AppFailure(
+        'Captured segment exceeds 25 MiB. Please lower camera resolution.',
+      );
+    }
+    final hash = (await sha256.bind(file.openRead()).first).toString();
+    for (var attempt = 0; state.capture == null; attempt++) {
+      if (!mounted) throw const AppFailure('Session closed.');
+      try {
+        state.capture = await services.api.send(
+          'POST',
+          '/v1/sessions/${widget.id}/captures',
+          institute: institute,
+          mutation: state.reserve,
+          body: {
+            'source_type': kIsWeb ? 'webcam' : 'phone',
+            'recorded_at': state.recordedAt.toIso8601String(),
+            'mime_type': kIsWeb ? 'video/webm' : 'video/mp4',
+            'expected_bytes': bytes,
+          },
+        );
+      } on AppFailure catch (e) {
+        if (e.code != 'CAPTURE_LIMIT' || attempt >= 23) rethrow;
+        if (kIsWeb) {
+          updateBrowserClassroomStatus(
+            'Waiting for earlier recognition results…',
+          );
+        }
+        await Future<void>.delayed(const Duration(seconds: 5));
+      }
+    }
+    final current = state.capture!;
+    if (!state.uploaded) {
+      final grant = await services.api.send(
+        'POST',
+        '/v1/captures/${current['id']}/upload-grant',
+        institute: institute,
+      );
+      uploader = ResumableUpload();
+      await uploader!.upload(
+        file,
+        grant,
+        services.config.publishableKey,
+        resumeUrl: state.resumeUrl,
+        progress: (_) {},
+        checkpoint: (url) async {
+          state.resumeUrl = url;
+        },
+      );
+      state.uploaded = true;
+    }
+    await services.api.send(
+      'POST',
+      '/v1/captures/${current['id']}/upload-complete',
+      institute: institute,
+      mutation: state.complete,
+      body: {
+        'asset_id': current['asset_id'],
+        'byte_size': bytes,
+        'sha256': hash,
+      },
+    );
+    capture = {...current, 'status': 'queued'};
+    captureStatusId = null;
+    captureStatusRequest = null;
+    scanUploads.remove(file.path);
+  }
+
+  Future<void> openClassroomScan() async {
+    if (scanActive || busy || camera.recording || camera.clip != null) return;
+    setState(() => scanActive = true);
+    ClassroomScan? scan;
+    Timer? livePoll;
+    var refreshing = false;
+    try {
+      await camera.interrupt();
+      if (kIsWeb) {
+        Future<void> refreshNames() async {
+          if (refreshing) return;
+          refreshing = true;
+          try {
+            final names = await scanSuggestions();
+            updateBrowserClassroomStatus(
+              '${names.length} students suggested${names.isEmpty ? '' : ': ${names.join(', ')}'}',
+            );
+          } catch (_) {
+            /* Keep latest results during a network retry. */
+          } finally {
+            refreshing = false;
+          }
+        }
+
+        livePoll = Timer.periodic(
+          const Duration(seconds: 5),
+          (_) => refreshNames(),
+        );
+        await scanClassroomInBrowser(
+          onSegment: uploadScanSegment,
+          onStarted: () => unawaited(refreshNames()),
+        );
+      } else {
+        scan = ClassroomScan(camera, uploadScanSegment);
+        if (!mounted) return;
+        await Navigator.of(context, rootNavigator: true).push<void>(
+          MaterialPageRoute(
+            fullscreenDialog: true,
+            builder: (_) =>
+                ClassroomScanPage(scan: scan!, suggestions: scanSuggestions),
+          ),
+        );
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => captureError = e is AppFailure
+              ? e
+              : const AppFailure(
+                  'Camera scan could not continue. Please retry.',
+                ),
+        );
+      }
+    } finally {
+      livePoll?.cancel();
+      scan?.dispose();
+      scanUploads.clear();
+      await camera.interrupt();
+      if (mounted) {
+        setState(() => scanActive = false);
+        await load(keepDecisions: true);
+      }
+    }
+  }
+
   Future<void> record() => action(capturePanel: true, () async {
     capture = null;
     captureStatusRequest = null;
@@ -1161,6 +1314,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     poll?.cancel();
     lifecycle?.dispose();
     uploader?.cancel();
+    if (scanActive && kIsWeb) cancelBrowserClassroomScan();
     camera.removeListener(changed);
     unawaited(camera.discard());
     camera.dispose();
@@ -1305,7 +1459,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                             }
                           },
                   ),
-                if (camera.controller != null && camera.clip == null) ...[
+                if (!scanActive &&
+                    camera.controller != null &&
+                    camera.clip == null) ...[
                   const SizedBox(height: 12),
                   LayoutBuilder(
                     builder: (context, constraints) {
@@ -1428,15 +1584,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: FilledButton.icon(
-                        onPressed: busy || camera.busy
+                        onPressed: busy || camera.busy || scanActive
                             ? null
-                            : camera.ready
-                            ? record
-                            : camera.initialize,
+                            : openClassroomScan,
                         icon: const Icon(Icons.videocam_outlined),
-                        label: Text(
-                          camera.ready ? 'Start recording' : 'Open camera',
-                        ),
+                        label: const Text('Scan classroom'),
                       ),
                     ),
                   ),
@@ -2242,3 +2394,11 @@ String captureStatusLabel(String status) => switch (status) {
   'expired' => 'upload expired',
   _ => status.replaceAll('_', ' '),
 };
+
+class _ScanUpload {
+  final recordedAt = DateTime.now().toUtc();
+  final reserve = Mutation(), complete = Mutation();
+  Json? capture;
+  String? resumeUrl;
+  bool uploaded = false;
+}

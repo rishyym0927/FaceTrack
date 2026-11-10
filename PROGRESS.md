@@ -1,6 +1,13 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 9 November 2026 (Asia/Kolkata)
+**Reviewed:** 10 November 2026 (Asia/Kolkata)
+
+## Continuous classroom scan — 10 November
+
+- One Start/Stop scan now uses automatically recorded, private 12-second browser or up-to-15-second Android segments. Local live face boxes follow visible faces; green means well framed. Teacher sees enrolled-student suggestions only after each segment is uploaded and processed; no temporary track ID is treated as an identity, and publication remains a teacher action. At most two Android segments wait including the active upload; a full queue pauses capture. Browser keeps the preview alive during its single-segment upload. Retry retains the same media and upload mutation/resume state. A 429 capture quota waits and retries for up to two minutes. Native segment boundaries have brief gaps, and recognition results have processing delay.
+- CameraX preview now uses the camera plugin's built-in orientation from opening, removing a second sensor rotation. Student native capture uses the root full-screen route. Local face framing starts on camera open, while challenge pose completion starts only with recording. Browser classroom scan uses its own full-screen responsive preview and one camera stream for local detection and independently recorded WebM segments.
+- Verified locally: API 58 tests, Capture 17, Student 20, Teacher 81, browser tracking 5; Flutter analysis clean; both web and signed arm64 APK builds succeeded; frozen ML receipt 16/16; diff whitespace clean. Physical orientation, real browser codec and live tracking under motion, recognition latency, and authenticated end-to-end scans remain open. The connected phone's camera was idle before installation check.
+- Final repository review: Capture (17), Student (20) and Teacher (81) suites and both product web builds passed again with Flutter 3.47.7; the browser tracker suite passed (5) and the diff is whitespace-clean. The API suite could not be rerun from the restricted review shell because its managed local PostgreSQL socket denied the connection before fixtures started (4 non-database tests passed; 54 setup errors). Re-run that suite on the normal Mac host before making a new backend claim.
 
 ## Camera guidance update — 9 November
 

@@ -19,3 +19,9 @@ The Student and Teacher apps list cameras reported by the OS or browser before r
 4. Deny permission once and unplug the selected camera once; verify the UI gives a recoverable error and another camera can be chosen.
 
 These are hands-on acceptance steps. Flutter tests and browser JavaScript syntax checks do not establish external-camera compatibility on a particular device.
+
+## Continuous scan acceptance
+
+Open Student capture before recording and verify the guide appears upright in portrait and landscape and reacts to a visible face. Start recording and confirm pose progress begins with the server challenge, not the earlier preview.
+
+Open Teacher **Scan classroom** on Android and Chrome. Check rear camera preference, full-screen controls, tracking boxes during a slow pan, green framing only after a stable hold, stale boxes clearing within one second, and one Start/Stop scan. Watch suggestions arrive after each private segment processes; verify previously recognized students stay suggested after later segments, manual choices stay locked, and publication remains explicit. Test network interruption and retry of the same kept part, queue backpressure, and closing after all uploads. Measure live analysis cadence, preview stutter, upload and suggestion delays on a consenting group. Check recorded file orientation and actual decoder compatibility; automated fake-recorder tests do not establish codec acceptance.

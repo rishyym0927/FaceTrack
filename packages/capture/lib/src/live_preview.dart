@@ -1,8 +1,6 @@
 import 'package:camera/camera.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'orientation.dart';
 
 Rect previewFaceRect(Rect bounds, Size size, {required bool mirrored}) =>
     Rect.fromLTWH(
@@ -87,36 +85,9 @@ class LiveCameraPreview extends StatelessWidget {
         );
       },
     );
-    if (!kIsWeb && defaultTargetPlatform != TargetPlatform.android) {
-      return Center(child: CameraPreview(camera, child: overlay));
-    }
-    return ValueListenableBuilder<CameraValue>(
-      valueListenable: camera,
-      builder: (context, value, _) {
-        if (!value.isInitialized) return const SizedBox.shrink();
-        // Use the sensor mapping previously verified on the demo phone.
-        // Rotate only the texture. Face bounds already use oriented coordinates.
-        final turns = kIsWeb
-            ? 0
-            : cameraQuarterTurns(
-                camera.description,
-                value.recordingOrientation ?? value.deviceOrientation,
-              );
-        return Center(
-          child: AspectRatio(
-            aspectRatio: turns.isOdd
-                ? 1 / value.aspectRatio
-                : value.aspectRatio,
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                RotatedBox(quarterTurns: turns, child: camera.buildPreview()),
-                overlay,
-              ],
-            ),
-          ),
-        );
-      },
-    );
+    // CameraX already handles sensor rotation inside buildPreview().
+    // CameraPreview adds device UI orientation before and during recording.
+    // Raw sensor rotation is reserved for the ML input image.
+    return Center(child: CameraPreview(camera, child: overlay));
   }
 }
