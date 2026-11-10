@@ -23,11 +23,11 @@ Run this check on a physical phone with the signed release APK before distributi
 
 On the Samsung, CameraX StreamSharing changed the preview buffer from 1280×720 to an already rotated 720×1280 when video and analysis ran together. The plugin applied its original sensor rotation again, turning the preview sideways. A Flutter widget test that held the preview rectangle steady could miss this native buffer change. See [Flutter issue #180075](https://github.com/flutter/flutter/issues/180075).
 
-[Student's preview](../packages/capture/lib/src/live_preview.dart) checks the actual CameraX buffer size. If recording supplies a portrait buffer and the surface does not apply its own rotation, it uses the native texture directly. The normal plugin path remains the fallback. Keep this condition tied to the native buffer and surface. Recheck the signed APK on the affected phone before removing the workaround after a CameraX update.
+[The shared preview](../packages/capture/lib/src/live_preview.dart) checks the actual CameraX buffer size. If recording supplies a portrait buffer and the surface does not apply its own rotation, it uses the native texture and its aspect ratio for both the image and overlays. The normal plugin path remains the fallback. Keep this condition tied to the native buffer and surface. Recheck both signed APKs on the affected phone before removing the workaround after a CameraX update.
 
 ### Live guidance unavailable in release
 
-R8 removed the no-argument constructors of ML Kit registrars loaded through reflection. The release log showed `ComponentDiscovery` failures with `NoSuchMethodException`, followed by `ImageError: Getting Image failed`. [Student's ProGuard rules](../apps/student/android/app/proguard-rules.pro) keep those constructors and are loaded by the [release build configuration](../apps/student/android/app/build.gradle.kts). Preserve both when changing Android packaging.
+R8 removed the no-argument constructors of ML Kit registrars loaded through reflection. The release log showed `ComponentDiscovery` failures with `NoSuchMethodException`, followed by `ImageError: Getting Image failed`. Both Android release configurations load the [shared ML Kit keep rules](../packages/capture/android/mlkit-keep.pro). Preserve those rules and both references when changing Android packaging.
 
 After the test, filter Logcat to the Student app process. Run the command while the app is still open.
 
@@ -38,6 +38,15 @@ adb logcat -d --pid="$student_pid" |
 ```
 
 On the verified build, ML Kit processed frames before and during recording without the earlier initialization or conversion errors. The user confirmed the upright preview and working live guidance on the Samsung on 10 November 2026. The test covers that device and build. Keep the visual check even when logs show detector calls, since detector activity alone cannot establish correct rendering or pose progress.
+
+## Teacher Android signed release check
+
+Use a signed release APK and a consenting test session on a physical phone after camera, detector, Flutter, CameraX, or Android packaging changes. Teacher reproduced the same native buffer change on the Samsung rear and front cameras, alongside the same ML Kit initialization failures. It uses the shared preview and keep rules described above.
+
+1. Open **Scan classroom**. Use the rear camera in portrait and check that a nearby, well-lit face gets a box before recording starts.
+2. Start the scan without moving the phone. Check that the preview stays upright and the box stays aligned, follows slow movement and turns green when the face holds steady in frame. Green indicates framing quality. Recognition suggestions arrive separately after a segment is processed.
+3. Keep a face in view across one segment transition, then move it out of frame and verify the box clears. Stop the scan, verify the clip plays upright, and repeat with the front camera and in landscape where supported.
+4. Filter Logcat as above using `dev.facetrack.teacher`. Check that ML Kit is called during the recording and that the earlier initialization and frame conversion errors are absent. Record each device and build result in [PROGRESS.md](../PROGRESS.md).
 
 ## Check in Chrome or Edge
 

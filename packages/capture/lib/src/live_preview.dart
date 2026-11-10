@@ -88,89 +88,106 @@ class LiveCameraPreview extends StatelessWidget {
         );
       },
     );
-    // The Student screen is portrait-locked. CameraPreview switches from
-    // deviceOrientation to recordingOrientation at recording start, which can
-    // rotate its texture even though the route and sensor have not moved.
-    // Keep the same portrait display transform for both states.
-    if (!kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
-        showGuide) {
-      return Center(
-        child: AspectRatio(
-          aspectRatio: 1 / camera.value.aspectRatio,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              ValueListenableBuilder<CameraValue>(
-                valueListenable: camera,
-                child: camera.buildPreview(),
-                builder: (context, value, preview) => value.isRecordingVideo
-                    ? _StudentRecordingTexture(
-                        camera: camera,
-                        fallback: preview!,
-                      )
-                    : preview!,
-              ),
-              overlay,
-            ],
-          ),
-        ),
-      );
+    final standardPreview = Center(
+      child: CameraPreview(camera, child: overlay),
+    );
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
+      return standardPreview;
     }
-    return Center(child: CameraPreview(camera, child: overlay));
+    return ValueListenableBuilder<CameraValue>(
+      valueListenable: camera,
+      builder: (context, value, _) {
+        if (!value.isInitialized) return const SizedBox.shrink();
+        // The Student route stays portrait even if the controller reports
+        // another recording orientation. Teacher follows device orientation.
+        final fallback = showGuide
+            ? _fittedPreview(
+                1 / value.aspectRatio,
+                camera.buildPreview(),
+                overlay,
+              )
+            : standardPreview;
+        return value.isRecordingVideo
+            ? _AndroidRecordingPreview(
+                key: ObjectKey(camera),
+                camera: camera,
+                fallback: fallback,
+                overlay: overlay,
+              )
+            : fallback;
+      },
+    );
   }
 }
 
-class _StudentRecordingTexture extends StatefulWidget {
-  const _StudentRecordingTexture({
+Widget _fittedPreview(double aspectRatio, Widget texture, Widget overlay) =>
+    Center(
+      child: AspectRatio(
+        aspectRatio: aspectRatio,
+        child: Stack(fit: StackFit.expand, children: [texture, overlay]),
+      ),
+    );
+
+class _AndroidRecordingPreview extends StatefulWidget {
+  const _AndroidRecordingPreview({
+    required super.key,
     required this.camera,
     required this.fallback,
+    required this.overlay,
   });
 
   final CameraController camera;
-  final Widget fallback;
+  final Widget fallback, overlay;
 
   @override
-  State<_StudentRecordingTexture> createState() =>
-      _StudentRecordingTextureState();
+  State<_AndroidRecordingPreview> createState() =>
+      _AndroidRecordingPreviewState();
 }
 
-class _StudentRecordingTextureState extends State<_StudentRecordingTexture> {
-  late final Future<bool> _useRawTexture = _hasPortraitBuffer();
+class _AndroidRecordingPreviewState extends State<_AndroidRecordingPreview> {
+  late final Future<double?> _rawAspectRatio = _portraitBufferAspectRatio();
 
-  Future<bool> _hasPortraitBuffer() async {
+  Future<double?> _portraitBufferAspectRatio() async {
     final platform = CameraPlatform.instance;
-    if (platform is! AndroidCameraCameraX) return false;
+    if (platform is! AndroidCameraCameraX) return null;
     // CameraX 0.7.6 exposes its live buffer size through this member.
     // Remove this bridge when flutter/flutter#180075 is fixed upstream.
     // ignore: invalid_use_of_visible_for_testing_member
     final preview = platform.preview;
     final camera = widget.camera;
-    if (preview == null || camera.value.aspectRatio <= 1) return false;
+    if (preview == null || camera.value.aspectRatio <= 1) return null;
     try {
-      if (await preview.surfaceProducerHandlesCropAndRotation()) return false;
+      if (await preview.surfaceProducerHandlesCropAndRotation()) return null;
       // CameraX can reconfigure Preview as VideoCapture binds. In this case
       // StreamSharing has already rotated (and, for front lenses, mirrored)
       // the buffer. Bypass the plugin's sensor transform only for that output.
       // https://github.com/flutter/flutter/issues/180075
       for (var attempt = 0; attempt < 6; attempt++) {
-        if (!mounted || !camera.value.isRecordingVideo) return false;
+        if (!mounted || !camera.value.isRecordingVideo) return null;
         final size = (await preview.getResolutionInfo())?.resolution;
-        if (size != null && size.height > size.width) return true;
+        if (size != null && size.width > 0 && size.height > size.width) {
+          return size.width / size.height;
+        }
         if (attempt < 5)
           await Future<void>.delayed(const Duration(milliseconds: 100));
       }
     } on Exception {
       // The camera may close or switch during this asynchronous check.
     }
-    return false;
+    return null;
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<bool>(
-    future: _useRawTexture,
-    builder: (context, snapshot) => snapshot.data == true
-        ? Texture(textureId: widget.camera.cameraId)
-        : widget.fallback,
+  Widget build(BuildContext context) => FutureBuilder<double?>(
+    future: _rawAspectRatio,
+    builder: (context, snapshot) {
+      final aspectRatio = snapshot.data;
+      if (aspectRatio == null) return widget.fallback;
+      return _fittedPreview(
+        aspectRatio,
+        Texture(textureId: widget.camera.cameraId),
+        widget.overlay,
+      );
+    },
   );
 }

@@ -2,6 +2,12 @@
 
 **Reviewed:** 10 November 2026 (Asia/Kolkata)
 
+## Teacher Android camera repair — 10 November
+
+- The user's Samsung SM-M356B reproduced sideways Teacher preview and missing tracking boxes. Teacher logs showed CameraX switching from 1280×720 to 720×1280 at recording start with both rear and front cameras, plus missing ML Kit registrar constructors and repeated image conversion failures.
+- Both apps now share the guarded recording texture and ML Kit keep rules. A regression test exercises the Teacher rear preview switching to a portrait buffer and verifies that the box fits the displayed texture. Capture 21, Teacher 81 and Student 20 tests passed. Analysis was clean in all three. Both signed arm64 APKs built and their R8 maps retain the three missing constructors.
+- The corrected Teacher APK installed on the Samsung at 21:31 IST with the camera idle. Retest tracking and upright preview in a consenting scan, then check the front camera, landscape and playback. See the [Teacher camera release check](docs/CAMERA_VALIDATION.md#teacher-android-signed-release-check).
+
 ## Student Android camera diagnosis and repair — 10 November
 
 - Physical Samsung SM-M356B retest disproved the previous preview change. CameraX logs show the preview switching from 1280×720 to an already rotated 720×1280 buffer when recording starts, matching Flutter issue #180075. Student Android now checks the native preview size and bypasses the plugin's extra transform only for that pre-rotated buffer on a surface that does not handle rotation itself.

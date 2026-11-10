@@ -1,6 +1,11 @@
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:camera_android_camerax/camera_android_camerax.dart';
+// ignore: implementation_imports
+import 'package:camera_android_camerax/src/camerax_library.dart' as camera_x;
+import 'package:camera_platform_interface/camera_platform_interface.dart'
+    show CameraPlatform;
 import 'package:flutter/foundation.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:flutter/material.dart';
@@ -243,6 +248,55 @@ void main() {
     },
   );
 
+  testWidgets(
+    'Teacher uses the native portrait buffer and fits boxes during recording',
+    (tester) async {
+      final previousPlatform = CameraPlatform.instance;
+      final controller = _RecordingOnlyCamera(back);
+      addTearDown(controller.dispose);
+      CameraPlatform.instance = AndroidCameraCameraX()
+        ..preview = _SharedPortraitPreview();
+      try {
+        controller.value = controller.value.copyWith(
+          isInitialized: true,
+          previewSize: const Size(1280, 720),
+        );
+        const bounds = Rect.fromLTWH(.125, .25, .25, .5);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: LiveCameraPreview(
+              camera: controller,
+              faces: [(bounds: bounds, framed: true)],
+            ),
+          ),
+        );
+        expect(find.byType(CameraPreview), findsOneWidget);
+        controller.value = controller.value.copyWith(
+          isRecordingVideo: true,
+          recordingOrientation: const Optional.of(DeviceOrientation.portraitUp),
+        );
+        await tester.pumpAndSettle();
+        expect(find.byType(CameraPreview), findsNothing);
+        final texture = tester.getRect(find.byType(Texture));
+        expect(texture.width / texture.height, closeTo(720 / 1280, .001));
+        expect(
+          tester.getRect(find.byType(Positioned)),
+          previewFaceRect(
+            bounds,
+            texture.size,
+            mirrored: false,
+          ).shift(texture.topLeft),
+        );
+        controller.value = controller.value.copyWith(isRecordingVideo: false);
+        await tester.pumpAndSettle();
+        expect(find.byType(CameraPreview), findsOneWidget);
+      } finally {
+        CameraPlatform.instance = previousPlatform;
+      }
+    },
+    variant: const TargetPlatformVariant({TargetPlatform.android}),
+  );
+
   test(
     'Tracking qualifies only continuously framed faces and clears stale boxes',
     () {
@@ -300,6 +354,25 @@ void main() {
       expect(guidance.completed, isEmpty);
     },
   );
+}
+
+class _SharedPortraitPreview extends camera_x.Preview {
+  _SharedPortraitPreview() : super.pigeon_detached();
+
+  @override
+  Future<bool> surfaceProducerHandlesCropAndRotation() async => false;
+
+  @override
+  Future<camera_x.ResolutionInfo> getResolutionInfo() async =>
+      _PortraitResolution();
+}
+
+class _PortraitResolution extends camera_x.ResolutionInfo {
+  _PortraitResolution() : super.pigeon_detached(resolution: _PortraitSize());
+}
+
+class _PortraitSize extends camera_x.CameraSize {
+  _PortraitSize() : super.pigeon_detached(width: 720, height: 1280);
 }
 
 class _RecordingOnlyCamera extends CameraController {

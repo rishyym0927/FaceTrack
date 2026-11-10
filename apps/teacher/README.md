@@ -29,6 +29,8 @@ The API must be running on local port 8000. Login reaches hosted Supabase, but s
 
 Debug network policy permits HTTP only to localhost/127.0.0.1. Release requires HTTPS and your release signing configuration. Android Studio/emulator and iOS are not required for this slice.
 
+Before shipping Android capture, ML Kit, or release packaging changes, run the [signed Teacher camera check](../../docs/CAMERA_VALIDATION.md#teacher-android-signed-release-check). It covers the recording transition, tracking boxes and the saved clip on a physical device.
+
 ## Preserved local camera spike
 
 Product login is the default entrypoint. The original capture implementation is retained in `lib/spike_app.dart` and launched separately:

@@ -53,7 +53,7 @@ android {
     buildTypes {
         release {
             signingConfig = signingConfigs.findByName("release")
-            proguardFiles("proguard-rules.pro")
+            proguardFiles(rootProject.file("../../../packages/capture/android/mlkit-keep.pro"))
         }
     }
 }
