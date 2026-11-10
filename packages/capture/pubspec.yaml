@@ -8,6 +8,8 @@ dependencies:
     sdk: flutter
   google_mlkit_face_detection: ^0.15.1
   camera: ^0.12.1
+  camera_android_camerax: ^0.7.6
+  camera_platform_interface: ^2.15.0
   video_player: ^2.14.1
   dio: ^5.9.0
   shared_preferences: ^2.5.3

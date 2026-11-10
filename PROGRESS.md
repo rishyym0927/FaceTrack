@@ -2,6 +2,12 @@
 
 **Reviewed:** 10 November 2026 (Asia/Kolkata)
 
+## Student Android camera diagnosis and repair — 10 November
+
+- Physical Samsung SM-M356B retest disproved the previous preview change. CameraX logs show the preview switching from 1280×720 to an already rotated 720×1280 buffer when recording starts, matching Flutter issue #180075. Student Android now checks the native preview size and bypasses the plugin's extra transform only for that pre-rotated buffer on a surface that does not handle rotation itself.
+- The signed release also logged missing reflective ML Kit registrar constructors and repeated image conversion failures. Keep rules preserve those constructors. The signed APK verified and installed in place while the camera was idle. During the first run after installation the phone logged 47 face detector calls across preview and recording, with no recurrence of the startup or image conversion failures. User confirmation of upright preview and green guidance is pending.
+- Capture 20 and Student 20 tests passed, analysis clean in both, Student web release built. This was an Android repair. The next device check is to confirm upright orientation on entry and during recording and that the live guide responds to a centered face.
+
 ## Student camera screenshot regression — 10 November
 
 - User screenshots show Student preview upright before capture but rotated 90° during recording, with unavailable live guidance and a timed Left heading while the Front chip stays active. The Student Android preview now keeps the same portrait texture layout before and during recording; portrait capture locks before preview analysis and again before recording. A single-plane converted NV21 frame carrying a YUV420 label is accepted for ML Kit after length/layout checks. The unavailable fallback displays its timed pose as the active chip and surfaces camera orientation-control errors. These changes are based on code and screenshot diagnosis, not yet physical acceptance.
