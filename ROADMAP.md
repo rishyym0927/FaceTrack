@@ -24,7 +24,7 @@ Check a milestone only after its required outcomes are verified. Implemented cod
 
 - [ ] **3B. Student biometric enrolment**
 
-  Consent, guided capture, private upload, durable local processing, encrypted templates and supervised activation are implemented. The real happy path and two active class members are verified. Complete interrupted upload, worker restart, rejection, replacement, withdrawal, expiry, no/two-face, low-light, denied-camera and retention recovery.
+  Consent, guided capture, private upload, durable local processing, encrypted templates and supervised activation are implemented. The real happy path and two active class members are verified. On 10 November 2026 the user confirmed upright recording preview and working live guidance on Samsung SM-M356B with signed build `1efb093`. Repeat the [signed Android camera check](docs/CAMERA_VALIDATION.md#student-android-signed-release-check) for relevant releases. Complete interrupted upload, worker restart, rejection, replacement, withdrawal, expiry, no/two-face, low-light, denied-camera and retention recovery.
 
 - [ ] **4. Teacher attendance**
 

@@ -48,6 +48,8 @@ export FACETRACK_KEY_PROPERTIES=$PWD/.local/release/signing/key.properties
 
 Most phones use `app-arm64-v8a-release.apk` (about 22 MB Teacher, 34 MB Student). Installing it over an earlier **debug** build fails (different signing key): uninstall the old app first, after any pending upload has finished.
 
+Before distributing a Student APK that changes camera capture, Flutter or CameraX, ML Kit, or Android packaging, run the [signed Android camera check](CAMERA_VALIDATION.md#student-android-signed-release-check). The previous release passed Flutter tests but lost ML Kit initialization under R8 and rotated the preview only when native recording started. A debug build cannot cover the release optimizer.
+
 ## Day-to-day
 
 ```sh

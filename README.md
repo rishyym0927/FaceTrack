@@ -39,6 +39,7 @@ Private configuration and approved model files are deliberately excluded from Gi
 - Faculty home shows an attendance dashboard: overall, semester-wise and subject-wise figures, a distribution chart, a needs-attention list and a CSV report
 - Admins get a guided Administration tab: setup checklist, statistics, directories, and access management
 - Verified with real people: consented face enrolment and template activation; one classroom session reviewed and published; student history; timetable import; CSV/PDF downloads
+- Student Android recording orientation and live guidance verified on Samsung SM-M356B with signed build `1efb093`. See the [camera release check](docs/CAMERA_VALIDATION.md#student-android-signed-release-check).
 - Independent real recognition acceptance: **1 of 6** held-out scenarios. Synthetic benchmarks are reported separately and are not classroom accuracy
 - Still open: faculty email (no permitted Resend sender), physical Windows/Linux acceptance, cloud deployment, institute-scale accuracy and capacity
 

@@ -43,6 +43,7 @@ Applies to this directory and its descendants.
 - Preserve idempotent job effects, immutable publication revisions and manual corrections.
 - Measure accuracy and latency before claiming targets. Architecture alone does not establish production readiness.
 - Run focused, meaningful checks for each change; record failures and checks not run explicitly.
+- Before distributing a signed Student Android build with camera, detector, Flutter or CameraX, or release packaging changes, run the physical [Student camera release check](docs/CAMERA_VALIDATION.md#student-android-signed-release-check). Check orientation across recording start and live guidance in the signed build.
 
 ## Checkpoint maintenance
 

@@ -25,6 +25,8 @@ See root `MASTER_DESIGN.md` for scope, the [installation guide](../../docs/INSTA
 
 ## Face enrolment
 
+Before shipping changes to Android capture, ML Kit, or release packaging, run the [signed Android camera check](../../docs/CAMERA_VALIDATION.md#student-android-signed-release-check). It covers the sideways preview at recording start and missing release-only face guidance seen on the Samsung reference phone.
+
 Open Enrolment, read the versioned notice and consent only voluntarily. Record alone using all five prompts, review playback, and select Upload for processing. The API, Redis, Celery and agent must be running on the local development computer; internet access is needed for private Storage. Keep USB connected while the API is local. Native pending recordings remain in private app storage; web recordings are temporary and disappear when the page closes.
 
 Upload progress and errors appear beside the upload button. Retry upload reuses the same attempt and completion key; do not discard a recoverable recording. The application reservation lasts 15 minutes. An expired attempt requires a fresh recording. Processing produces a review candidate, not active recognition permission. A faculty member must verify identity and poses. Withdraw consent to revoke templates and queue media deletion.

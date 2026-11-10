@@ -349,6 +349,8 @@ cd ../teacher
 
 Development Android permits loopback HTTP only in the debug manifest. Release builds require HTTPS and proper signing.
 
+For Student camera or Android packaging changes, test the signed APK on a physical phone as well as running the debug build. Follow the [signed Android camera check](CAMERA_VALIDATION.md#student-android-signed-release-check) for the recording transition and live guidance.
+
 ## 8. Tests that need no private data
 
 ### Python/ML

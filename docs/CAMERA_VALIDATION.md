@@ -11,6 +11,34 @@ The Student and Teacher apps list cameras reported by the OS or browser before r
 5. With a consenting group, start a classroom recording and walk or pan slowly. Check that green outlines follow well-framed faces and clear within about a second when analysis stops. Look for dropped preview frames or recording stutter. Confirm the clip saves and plays back even if the live guidance reports it is unavailable.
 6. If Android exposes an external camera, repeat selection and playback with it. Confirm camera switching is disabled during a clip and returns after discarding it.
 
+## Student Android signed release check
+
+Run this check on a physical phone with the signed release APK before distributing changes to camera capture, Flutter or CameraX, ML Kit, or Android release packaging. The Samsung SM-M356B reproduced both failures below. Use it as a reference device when available and record the build commit, device model, Android version, and results in [PROGRESS.md](../PROGRESS.md).
+
+1. Install the signed APK while the camera is idle. Sign in with an approved test account and open **Enrolment** with the phone upright. Check that the front camera image and guide are upright and aligned.
+2. Tap **Start recording** without moving the phone. Check that the image stays upright through the transition and while recording. Center your face in good light, verify the guide turns green, and follow the prompts to check that pose progress responds.
+3. Review local playback for upright video, then discard the test clip. If timed fallback appears while a face is in view, check the device logs before passing this release check.
+
+### Sideways preview when recording starts
+
+On the Samsung, CameraX StreamSharing changed the preview buffer from 1280×720 to an already rotated 720×1280 when video and analysis ran together. The plugin applied its original sensor rotation again, turning the preview sideways. A Flutter widget test that held the preview rectangle steady could miss this native buffer change. See [Flutter issue #180075](https://github.com/flutter/flutter/issues/180075).
+
+[Student's preview](../packages/capture/lib/src/live_preview.dart) checks the actual CameraX buffer size. If recording supplies a portrait buffer and the surface does not apply its own rotation, it uses the native texture directly. The normal plugin path remains the fallback. Keep this condition tied to the native buffer and surface. Recheck the signed APK on the affected phone before removing the workaround after a CameraX update.
+
+### Live guidance unavailable in release
+
+R8 removed the no-argument constructors of ML Kit registrars loaded through reflection. The release log showed `ComponentDiscovery` failures with `NoSuchMethodException`, followed by `ImageError: Getting Image failed`. [Student's ProGuard rules](../apps/student/android/app/proguard-rules.pro) keep those constructors and are loaded by the [release build configuration](../apps/student/android/app/build.gradle.kts). Preserve both when changing Android packaging.
+
+After the test, filter Logcat to the Student app process. Run the command while the app is still open.
+
+```sh
+student_pid=$(adb shell pidof -s dev.facetrack.student)
+adb logcat -d --pid="$student_pid" |
+  rg 'Could not instantiate com.google.mlkit|NoSuchMethodException|Getting Image failed|detectFacesImageByteArray|onSuggestedStreamSpecUpdated'
+```
+
+On the verified build, ML Kit processed frames before and during recording without the earlier initialization or conversion errors. The user confirmed the upright preview and working live guidance on the Samsung on 10 November 2026. The test covers that device and build. Keep the visual check even when logs show detector calls, since detector activity alone cannot establish correct rendering or pose progress.
+
 ## Check in Chrome or Edge
 
 1. Attach an external webcam. Grant camera permission to the HTTPS app (or loopback development origin); reload after attaching if the browser does not update its device list.

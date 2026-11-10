@@ -5,13 +5,12 @@
 ## Student Android camera diagnosis and repair — 10 November
 
 - Physical Samsung SM-M356B retest disproved the previous preview change. CameraX logs show the preview switching from 1280×720 to an already rotated 720×1280 buffer when recording starts, matching Flutter issue #180075. Student Android now checks the native preview size and bypasses the plugin's extra transform only for that pre-rotated buffer on a surface that does not handle rotation itself.
-- The signed release also logged missing reflective ML Kit registrar constructors and repeated image conversion failures. Keep rules preserve those constructors. The signed APK verified and installed in place while the camera was idle. During the first run after installation the phone logged 47 face detector calls across preview and recording, with no recurrence of the startup or image conversion failures. User confirmation of upright preview and green guidance is pending.
-- Capture 20 and Student 20 tests passed, analysis clean in both, Student web release built. This was an Android repair. The next device check is to confirm upright orientation on entry and during recording and that the live guide responds to a centered face.
+- The signed release also logged missing reflective ML Kit registrar constructors and repeated image conversion failures. Keep rules preserve those constructors. The signed Student APK from `1efb093` verified and installed in place while the camera was idle. The phone logged 47 face detector calls across preview and recording, with zero repeats of the earlier initialization or image conversion errors. The user confirmed that the preview stayed upright and live guidance worked on the Samsung SM-M356B on 10 November.
+- Capture 20 and Student 20 tests passed, analysis clean in both, and the Student web release built. The [signed APK regression check](docs/CAMERA_VALIDATION.md#student-android-signed-release-check) is required before distributing relevant Android changes. Phase 3B recovery and other device coverage remain open.
 
-## Student camera screenshot regression — 10 November
+## Earlier Student camera attempt — 10 November
 
-- User screenshots show Student preview upright before capture but rotated 90° during recording, with unavailable live guidance and a timed Left heading while the Front chip stays active. The Student Android preview now keeps the same portrait texture layout before and during recording; portrait capture locks before preview analysis and again before recording. A single-plane converted NV21 frame carrying a YUV420 label is accepted for ML Kit after length/layout checks. The unavailable fallback displays its timed pose as the active chip and surfaces camera orientation-control errors. These changes are based on code and screenshot diagnosis, not yet physical acceptance.
-- Capture 20 and Student 20 tests pass; analysis clean. A regression test forces a landscape recording orientation and verifies the Student portrait preview rectangle stays fixed. Commit `006d700` was pushed. The signed arm64 Student APK built and verified with APK Signature Scheme v2, then was copied to `~/Downloads/FaceTrack-releases/FaceTrack-Student-camera-fix-2026-11-10.apk`. Both web apps were deployed from that commit and returned HTTP 200. After the phone reconnected and showed zero active camera clients, the new Student APK installed successfully; Android reports package `dev.facetrack.student` updated at 21:15 IST. Real face-guidance and orientation acceptance still needs the user to test the new installation. The earlier screenshot showed the old Front chip during a timed Down prompt, consistent with the fact that this new build had not yet been delivered; do not treat it as acceptance of the new code.
+- Commit `006d700` aligned the active pose chip with the timed prompt and kept the Flutter preview rectangle in portrait. Both web apps deployed from that commit and returned HTTP 200. The installed APK still showed a sideways camera image and unavailable live guidance on the Samsung. Those failures required the native buffer and release packaging fixes in `1efb093`.
 
 ## Camera follow-up — 10 November
 
@@ -120,7 +119,7 @@ Schema head is **`0008_admin`**, with **37 forced-RLS business tables**. The run
 - Teacher identity/pose review before activation
 - Two consenting approved class members currently have active templates
 - One complete real happy path is verified; a second active student was user-confirmed
-- Android upright preview/playback and correct left/right pose guidance are user-confirmed
+- Android upright preview/playback and correct left/right pose guidance are user-confirmed. The Samsung recording regression was separately retested and closed with signed build `1efb093`.
 
 Recovery/lifecycle acceptance remains open for interrupted upload, worker restart, rejection, replacement, withdrawal, expiry and all capture edge cases.
 
