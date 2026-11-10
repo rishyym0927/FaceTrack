@@ -5,7 +5,7 @@
 ## Camera follow-up — 10 November
 
 - In-progress review found that native classroom preview analysis did not resume after each recorded segment, so green framing could disappear while uploads paused the scan. It now resumes while the camera remains open. Student's face guide now turns green when one face is framed and sufficiently lit, including before recording, rather than waiting for a completed pose hold. Teacher scan controls distinguish an active 15-second segment, a queued-upload pause, and finishing. The teacher still explicitly ends the continuous scan with Stop; Student recording automatically ends at 25 seconds or after all verified poses and 10 seconds.
-- Capture 19, Student 20, Teacher 81 tests passed. Student and Teacher Flutter analysis found no issues. Release builds and real camera acceptance are still being checked. Do not claim live tracking reliability or orientation acceptance until tested on the connected phone and a real browser camera.
+- Capture 19, Student 20, Teacher 81 tests passed. Student and Teacher Flutter analysis found no issues. Both release web apps and both signed arm64 APKs built. Commit `c241808` was pushed; web-only deployment completed and Student, Teacher and API readiness returned HTTP 200. Both APKs installed successfully on the connected phone after confirming zero active camera clients, and both packages are present. Live guidance, orientation, recording and moving-classroom tracking still need a consenting on-device and authenticated browser check; automated builds cannot prove camera behavior.
 
 ## Continuous classroom scan — 10 November
 
