@@ -1,6 +1,6 @@
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-
 
 Rect previewFaceRect(Rect bounds, Size size, {required bool mirrored}) =>
     Rect.fromLTWH(
@@ -85,9 +85,23 @@ class LiveCameraPreview extends StatelessWidget {
         );
       },
     );
-    // CameraX already handles sensor rotation inside buildPreview().
-    // CameraPreview adds device UI orientation before and during recording.
-    // Raw sensor rotation is reserved for the ML input image.
+    // The Student screen is portrait-locked. CameraPreview switches from
+    // deviceOrientation to recordingOrientation at recording start, which can
+    // rotate its texture even though the route and sensor have not moved.
+    // Keep the same portrait display transform for both states.
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        showGuide) {
+      return Center(
+        child: AspectRatio(
+          aspectRatio: 1 / camera.value.aspectRatio,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [camera.buildPreview(), overlay],
+          ),
+        ),
+      );
+    }
     return Center(child: CameraPreview(camera, child: overlay));
   }
 }

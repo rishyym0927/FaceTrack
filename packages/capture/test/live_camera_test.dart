@@ -1,6 +1,7 @@
 import 'dart:io';
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -94,31 +95,44 @@ void main() {
     },
   );
 
-  test('Preview analysis stops before recording and resets challenge progress', () async {
-    final controller = _RecordingOnlyCamera(front);
-    final camera = GuidedCamera(enrollmentGuidance: true,
-        analyzerFactory: (_) => _UnusedAnalyzer())
-      ..controller = controller
-      ..ready = true;
-    addTearDown(camera.dispose);
-    await camera.startPreviewAnalysis();
-    expect(controller.value.isStreamingImages, true);
-    final before = camera.guidance!;
-    final now = DateTime.now();
-    for (final ms in [0, 500, 1000]) {
-      before.observe(PoseObservation(timestamp: now.add(Duration(milliseconds: ms)),
-          faceCount: 1, bounds: const Rect.fromLTWH(.3, .2, .4, .6),
-          yaw: 0, pitch: 0), allowCompletion: false);
-    }
-    expect(before.faceFramed, true);
-    expect(before.completed, isEmpty);
-    await camera.start(const ['front', 'left']);
-    expect(controller.value.isStreamingImages, false);
-    expect(camera.guidance, isNot(same(before)));
-    expect(camera.guidance!.completed, isEmpty);
-    expect(camera.recording, true);
-    await camera.interrupt();
-  });
+  test(
+    'Preview analysis stops before recording and resets challenge progress',
+    () async {
+      final controller = _RecordingOnlyCamera(front);
+      final camera =
+          GuidedCamera(
+              enrollmentGuidance: true,
+              analyzerFactory: (_) => _UnusedAnalyzer(),
+            )
+            ..controller = controller
+            ..ready = true;
+      addTearDown(camera.dispose);
+      await camera.startPreviewAnalysis();
+      expect(controller.value.isStreamingImages, true);
+      final before = camera.guidance!;
+      final now = DateTime.now();
+      for (final ms in [0, 500, 1000]) {
+        before.observe(
+          PoseObservation(
+            timestamp: now.add(Duration(milliseconds: ms)),
+            faceCount: 1,
+            bounds: const Rect.fromLTWH(.3, .2, .4, .6),
+            yaw: 0,
+            pitch: 0,
+          ),
+          allowCompletion: false,
+        );
+      }
+      expect(before.faceFramed, true);
+      expect(before.completed, isEmpty);
+      await camera.start(const ['front', 'left']);
+      expect(controller.value.isStreamingImages, false);
+      expect(camera.guidance, isNot(same(before)));
+      expect(camera.guidance!.completed, isEmpty);
+      expect(camera.recording, true);
+      await camera.interrupt();
+    },
+  );
 
   test('Classroom prefers the rear camera and falls back when absent', () {
     expect(preferredCamera([front, back], enrollment: false), back);
@@ -141,50 +155,93 @@ void main() {
     },
   );
 
-  testWidgets('Portrait preview delegates sensor rotation and fits the overlay', (
-    tester,
-  ) async {
-    final controller = _RecordingOnlyCamera(front);
-    addTearDown(controller.dispose);
-    controller.value = controller.value.copyWith(
-      isInitialized: true,
-      previewSize: const Size(1280, 720),
-    );
-    const bounds = Rect.fromLTWH(.125, .25, .25, .5);
-    await tester.pumpWidget(
-      MaterialApp(
-        home: Center(
-          child: SizedBox(
-            width: 360,
-            height: 520,
-            child: LiveCameraPreview(
-              camera: controller,
-              faces: [(bounds: bounds, framed: true)],
+  testWidgets(
+    'Portrait preview delegates sensor rotation and fits the overlay',
+    (tester) async {
+      final controller = _RecordingOnlyCamera(front);
+      addTearDown(controller.dispose);
+      controller.value = controller.value.copyWith(
+        isInitialized: true,
+        previewSize: const Size(1280, 720),
+      );
+      const bounds = Rect.fromLTWH(.125, .25, .25, .5);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: SizedBox(
+              width: 360,
+              height: 520,
+              child: LiveCameraPreview(
+                camera: controller,
+                faces: [(bounds: bounds, framed: true)],
+              ),
             ),
           ),
         ),
-      ),
-    );
-    final preview = tester.getRect(find.byType(AspectRatio));
-    expect(tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns, 0);
-    expect(preview.width, lessThan(preview.height));
-    controller.value = controller.value.copyWith(
-      isRecordingVideo: true,
-      recordingOrientation: const Optional.of(DeviceOrientation.portraitUp),
-    );
-    await tester.pump();
-    expect(tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns, 0);
-    expect(tester.getRect(find.byType(AspectRatio)), preview);
-    final box = tester.getRect(find.byType(Positioned));
-    expect(
-      box,
-      previewFaceRect(
-        bounds,
-        preview.size,
-        mirrored: true,
-      ).shift(preview.topLeft),
-    );
-  });
+      );
+      final preview = tester.getRect(find.byType(AspectRatio));
+      expect(
+        tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns,
+        0,
+      );
+      expect(preview.width, lessThan(preview.height));
+      controller.value = controller.value.copyWith(
+        isRecordingVideo: true,
+        recordingOrientation: const Optional.of(DeviceOrientation.portraitUp),
+      );
+      await tester.pump();
+      expect(
+        tester.widget<RotatedBox>(find.byType(RotatedBox)).quarterTurns,
+        0,
+      );
+      expect(tester.getRect(find.byType(AspectRatio)), preview);
+      final box = tester.getRect(find.byType(Positioned));
+      expect(
+        box,
+        previewFaceRect(
+          bounds,
+          preview.size,
+          mirrored: true,
+        ).shift(preview.topLeft),
+      );
+    },
+  );
+
+  testWidgets(
+    'Student Android preview stays portrait when recording reports landscape',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      final controller = _RecordingOnlyCamera(front);
+      addTearDown(controller.dispose);
+      controller.value = controller.value.copyWith(
+        isInitialized: true,
+        previewSize: const Size(1280, 720),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: SizedBox(
+            width: 360,
+            height: 600,
+            child: LiveCameraPreview(camera: controller, showGuide: true),
+          ),
+        ),
+      );
+      final before = tester.getRect(find.byType(AspectRatio));
+      expect(before.width, lessThan(before.height));
+      expect(find.byType(RotatedBox), findsNothing);
+      controller.value = controller.value.copyWith(
+        isRecordingVideo: true,
+        recordingOrientation: const Optional.of(
+          DeviceOrientation.landscapeLeft,
+        ),
+      );
+      await tester.pump();
+      expect(tester.getRect(find.byType(AspectRatio)), before);
+      expect(find.byType(RotatedBox), findsNothing);
+      debugDefaultTargetPlatformOverride = null;
+    },
+  );
 
   test(
     'Tracking qualifies only continuously framed faces and clears stale boxes',
@@ -272,7 +329,8 @@ class _RecordingOnlyCamera extends CameraController {
     void Function(CameraImage)? onAvailable,
     bool enablePersistentRecording = true,
   }) async {
-    if (value.isStreamingImages) throw StateError('Preview stream still active');
+    if (value.isStreamingImages)
+      throw StateError('Preview stream still active');
     if (onAvailable != null) {
       frameRequests++;
       throw CameraException(

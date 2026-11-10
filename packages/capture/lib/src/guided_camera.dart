@@ -212,6 +212,7 @@ class GuidedCamera extends ChangeNotifier {
       }
       controller = next;
       ready = true;
+      if (enrollmentGuidance && !kIsWeb) await lockPortraitCapture();
       await startPreviewAnalysis();
     } catch (_) {
       await next?.dispose();
@@ -304,6 +305,7 @@ class GuidedCamera extends ChangeNotifier {
     emit();
     try {
       await _stopPreviewAnalysis(controller);
+      if (enrollmentGuidance && !kIsWeb) await lockPortraitCapture();
       await discard();
       if (disposed || generation != epoch) return;
       guidance?.removeListener(emit);

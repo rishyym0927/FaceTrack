@@ -2,6 +2,11 @@
 
 **Reviewed:** 10 November 2026 (Asia/Kolkata)
 
+## Student camera screenshot regression — 10 November
+
+- User screenshots show Student preview upright before capture but rotated 90° during recording, with unavailable live guidance and a timed Left heading while the Front chip stays active. The Student Android preview now keeps the same portrait texture layout before and during recording; portrait capture locks before preview analysis and again before recording. A single-plane converted NV21 frame carrying a YUV420 label is accepted for ML Kit after length/layout checks. The unavailable fallback displays its timed pose as the active chip and surfaces camera orientation-control errors. These changes are based on code and screenshot diagnosis, not yet physical acceptance.
+- Capture 20 and Student 20 tests pass; analysis clean. A regression test forces a landscape recording orientation and verifies the Student portrait preview rectangle stays fixed. The signed arm64 Student APK built and verified with APK Signature Scheme v2, then was copied to `~/Downloads/FaceTrack-releases/FaceTrack-Student-camera-fix-2026-11-10.apk` for the user's requested direct install. Web build/deployment status must be checked before claiming completion. The phone was disconnected at check time; direct APK installation and real face-guidance confirmation remain open. The subsequent user screenshot still showed the old Front chip during a timed Down prompt, consistent with the fact that this new build had not yet been delivered; do not treat it as acceptance of the new code.
+
 ## Camera follow-up — 10 November
 
 - In-progress review found that native classroom preview analysis did not resume after each recorded segment, so green framing could disappear while uploads paused the scan. It now resumes while the camera remains open. Student's face guide now turns green when one face is framed and sufficiently lit, including before recording, rather than waiting for a completed pose hold. Teacher scan controls distinguish an active 15-second segment, a queued-upload pause, and finishing. The teacher still explicitly ends the continuous scan with Stop; Student recording automatically ends at 25 seconds or after all verified poses and 10 seconds.

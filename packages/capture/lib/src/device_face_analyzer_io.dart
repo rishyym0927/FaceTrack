@@ -30,7 +30,11 @@ class _MlKitAnalyzer implements PoseFrameAnalyzer {
 
   @override
   Future<PoseObservation?> analyze(CameraImage image) async {
-    if (image.format.group != ImageFormatGroup.nv21 ||
+    // CameraX can label a requested NV21 stream as YUV_420_888 while still
+    // returning its converted, single NV21 plane. Validate the plane layout
+    // before passing it to ML Kit instead of discarding every such frame.
+    if ((image.format.group != ImageFormatGroup.nv21 &&
+            image.format.group != ImageFormatGroup.yuv420) ||
         image.planes.length != 1 ||
         image.planes.first.bytes.length < image.width * image.height * 3 ~/ 2) {
       return null;

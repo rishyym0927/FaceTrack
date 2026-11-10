@@ -1064,6 +1064,7 @@ class _CaptureControls extends StatelessWidget {
         : 'Look $pose';
     final detail =
         camera.error ??
+        camera.controlMessage ??
         (timed
             ? 'Live guidance is unavailable on this camera. Keep following the timed prompts; faculty will review the recording.'
             : guidance?.hint ?? 'Opening live face guidance…');
@@ -1116,7 +1117,9 @@ class _CaptureControls extends StatelessWidget {
                   for (final direction in order)
                     _PoseChip(
                       direction: direction,
-                      active: guidance?.current == direction,
+                      active: timed
+                          ? direction == pose
+                          : guidance?.current == direction,
                       holding:
                           guidance?.current == direction &&
                           guidance?.state == GuidanceState.holding,
