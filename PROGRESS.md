@@ -1,6 +1,31 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 10 November 2026 (Asia/Kolkata)
+**Reviewed:** 11 November 2026 (Asia/Kolkata)
+
+## Audit fixes — 11 November
+
+- Student attendance clears prior data and filters after access denial and exposes retries for temporary failures. Subject history loads all dispute pages independently. The overview labels a capped history. Teacher pending-work counts show partial failures and reject stale refresh responses.
+- Timetable import rechecks faculty access and reservation ownership and purpose after Storage verification. Attendance history uses a stable session ordering with legacy cursor compatibility. All new publication revisions require binary marks. Existing legacy snapshots are retained, and a correction that would copy nonbinary marks returns `REVIEW_REQUIRED`.
+- Classroom scan teardown releases the browser camera and cleans queued Android clips. Interrupted transfers try to confirm an existing upload first. Expired or invalid clips offer discard and camera errors offer restart.
+- Web deploy stages both apps behind one release pointer and rolls back on smoke-check failure. Verified with three local deployment tests including incomplete transfer, HTTP serving and simulated post-switch failure. No Azure staging or production deployment was performed.
+- Verified clean Flutter analysis across app core, capture, Student and Teacher. Passed 72 app core, 21 capture, 21 Student, 83 Teacher, 9 browser scanner, 62 API and 56 worker tests. API integration uses local PostgreSQL and mocked Auth HTTP. Both production-configured web builds and signed arm64 APKs passed. Chrome rendered 12 routes at 390 and 1440 px using fixture accounts and intercepted API data. APKs are in Downloads/FaceTrack-releases with audit-fixes-2026-11-11 in their names.
+- Next live checks are an authenticated Android and Chrome walkthrough with a consenting recording, retry, review, publish and Student history, plus deployment rollback on a staging host. The phone was disconnected.
+
+## Android and web UI cleanup — 11 November
+
+| Screen or workflow | UI decision |
+| --- | --- |
+| Sign-in, account claim, institute selection, connection and restricted access | Use one scrollable form and compact role label. Keep field guidance, errors, retry, institute choices and access recovery. |
+| Account and notifications | Show profile details once. Keep institute switching, sign-out, notification filters, unread state and refresh. Hide the idle notification summary on subject lists. |
+| Student subjects and join dialog | Put Join subject above the subject list. Keep pending and declined states, join-code validation, refresh and the Attendance tab. |
+| Student attendance and subject history | Put published records above expandable trends or summaries. Keep filters, attendance corrections, faculty notes, and query and resolution actions. |
+| Student enrolment and camera | Keep consent, current state, pose progress, stop, cancel, clip playback, retry and withdrawal. Remove the duplicate workflow strip and camera sheet decoration. Keep timed guidance feedback and upload errors. |
+| Teacher subjects and dashboard | Use a compact subject heading and preserve pending-work links, the Sessions tab, its upcoming list and secondary analytics. Keep join codes, roster approvals and enrolment review. |
+| Teacher sessions, recording, review and published results | Remove repeated headings and the extra create action on empty lists. Keep open/close, capture guidance, upload progress and retry, binary decisions, manual overrides and Publish. |
+| Timetable, reports, disputes and Admin | Put CSV selection first and collapse format help. Keep validation and confirmation. Keep report versions, downloads and retry, query reasons and resolution controls, and Admin forms and permissions. Open the Admin tour only on request. |
+
+- Verified Flutter analysis for shared app core, Student and Teacher. Flutter tests passed (72 shared, 20 Student, 79 Teacher), including layout checks at 200% text, route guards, scan stop and upload retry, and attendance defaults. Local PostgreSQL API tests with mocked Auth HTTP passed (41 attendance, biometric and foundation tests), including join approval, unseen students and publication history.
+- Built both production-configured Flutter web releases and verified signatures on both arm64 release APKs. Headless Chrome at 390 and 1440 px verified protected routes redirect to sign-in and rendered 12 main routes across both roles with synthetic Auth and API fixtures. Physical Android was disconnected. A live authenticated walkthrough with consenting camera capture and exhaustive dialog/state checks remain open. No production rollout was performed for this UI change.
 
 ## Session workflow and binary attendance — 10 November
 

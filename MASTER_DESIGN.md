@@ -505,6 +505,10 @@ Worker config is exactly `API_BASE_URL`, `WORKER_TOKEN`, `REDIS_URL`, `MANIFEST_
 
 Flutter config is exactly `API_BASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `DEFAULT_INSTITUTE_ID`. Never place a secret key, database password, encryption key or worker token in Flutter. Student and Teacher use separate session-storage keys.
 
+On Azure, stage both Flutter web builds before switching the shared release pointer.
+Check the served HTML and JavaScript for both apps against the staged artifacts.
+Retain the prior release until checks pass and restore it on failure. See [Azure deployment](docs/DEPLOY_AZURE.md).
+
 ### Deployment order
 
 1. Validate local camera/model/runtime and lock dependencies.

@@ -3,6 +3,8 @@
 import base64
 from datetime import date, timedelta
 
+import pytest
+
 from test_attendance import open_session
 from test_biometrics import bio as bio
 
@@ -113,7 +115,10 @@ async def test_failed_report_retry_requires_authorized_teacher_and_preserves_sna
     assert after == (before, "queued")
 
 
-async def test_timetable_import_rechecks_reservation_owner_after_storage_lookup(bio):
+@pytest.mark.parametrize(
+    ("change", "expected_status"), [("owner", 404), ("delete", 404), ("faculty", 403)]
+)
+async def test_timetable_import_rechecks_access_after_storage_lookup(bio, change, expected_status):
     b = bio
     reservation = await b.client.post(
         "/v1/media-reservations",
@@ -124,15 +129,23 @@ async def test_timetable_import_rechecks_reservation_owner_after_storage_lookup(
     aid = reservation.json()["id"]
     info = b.app.state.storage.info
 
-    async def changed_owner(asset):
+    async def change_during_lookup(asset):
         with connect(b.urls["owner"]) as c:
-            c.execute(
-                "UPDATE app.media_assets SET owner_user_id=%s WHERE id=%s",
-                (b.users["other_teacher"]["id"], aid),
-            )
+            if change == "owner":
+                c.execute(
+                    "UPDATE app.media_assets SET owner_user_id=%s WHERE id=%s",
+                    (b.users["other_teacher"]["id"], aid),
+                )
+            elif change == "delete":
+                c.execute("DELETE FROM app.media_assets WHERE id=%s", (aid,))
+            else:
+                c.execute(
+                    "UPDATE app.memberships SET status='suspended' WHERE auth_user_id=%s AND role='teacher'",
+                    (b.users["teacher"]["id"],),
+                )
         return await info(asset)
 
-    b.app.state.storage.info = changed_owner
+    b.app.state.storage.info = change_during_lookup
     r = await b.client.post(
         "/v1/timetable-imports",
         headers=b.headers("teacher", key="import"),
@@ -144,11 +157,10 @@ async def test_timetable_import_rechecks_reservation_owner_after_storage_lookup(
             "sha256": "c" * 64,
         },
     )
-    assert r.status_code == 404, r.text
+    assert r.status_code == expected_status, r.text
     with connect(b.urls["owner"]) as c:
-        assert c.execute("SELECT status FROM app.media_assets WHERE id=%s", (aid,)).fetchone() == (
-            "reserved",
-        )
+        state = c.execute("SELECT status FROM app.media_assets WHERE id=%s", (aid,)).fetchone()
+        assert state == (None if change == "delete" else ("reserved",))
 
 
 async def import_ready(b, key="import", revision=0, rows=None):

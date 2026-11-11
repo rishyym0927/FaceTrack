@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/services.dart';
 import 'package:facetrack_core/facetrack_core.dart';
@@ -46,10 +47,11 @@ class FakeScanCamera extends GuidedCamera {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  var cache = '/test-private-cache';
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
         const MethodChannel('plugins.flutter.io/path_provider'),
-        (_) async => '/test-private-cache',
+        (_) async => cache,
       );
   test(
     'bounded scan continues during upload then pauses when two segments wait',
@@ -136,6 +138,31 @@ void main() {
     expect(attempts, 1);
     await scan.discardPending();
     expect(scan.pending, 0);
+  });
+
+  test('Disposal releases a clip while its upload is still pending', () async {
+    final folder = await Directory.systemTemp.createTemp('scan-test-');
+    cache = folder.path;
+    addTearDown(() async {
+      cache = '/test-private-cache';
+      await folder.delete(recursive: true);
+    });
+    final clip = await File('${folder.path}/pending.mp4').writeAsString('clip');
+    final upload = Completer<void>();
+    final camera = FakeScanCamera();
+    final scan = ClassroomScan(camera, (_) => upload.future);
+    await scan.start();
+    camera.finish(clip.path);
+    await Future<void>.delayed(Duration.zero);
+    expect(scan.pending, 1);
+    scan.dispose();
+    for (var i = 0; i < 50 && await clip.exists(); i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(await clip.exists(), false);
+    upload.complete();
+    await Future<void>.delayed(Duration.zero);
+    expect(scan.submitted, 0);
   });
 
   test('Stop closes the camera immediately and drops a short tail', () async {
