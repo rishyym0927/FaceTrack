@@ -305,12 +305,7 @@ class _TeacherSessionsState extends State<TeacherSessions> {
       list = MessageView(
         icon: Icons.event_note_outlined,
         title: 'No sessions yet',
-        message: 'Create a session for your next class, or import the timetable to schedule the whole semester at once.',
-        action: FilledButton.icon(
-          onPressed: create,
-          icon: const Icon(Icons.add),
-          label: const Text('Create session'),
-        ),
+        message: 'Create a session for your next class or import a timetable.',
       );
     } else {
       final shown = [
@@ -1378,8 +1373,6 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
-              SessionSteps(status: status, captured: captured),
-              const SizedBox(height: 14),
               Text(
                 sessionStepHint(status, captured: captured),
                 style: TextStyle(
@@ -1791,7 +1784,9 @@ String sessionStepHint(
   'open' when !captured =>
     'Scan the classroom, or go straight to review to mark attendance manually.',
   'open' => 'Add another scan if needed, then go to review. Uploads already accepted can finish processing there.',
-  'closed' || 'review_required' || 'no_data' => 'Review the suggested marks, choose Present or Absent for the remaining students, then publish.',
+  'closed' ||
+  'review_required' ||
+  'no_data' => 'Check the attendance marks and adjust them before publishing.',
   'finalized' =>
     'Attendance is published. Use Correct on a row to fix a mistake.',
   _ => 'This session was cancelled. Nothing was recorded.',
@@ -1896,7 +1891,7 @@ class _SessionHero extends StatelessWidget {
       ),
     );
     return Container(
-      padding: const EdgeInsets.all(24),
+      padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(24),
         gradient: const LinearGradient(
@@ -1910,33 +1905,26 @@ class _SessionHero extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Expanded(
-                child: Text(
-                  'ATTENDANCE SESSION',
-                  style: TextStyle(
-                    color: Color(0xffa8e5cf),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.6,
+              Expanded(
+                child: Semantics(
+                  header: true,
+                  child: Text(
+                    offering?.title ?? 'Attendance session',
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
               ),
               IconButton(
-                tooltip: 'Refresh',
+                tooltip: 'Refresh session',
                 color: Colors.white,
                 onPressed: onRefresh,
                 icon: const Icon(Icons.refresh),
               ),
             ],
-          ),
-          Text(
-            offering?.title ?? 'Attendance session',
-            style: const TextStyle(
-              color: Colors.white,
-              fontSize: 28,
-              fontWeight: FontWeight.w800,
-              letterSpacing: -.5,
-            ),
           ),
           const SizedBox(height: 10),
           Wrap(

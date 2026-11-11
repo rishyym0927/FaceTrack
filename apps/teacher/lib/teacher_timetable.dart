@@ -338,10 +338,6 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text('Timetable CSV', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 6),
-          const Text(
-            '1 · Add rooms used by your CSV.\n2 · Choose a CSV and validate it.\n3 · Check the date and entries, then confirm. Sessions open manually.',
-          ),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -352,7 +348,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
                 icon: const Icon(Icons.download_outlined),
                 label: const Text('Download CSV template'),
               ),
-              OutlinedButton.icon(
+              FilledButton.icon(
                 onPressed: busy ? null : choose,
                 icon: const Icon(Icons.upload_file_outlined),
                 label: const Text('Choose CSV'),
@@ -364,8 +360,18 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
               ),
             ],
           ),
-          const Text(
-            'Use one row per weekly period. Match the approved semester term, subject code, section, faculty email and room code. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as BCS201-CSE1-Mon-09.',
+          const ExpansionTile(
+            title: Text('CSV format and import help'),
+            childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 12),
+            children: [
+              Text(
+                'Add the rooms used by your CSV before importing. Check the validated entries before confirming. Sessions open manually.',
+              ),
+              SizedBox(height: 8),
+              Text(
+                'Use one row per weekly period. Match the approved semester term, subject code, section, faculty email and room code. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as BCS201-CSE1-Mon-09.',
+              ),
+            ],
           ),
           if (filename != null && selected != null)
             Padding(

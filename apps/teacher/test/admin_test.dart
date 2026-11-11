@@ -499,12 +499,15 @@ void main() {
   });
 
   testWidgets(
-    'The guided tour starts on a first visit, walks the sections and can be restarted',
+    'The guided tour opens on request, walks the sections and can be restarted',
     (tester) async {
       SharedPreferences.setMockInitialValues({});
       final h = await _admin(tester);
       h.services.api.dio.httpClientAdapter = _adapter(h.account, []);
       await _pumpAdmin(tester, h);
+      expect(find.text('Welcome to the Admin console'), findsNothing);
+      await tester.tap(find.text('Take the tour'));
+      await tester.pumpAndSettle();
       expect(find.text('Welcome to the Admin console'), findsOneWidget);
       expect(find.text('Step 1 of 11'), findsOneWidget);
       await tester.tap(find.text('Next'));
@@ -575,6 +578,8 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
+      await tester.tap(find.text('Take the tour'));
+      await tester.pumpAndSettle();
       // Walk the whole tour: every step must lay out at this width.
       for (var i = 0; i < 11; i++) {
         expect(find.text('Step ${i + 1} of 11'), findsOneWidget);

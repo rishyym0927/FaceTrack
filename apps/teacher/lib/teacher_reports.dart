@@ -315,19 +315,14 @@ class _TeacherReportsState extends State<TeacherReports> {
                                 '${finalReport ? 'Final report' : 'Draft report'} · version ${report['source_version']}',
                                 style: Theme.of(context).textTheme.titleMedium,
                               ),
-                              Text(
-                                [
-                                  finalReport
-                                      ? 'From the published attendance'
-                                      : 'Before publishing; may still change',
-                                  if (created != null)
-                                    'created ${l.formatMediumDate(created)}, ${l.formatTimeOfDay(TimeOfDay.fromDateTime(created))}',
-                                ].join(' · '),
-                                style: TextStyle(
-                                  fontSize: 13,
-                                  color: scheme.onSurfaceVariant,
+                              if (created != null)
+                                Text(
+                                  '${l.formatMediumDate(created)} · ${l.formatTimeOfDay(TimeOfDay.fromDateTime(created))}',
+                                  style: TextStyle(
+                                    fontSize: 13,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
                                 ),
-                              ),
                             ],
                           ),
                         ),

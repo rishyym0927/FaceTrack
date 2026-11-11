@@ -83,38 +83,28 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(authProvider);
-    String? name;
-    for (final p in auth.account?.students ?? const <Person>[]) {
-      if (p.instituteId == institute) name = firstName(p.name);
-    }
     return ContentPage(
       onRefresh: () => controller.load(),
       children: [
-        HomeHero(
-          title: '${greeting()}${name == null ? '' : ', $name'}',
-          subtitle: 'Tap a subject to see your attendance. Use a join code from your faculty to add a new one.',
-          actions: [
-            FilledButton.icon(
-              onPressed: join,
-              icon: const Icon(Icons.add),
-              label: const Text('Join subject'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => context.go('/attendance'),
-              icon: const Icon(Icons.insights_outlined),
-              label: const Text('Attendance overview'),
-            ),
-            OutlinedButton.icon(
-              onPressed: () => controller.load(),
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh'),
-            ),
-          ],
+        PageHeader(
+          title: 'Subjects',
+          action: Wrap(
+            spacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: join,
+                icon: const Icon(Icons.add),
+                label: const Text('Join subject'),
+              ),
+              IconButton(
+                tooltip: 'Refresh subjects',
+                onPressed: () => controller.load(),
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 16),
-        const AttentionCard(),
-        const SectionTitle('Your subjects'),
+        const AttentionCard(hideWhenIdle: true),
         PagedList(
           controller: controller,
           emptyTitle: 'No subjects yet',
@@ -125,9 +115,7 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
             subtitle: e.offering!.subtitle,
             status: e.status == 'active' ? null : e.status,
             note: switch (e.status) {
-              'active' => 'View attendance',
-              'requested' =>
-                'Waiting for faculty approval. No need to send it again.',
+              'requested' => 'Waiting for faculty approval.',
               'rejected' =>
                 e.reason != null && e.reason!.isNotEmpty
                     ? 'Declined: ${e.reason}'

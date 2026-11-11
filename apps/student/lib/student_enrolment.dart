@@ -446,25 +446,10 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
     final a = state!.attempt;
     final captureVisible =
         !state!.active || replacing || (a?.unfinished ?? false);
-    final step = state!.active && !replacing && !(a?.unfinished ?? false)
-        ? 5
-        : a?.status == 'review_required'
-        ? 4
-        : ['queued', 'processing'].contains(a?.status)
-        ? 3
-        : pending != null
-        ? 2
-        : state!.consentId != null
-        ? 1
-        : 0;
     return ContentPage(
       children: [
         PageHeader(
           title: 'Face enrolment',
-          subtitle:
-              'Record once, then ask your faculty to verify your identity.',
-          eyebrow: 'STUDENT SPACE',
-          icon: Icons.face_retouching_natural_outlined,
           action: OutlinedButton.icon(
             onPressed: busy ? null : load,
             icon: const Icon(Icons.refresh),
@@ -476,7 +461,6 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
             padding: const EdgeInsets.only(bottom: 16),
             child: ErrorView(error!, retry: load),
           ),
-        EnrolmentSteps(current: step),
         if (state!.active)
           Panel(
             accent: true,
@@ -587,7 +571,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   const Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
-                      'Processing runs on the institute Mac. This stays pending while its worker is offline.',
+                      'You can leave this page while your recording is processed.',
                     ),
                   ),
                 if (a.status == 'review_required')
@@ -1066,7 +1050,7 @@ class _CaptureControls extends StatelessWidget {
         camera.error ??
         camera.controlMessage ??
         (timed
-            ? 'Live guidance is unavailable on this camera. Keep following the timed prompts; faculty will review the recording.'
+            ? 'Live guidance is unavailable. Follow the timed prompts.'
             : guidance?.hint ?? 'Opening live face guidance…');
     return Material(
       color: scheme.surface,
@@ -1077,17 +1061,6 @@ class _CaptureControls extends StatelessWidget {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Center(
-              child: Container(
-                width: 42,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: scheme.outlineVariant,
-                  borderRadius: BorderRadius.circular(20),
-                ),
-              ),
-            ),
-            const SizedBox(height: 14),
             Semantics(
               liveRegion: true,
               child: Text(
@@ -1239,68 +1212,4 @@ class _PoseChip extends StatelessWidget {
       ),
     );
   }
-}
-
-class EnrolmentSteps extends StatelessWidget {
-  const EnrolmentSteps({super.key, required this.current});
-  final int current;
-  static const labels = [
-    'Consent',
-    'Record',
-    'Upload',
-    'Processing',
-    'Faculty review',
-    'Active',
-  ];
-  @override
-  Widget build(BuildContext context) => Panel(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Semantics(
-          liveRegion: true,
-          child: Text(
-            'Step ${current + 1} of 6 · ${labels[current]}',
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-        ),
-        const SizedBox(height: 12),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(100),
-          child: LinearProgressIndicator(
-            value: (current + 1) / labels.length,
-            minHeight: 7,
-            semanticsLabel: 'Face enrolment progress',
-          ),
-        ),
-        const SizedBox(height: 12),
-        Wrap(
-          spacing: 12,
-          runSpacing: 8,
-          children: List.generate(
-            labels.length,
-            (i) => Container(
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 8),
-              decoration: BoxDecoration(
-                color: i == current
-                    ? Theme.of(context).colorScheme.primary
-                          .withValues(alpha: .10)
-                    : Theme.of(context).colorScheme.surfaceContainerLowest,
-                borderRadius: BorderRadius.circular(100),
-              ),
-              child: Text(
-                '${i < current ? '✓' : '${i + 1}.'} ${labels[i]}',
-                style: TextStyle(
-                  color: i == current
-                      ? Theme.of(context).colorScheme.primary
-                      : Theme.of(context).colorScheme.onSurfaceVariant,
-                  fontWeight: i == current ? FontWeight.w700 : FontWeight.w500,
-                ),
-              ),
-            ),
-          ),
-        ),
-      ],
-    ),
-  );
 }

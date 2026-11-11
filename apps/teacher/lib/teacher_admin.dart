@@ -93,7 +93,6 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     prepare: _prepareStep,
     onEnd: _markTourSeen,
   );
-  bool _tourChecked = false;
 
   @override
   void initState() {
@@ -163,7 +162,6 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         studentsError = studentProblem;
         loading = false;
       });
-      _maybeStartTour();
     } catch (e) {
       if (!mounted || generation != _reloadGeneration) return;
       setState(() {
@@ -481,27 +479,6 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   void _startTour() => tour.start(context);
 
   String? get _userId => ref.read(authProvider).account?.userId;
-
-  Future<void> _maybeStartTour() async {
-    if (_tourChecked) return;
-    _tourChecked = true;
-    final user = _userId;
-    if (user == null) return;
-    bool seen;
-    try {
-      seen =
-          (await SharedPreferences.getInstance()).getBool(
-            adminTourSeenKey(user),
-          ) ??
-          false;
-    } catch (_) {
-      seen = true; // Unknown: never interrupt an admin with an unexpected tour.
-    }
-    if (seen || !mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _startTour();
-    });
-  }
 
   Future<void> _markTourSeen() async {
     final user = _userId;
@@ -929,10 +906,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _Heading(
-              'Quick actions',
-              subtitle: 'The tasks admins do most often.',
-            ),
+            const _Heading('Quick actions'),
             StatGrid(
               minTileWidth: 200,
               children: [
@@ -988,7 +962,6 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
           children: [
             _Heading(
               'Institute at a glance',
-              subtitle: 'Live counts of everything set up so far.',
               tip: const _InfoTip(
                 'What these numbers mean',
                 'Semester terms, subjects and sections make up the academic structure. An '
