@@ -14,7 +14,7 @@ FaceTrack runs online on a single Azure virtual machine. Data stays in the hoste
 - Azure for Students subscription, resource group `facetrack-rg`, VM `facetrack-vm`, Central India, `Standard_B2as_v2` (2 vCPU, 8 GB, burstable), Ubuntu 24.04, 64 GB Standard SSD, static public IP with DNS label `facetrack`. About US$45 a month from student credit.
 - Firewall: 80 and 443 open; SSH (22) only from the operator's IP. Port 8000 is never opened: the API listens on `127.0.0.1` and Caddy fronts it.
 - Login: `ssh -i ~/.ssh/facetrack_azure azureuser@facetrack.centralindia.cloudapp.azure.com`. The key exists only on the operator's Mac.
-- Layout: code in `/opt/facetrack` (from `git archive origin/main`), web builds in `/srv/facetrack/{teacher,student}`, Caddy config in `/etc/caddy/Caddyfile` (copy of [deploy/azure/Caddyfile](../deploy/azure/Caddyfile)).
+- Layout: code in `/opt/facetrack` (from `git archive origin/main`), web builds served at `/srv/facetrack/{teacher,student}`, Caddy config in `/etc/caddy/Caddyfile` (copy of [deploy/azure/Caddyfile](../deploy/azure/Caddyfile)).
 - Private files copied over SSH: `services/api/.env`, `services/worker/.env`, `.local/spike/models/buffalo_sc/` and `.local/spike/profiles/frozen-phase1b-v1.json`. On the server, `MIGRATION_DATABASE_URL` is removed from the API `.env` (the runtime never uses the owner credential) and `CORS_ORIGINS` includes the public origin.
 - Caddy blocks `/internal/*` (the agent reaches the API on the private Docker network) and the OpenAPI docs pages.
 
@@ -33,6 +33,15 @@ From the Mac, after pushing to `main` (the script starts the VM if it is dealloc
 deploy/azure/deploy.sh            # ships origin/main, rebuilds containers and both web apps
 deploy/azure/deploy.sh --web-only # only the web apps
 ```
+
+Both builds transfer into a new release directory before the shared `web-current`
+pointer changes. The first run converts the existing app directories into
+symlinks while preserving their content. The script checks the public HTML and
+JavaScript for both apps and restores the previous pointer on failure. A full
+deploy also restores the previous service tree if the web checks fail. Keep
+`/srv/facetrack` writable by the deploy user and retain the previous release
+directory for recovery.
+
 
 It needs `.local/flutter/production.json` (a copy of `development.json` with `API_BASE_URL` set to the public address). It never ships uncommitted local edits and never touches the server's `.env` or model files. No migration runs on deploy.
 

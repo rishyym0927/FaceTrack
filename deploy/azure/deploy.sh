@@ -13,6 +13,9 @@ NSG=${FACETRACK_NSG:-facetrack-vmNSG}
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 CFG="$ROOT/.local/flutter/production.json"
 REMOTE="azureuser@$HOST"
+case "$HOST" in
+  ''|*[!a-zA-Z0-9.-]*) echo "Invalid deployment hostname." >&2; exit 1 ;;
+esac
 ssh_vm() { ssh -i "$KEY" -o ConnectTimeout=15 "$REMOTE" "$@"; }
 
 [ -f "$CFG" ] || { echo "Missing $CFG (development.json with API_BASE_URL=https://$HOST)"; exit 1; }
@@ -54,11 +57,28 @@ for app in teacher student; do
   (cd "$WT/apps/$app" && "$ROOT/scripts/flutter" pub get --enforce-lockfile >/dev/null &&
     "$ROOT/scripts/flutter" build web --release --base-href "/$app/" --dart-define-from-file="$CFG")
 done
+WEB_ROOT=/srv/facetrack
+WEB_STAGE=$(ssh_vm 'set -e
+stage=$(mktemp -d /srv/facetrack/release-XXXXXXXX)
+chmod 755 "$stage"
+mkdir "$stage/teacher" "$stage/student"
+printf "%s\n" "$stage"')
+case "$WEB_STAGE" in
+  "$WEB_ROOT"/release-[a-zA-Z0-9][a-zA-Z0-9][a-zA-Z0-9][a-zA-Z0-9][a-zA-Z0-9][a-zA-Z0-9][a-zA-Z0-9][a-zA-Z0-9]) ;;
+  *) echo "Invalid remote staging directory." >&2; exit 1 ;;
+esac
+for app in teacher student; do
+  if ! rsync -az -e "ssh -i '$KEY'" "$WT/apps/$app/build/web/" "$REMOTE:$WEB_STAGE/$app/"; then
+    ssh_vm "rm -rf '$WEB_STAGE'" || true
+    exit 1
+  fi
+done
+activate_web() {
+  ssh_vm "python3 - '$WEB_ROOT' '$WEB_STAGE' 'https://$HOST'" < "$ROOT/deploy/azure/activate_web.py"
+}
 if [ "${1:-}" = "--web-only" ]; then
-  for app in teacher student; do
-    rsync -az --delete -e "ssh -i '$KEY'" "$WT/apps/$app/build/web/" "$REMOTE:/srv/facetrack/$app/"
-  done
-  echo "Web apps updated."
+  activate_web
+  echo "Both web apps updated and verified."
   exit 0
 fi
 
@@ -68,7 +88,9 @@ fi
 # removed only once worker and agent run from the new one.
 ssh_vm 'sudo rm -rf /opt/facetrack.new && sudo install -d -o azureuser -g azureuser /opt/facetrack.new'
 git -C "$ROOT" archive --format=tar origin/main | ssh_vm 'tar -xf - -C /opt/facetrack.new'
-ssh_vm 'set -e
+rsync -az -e "ssh -i '$KEY'" "$ROOT/deploy/azure/activate_web.py" "$REMOTE:$WEB_STAGE/"
+ssh_vm "WEB_STAGE='$WEB_STAGE' WEB_BASE='https://$HOST' sh -s" <<'REMOTE_DEPLOY'
+set -e
 cd /opt
 cp -p facetrack/services/api/.env facetrack.new/services/api/.env
 cp -p facetrack/services/worker/.env facetrack.new/services/worker/.env
@@ -97,9 +119,9 @@ cd /opt/facetrack
 timeout 600 docker compose up -d --build --force-recreate --wait || rollback
 running || rollback
 curl -fsS --max-time 10 http://127.0.0.1:8000/health/ready >/dev/null || rollback
+curl -fsS --max-time 10 "$WEB_BASE/health/ready" >/dev/null || rollback
+python3 "$WEB_STAGE/activate_web.py" /srv/facetrack "$WEB_STAGE" "$WEB_BASE" || rollback
 sudo rm -rf /opt/facetrack.old /opt/facetrack.failed
-docker compose ps --format "{{.Service}} {{.State}}"'
-for app in teacher student; do
-  rsync -az --delete -e "ssh -i '$KEY'" "$WT/apps/$app/build/web/" "$REMOTE:/srv/facetrack/$app/"
-done
-curl -fsS "https://$HOST/health/ready" && echo
+docker compose ps --format "{{.Service}} {{.State}}"
+REMOTE_DEPLOY
+echo "Services and both web apps updated and verified."
