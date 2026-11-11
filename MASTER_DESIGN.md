@@ -29,8 +29,8 @@ The agreed technology stack is unchanged. This revision removes repeated explana
 
 ### Deliver for the demonstration
 
-- Separate student and teacher Flutter applications, with shared code. Android is the initial mobile target; a teacher Flutter web build accesses the Mac camera.
-- Student signup, verified linkage to an approved roster, consent, and a guided front/up/down/left/right enrolment video.
+- Separate Student and Teacher Flutter apps with shared code. Both run on Android and web.
+- Sign-in with provisioned accounts, verified linkage to an approved roster, consent, and a guided front/up/down/left/right enrolment video.
 - Face-template generation, supervised activation, and storage linked to the correct student.
 - Courses, rosters, sessions, and a basic structured CSV timetable upload with preview/confirmation.
 - Teacher camera capture, actual recognition, visible progress, provisional attendance, teacher correction and publication.
@@ -66,7 +66,7 @@ These are planning assumptions, not measured institute facts. Verified developme
 | PostgreSQL is authoritative | Redis loss or worker retries cannot erase attendance or job state |
 | Exact, roster-scoped cosine matching | Tens of identities per class do not require an approximate vector index |
 | Human-reviewed publication | A usable scan suggests Present or Absent. Only a teacher may publish. |
-| Local worker for demo; always-on CPU worker later | Supports minimal cost while retaining the same processing interface; Runpod/GPU stays optional after measurement |
+| CPU worker for local and Azure demo profiles | Supports minimal cost while retaining the same processing interface; Runpod/GPU stays optional after measurement |
 | CSV timetable first | Deterministic import; PDF/OCR and ERP integration can feed the same normalized model later |
 
 Retain pandas/openpyxl, ReportLab, Resend and Docker. Sentry and GitHub Actions remain planned operational work and are not present in the repository. No React rewrite, MongoDB/Firebase Auth migration, Kubernetes or new message platform.
@@ -114,7 +114,7 @@ The worker agent is a small module, not another hosted service. It lets the Mac 
 | Redis/Celery/ML | Existing Mac; CPU baseline | Persistent CPU worker group on one always-on server (AWS Mumbai estimated); GPU is not required at the measured 356 ms pipeline time and is reconsidered only if benchmarks or continuous camera streaming demand it |
 | Reports/email | Worker group on Mac | Always-on CPU worker group |
 
-The target demo is **cloud-hosted data with local application processing**. Supabase Auth, PostgreSQL and private Storage are hosted; FastAPI, Redis, Celery and inference run on the development computer, and Android uses USB forwarding. The verified host is macOS. Windows uses native Flutter with the same Linux API/Redis/worker services in Docker Desktop, because native Windows Celery and Redis are not a supported runtime. It is not an entirely cloud-executed inference system. The local computer must stay awake. Institute deployment removes these availability limitations through funded capacity, without replacing the domain model or APIs.
+Supabase hosts Auth, PostgreSQL and private Storage. The Azure demo serves both web apps over HTTPS and runs FastAPI, Redis, the agent and CPU inference on one VM. The local development profile runs the services on the development machine, with USB forwarding for Android debug builds. Windows uses native Flutter and Linux containers for the backend. Institute operation still requires model rights, capacity and recovery validation.
 
 ## 3. Code structure
 
@@ -162,7 +162,7 @@ Visual system: Material 3 with deep teal-to-green branded headers, pale neutral 
 
 Add `/v1/me/enrollments` with own-account derivation and keyset pagination, returning enrolment state/version and a limited offering summary even for rejected/withdrawn history. Add course/term/group labels to offering summaries and optional status filtering before pagination on the faculty roster route. Core database schema remains unchanged. Regenerate OpenAPI and typed Dart contracts with these read additions.
 
-Keep existing local camera app on a separate `main_spike.dart` entrypoint; do not alter frozen ML files. Teacher web uses localhost:5300; student web localhost:5301; spike localhost:5302. CORS permits the exact product origins. Android IDs are dev.facetrack.student and dev.facetrack.teacher. Use installed Flutter and JDK17, Android SDK36/minSDK24 and generated compatible Gradle tooling; native verification uses the user's USB-connected phone, not an emulator. `adb reverse tcp:8000 tcp:8000` reaches the Mac API; localhost HTTP is allowed only for debug Android builds, release endpoints require HTTPS. Public Flutter config contains only API/Supabase URLs, publishable key and demo institute ID. Native debug APKs and web artifacts are the phase deliverables; standalone deployment and production signing come later.
+Keep existing local camera app on a separate `main_spike.dart` entrypoint; do not alter frozen ML files. Teacher web uses localhost:5300; student web localhost:5301; spike localhost:5302. CORS permits the exact product origins. Android IDs are dev.facetrack.student and dev.facetrack.teacher. Use installed Flutter and JDK17, Android SDK36/minSDK24 and generated compatible Gradle tooling; native verification uses the user's USB-connected phone, not an emulator. `adb reverse tcp:8000 tcp:8000` reaches the Mac API; localhost HTTP is allowed only for debug Android builds, release endpoints require HTTPS. Public Flutter config contains only API/Supabase URLs, publishable key and demo institute ID. Signed release APKs use the HTTPS Azure API. Follow the [installation guide](docs/INSTALLATION.md) for local debug and the [Azure guide](docs/DEPLOY_AZURE.md) for release builds.
 
 ## 4. Data model
 
@@ -248,7 +248,7 @@ Lock session before attendance mutation; lock student before template activation
 
 Branches: scheduled/open → cancelled; closed → no_data when no usable evidence/manual assessment exists; no_data → review_required after teacher action. Finalized corrections create revision N+1; they do not reopen the session or overwrite old publications.
 
-At open, freeze active course membership in session_roster and initialize attendance rows as unassessed. Later course/section changes cannot rewrite historical rosters. Already-accepted captures may finish after close; results arriving after finalization are review suggestions only.
+At open, freeze active course membership in `session_roster` and initialize attendance rows as unresolved. Later course or section changes cannot rewrite historical rosters. Already accepted processing can finish after close. Finalization requires settled recognition jobs.
 
 ### Enrolment
 
@@ -260,10 +260,9 @@ Rejected/failed attempts show actionable reasons and permit a new attempt. Appro
 
 New attendance decisions and publications use **Present** or **Absent** only. The Teacher review shows one choice per frozen approved roster member. The API rejects publication while any member lacks a final mark or recognition is still processing.
 
-- A corroborated identity suggests Present. After a usable capture, every other approved roster member starts as draft Absent, including students outside the camera view and students without a matchable template. Teachers verify and can change each mark before publishing.
-- After successful processing, the review preselects Present for matches and Absent for everyone else, including limited footage. The teacher can edit any mark and publish with one click. If processing fails or there is no recording result, the teacher chooses marks manually. An internal unresolved row represents work still to review, rather than a publishable status.
+- The API records Present evidence for corroborated matches and proposes absence for remaining approved students after usable footage. The Teacher review preselects Present for matches and Absent for other unresolved rows when processing produces a result, including limited footage. A failed scan alone or no recording result requires manual marks. The teacher can change any draft mark and publish once processing settles.
 - Later usable clips can add Present suggestions. Limited clips cannot erase earlier evidence or draft absence. A manual mark is locked against recognition updates.
-- Corrections require a reason, actor, expected version and a new immutable revision. Older publications remain historical. Legacy late counts as Present. Unmarked historical entries are excluded from current student attendance views.
+- Corrections require a reason, actor, expected version and a new immutable revision. Older publications remain historical. Corrections and accepted disputes return `REVIEW_REQUIRED` if the resulting publication would retain any nonbinary legacy mark. Legacy late counts as Present. Unmarked historical entries are excluded from current student attendance views.
 - Match only students on the frozen roster with current consent and compatible templates.
 
 **Percentage policy `session-v1`.** Divide published Present marks (including legacy late) by published Present plus Absent. Older records without a binary mark, cancelled sessions and unpublished sessions are excluded. When there are no marks, the percentage is null. One clip establishes observed presence at capture time.
@@ -305,9 +304,9 @@ Errors: `{error:{code,message,request_id,retryable,details}}`. Use 401 authentic
 | `PUT /sessions/{id}/attendance-review` | `{decisions:[{student_id,status,reason?}]}`; manual locks; If-Match |
 | `POST /sessions/{id}/finalize` | Present/Absent for the entire roster, all recognition jobs settled; publish + report job |
 | `POST /sessions/{id}/corrections` | `{student_id,status,reason,publication_revision}`; new revision |
-| `GET /me/attendance` | Own published history/summary only; no arbitrary student parameter |
+| `GET /me/attendance` | Own published history and summary. Order by session start and stable session ID. Publication UUID cursors resolve to their session and remain valid after corrections. |
 | `POST /media-reservations` | Purpose timetable + upload metadata; teacher/admin only |
-| `POST /timetable-imports`, `GET /timetable-imports/{id}` | `{asset_id,term_id,base_revision}` → validation job/preview |
+| `POST /timetable-imports`, `GET /timetable-imports/{id}` | `{asset_id,term_id,base_revision,byte_size,sha256}` → validation job/preview. Recheck faculty access and reservation ownership and purpose after Storage verification. |
 | `POST /timetable-imports/{id}/commit` | `{preview_hash,expected_revision}` → atomic schedule update |
 | `GET /reports/{id}`, `GET /reports/{id}/download?format=csv\|pdf` | Assigned teacher; authorized short-lived download |
 | `POST /reports/{id}/deliveries` | No arbitrary address; backend resolves verified faculty recipient |
@@ -333,7 +332,7 @@ Recognition results contain capture/model/roster hash and evidence `{student_id,
 
 ## 7. Camera and media pipeline
 
-Use the official Flutter camera adapter for Android/web. Mac capture uses **Flutter web on HTTPS or localhost**, initially Chrome; do not assume native macOS support. Test permission denial, app pause/resume, camera already in use, orientation and actual recorded codec. Audio is off.
+Android uses the Flutter camera adapter. The Teacher web classroom scanner uses browser media APIs on **HTTPS or localhost**. Chrome is the primary web test target. Test permission denial, app pause/resume, camera already in use, orientation and actual recorded codec. Audio is off.
 
 Student and Teacher Android use CameraX and local ML Kit analysis. When simultaneous recording and analysis make CameraX deliver an already rotated portrait buffer, the shared preview bypasses the plugin's sensor transform only if the surface does not handle rotation itself. The overlay fits the native buffer dimensions. Both signed APKs use shared rules that preserve the ML Kit registrar constructors Android discovers through reflection. Maintain these safeguards and validate changes using the signed camera checks for [Student](docs/CAMERA_VALIDATION.md#student-android-signed-release-check) and [Teacher](docs/CAMERA_VALIDATION.md#teacher-android-signed-release-check).
 
@@ -342,7 +341,7 @@ One Mac camera gives one viewpoint. It cannot demonstrate 20 physical rooms or g
 | Input | Limit |
 |---|---|
 | Enrolment clip | 30s / 25MiB |
-| Class clip | 30s / 50MiB; prefer 5–15s |
+| Class clip | 25 MiB per segment; see [camera validation](docs/CAMERA_VALIDATION.md) for capture timing and device checks |
 | CSV/XLSX timetable | 5MiB / 2,000 rows |
 | Video profile | MP4/H.264 or WebM/VP8/VP9; ≤1080p, bounded decode frame/pixel/time budget |
 
@@ -509,11 +508,13 @@ On Azure, stage both Flutter web builds before switching the shared release poin
 Check the served HTML and JavaScript for both apps against the staged artifacts.
 Retain the prior release until checks pass and restore it on failure. See [Azure deployment](docs/DEPLOY_AZURE.md).
 
+The current Azure demo runs FastAPI, Redis, the agent and a CPU worker on one VM. The local stack remains available for development. [Deployment guide](docs/DEPLOY_AZURE.md) · [Verified release](PROGRESS.md#azure-audit-release--11-november)
+
 ### Deployment order
 
 1. Validate local camera/model/runtime and lock dependencies.
 2. Provision Supabase; apply migrations, tenant RLS and private bucket policies; seed approved demo identities/academics.
-3. Start CPU-only FastAPI locally for the demo; configure exact localhost CORS and client settings. HTTPS/cloud deployment is a later gate.
+3. Start the local API and configure exact local CORS origins. Use the Azure runbook for the hosted demo.
 4. Start private Redis and the Mac or Linux-container worker/agent; verify worker claim/heartbeat/completion.
 5. Build student/teacher Android APKs and teacher web; test real camera/codec path and intended email recipient.
 6. Run the full demonstration script and restart/retry tests before presentation.
@@ -652,7 +653,7 @@ Implementation contract clarification (3B): normalize Storage info MIME from cur
 
 The user approved small usability improvements followed by sessions/real recognition, teacher publication/student history, structured CSV timetable and publication-based CSV/PDF reports with permitted faculty email. Demo remains USB-connected with Mac API/Redis/Celery/CPU and existing free hosted Supabase; HTTPS API deployment moves after the demo. Preserve the accepted enrolment and all frozen ML files. Phase 3A account/class acceptance passed on both apps, including session restoration/logout, invalid-code handling and Teacher web keyboard/screen-reader navigation. Phase 3B recovery/lifecycle tests and broader recognition acceptance remain open.
 
-Student keeps Classes/Enrolment/Account; enrolment shows Consent → Record → Upload → Processing → Teacher review → Active, concise capture guidance and a secondary replacement action. Teacher class uses Sessions (only after functional), Join requests, Students and Face reviews with explanatory text. Use plain quality labels/local dates, actionable nearby errors and success feedback. No decorative dashboard or unsupported action. Attendance decisions saved while a session is open are drafts. After closure, the Teacher app keeps Publish disabled until every roster row has a binary decision and recognition processing finishes. A stale-version error offers refresh with a warning that unsaved choices will be discarded, then requires review again. Sessions freeze membership, initialize unassessed rows and use current eligible encrypted templates through a job-scoped in-memory adapter. ML suggests presence only; teacher decisions/publications remain authoritative.
+Student navigation includes Subjects, Attendance, Enrolment and Account; enrolment shows Consent → Record → Upload → Processing → Teacher review → Active, concise capture guidance and a secondary replacement action. Teacher class uses Sessions (only after functional), Join requests, Students and Face reviews with explanatory text. Use plain quality labels/local dates, actionable nearby errors and success feedback. No decorative dashboard or unsupported action. Attendance decisions saved while a session is open are drafts. After closure, the Teacher app keeps Publish disabled until every roster row has a binary decision and recognition processing finishes. A stale-version error offers refresh with a warning that unsaved choices will be discarded, then requires review again. Sessions freeze membership, initialize unassessed rows and use current eligible encrypted templates through a job-scoped in-memory adapter. ML suggests presence only; teacher decisions/publications remain authoritative.
 
 **Student live capture guidance (authorized enhancement):** During enrolment recording, analyze preview frames locally on Android and Chrome to guide the server-issued front-first pose order. Display a face outline, current direction and five progress circles. Advance after one well-sized, centered face holds the requested approximate orientation briefly; explain no face, multiple faces, inadequate size and poor lighting without asserting identity, liveness or final quality. Stop once all five prompts appear captured and at least 10 seconds have elapsed, or at 25 seconds. Preserve a clip with incomplete live guidance for playback, warning, retake or upload for supervised review. Browser preview frames never leave the device; only the completed clip uses the existing private upload. This feature does not change model/profile versions, server pose labels (`unverified`), consent, teacher confirmation, the 25 MiB media limit or attendance authority. The Android preview follows section 7. ML Kit input rotation uses the camera sensor and recording orientation. The advisory outline is fitted to the displayed preview and mirrored for front-facing cameras. Front-camera detector yaw is inverted to match user-facing left/right prompts. Verify rotation and direction signs on each supported device model before rollout. The current Flutter web camera plugin does not stream frames during recording, so a browser capture adapter shares one media stream for preview, local analysis and audio-free recording. Verify Android simultaneous frame analysis/recording on the physical phone and record any limitations in PROGRESS.
 

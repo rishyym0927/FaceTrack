@@ -16,7 +16,7 @@ It assumes the client uses **Claude Code** (or another Claude session with termi
 
 ## Owner checklist (Rishi, before sending)
 
-1. **Put the latest code on `main`.** The client runs `git pull` on `main`, so she only gets what is merged and pushed there. That includes the faculty dashboard (overall, semester-wise and subject-wise attendance), the guided Admin tab, the academic terminology changes and this guide, which are on `admin-docs-upgrade` and not yet on `origin/main`. These are Flutter-only: they add no API route or migration. `origin/main` already contains `services/api/migrations/versions/0008_admin.py` and the `0008_admin` readiness check.
+1. **Confirm the target release is on `main`.** The update pulls the remote branch. Confirm its expected commit and database migration head before giving it to the recipient.
 2. **Build the encrypted archive** with this structure. The ML part is required. The worker `.env` is optional (see step 4).
 
    ```text
@@ -225,79 +225,10 @@ cd ~/FaceTrack/apps/student
 
 ## Prompt to copy into Claude Code
 
-Copy everything inside this block. It is self-contained, so it works even before this guide is in her copy of the repository.
-
-```text
-You are upgrading my existing FaceTrack installation to the latest code and adding the licensed ML model files. I am nontechnical, so perform the terminal and file operations yourself, explain only the actions I must take, and verify each step before continuing.
-
-My install folder is C:\FaceTrack on Windows or ~/FaceTrack on macOS (ask me if it is somewhere else). It is already connected to Rishi's shared hosted Supabase project. I have received an encrypted archive from Rishi containing the model folder and frozen profile, and its password through a separate channel.
-
-Safety rules (these override everything else):
-1. Never display, print, upload or commit .env files, tokens, passwords, keys, model files, recordings, embeddings or templates. Check private files by name, size and existence only.
-2. Never run seed, Alembic/migration, provisioning (tools.provision_*), configuration (tools.configure_*), key-rotation or model-download commands. The hosted database is already at schema 0008_admin; no migration is needed.
-3. Never run `docker compose down -v`, never delete Docker volumes, and never touch Supabase data, attendance records or biometric data.
-4. Never discard local work: no `git reset`, `git stash`, `git clean`, `git checkout -- <file>` or forced operations. If Git refuses an operation or shows modified tracked files, stop and tell me exactly what it says.
-5. Do not accept biometric consent, record a face, approve an enrolment or pose, or publish attendance for me. Do not modify application code, model files, the profile or settings to make a check pass.
-6. If a private file is missing, or the worker reports an unauthorized or expired credential, stop and tell me to contact Rishi. Do not invent or regenerate values.
-
-Read docs/INSTALLATION.md (and docs/WINDOWS_SETUP.md on Windows) before acting. If docs/UPGRADE_EXISTING_INSTALL.md exists after the update, follow it; it matches these steps.
-
-Do this in order:
-
-A. Inspect
-- Detect the OS. On Windows use PowerShell and run `Set-ExecutionPolicy -Scope Process Bypass` in each new PowerShell.
-- Determine whether the folder is a Git clone or a ZIP extraction. For Git, run `git status` and record `git rev-parse HEAD` as the rollback point. For a ZIP install, note that there is no commit and the old folder will be the rollback copy.
-- Report, by name only, which of these exist: services/api/.env, services/worker/.env, .local/flutter/development.json, .local/spike/models/buffalo_sc/, .local/spike/profiles/frozen-phase1b-v1.json. If services/api/.env or .local/flutter/development.json is missing, stop.
-
-B. Back up
-- Create a dated folder outside the repository (e.g. C:\FaceTrack-backup-YYYY-MM-DD or ~/FaceTrack-backup-YYYY-MM-DD) and copy services/api/.env, services/worker/.env (if present) and the whole .local folder into it, keeping relative paths. Confirm the copies exist with matching sizes.
-
-C. Stop services
-- Windows: `.\scripts\windows\stop-demo.ps1`. macOS: `make down`. Ask me to close the two Flutter windows.
-
-D. Update code
-- Git: `git fetch origin`, `git switch main`, `git pull --ff-only`. Stop and report on any refusal.
-- ZIP: ask me for the new ZIP, extract it beside the old folder (never over it), copy services/api/.env, services/worker/.env and the whole .local folder from the backup into the new folder, then rename the old folder to FaceTrack-old and the new one to FaceTrack.
-- Confirm services/api/.env and .local/flutter/development.json exist in the updated folder before continuing. setup.ps1 would create a new services/api/.env with a wrong join-code key if it were missing.
-
-E. Install the ML files
-- Ask me to select the encrypted archive and to type its password into the extraction tool myself. Extract to a temporary folder outside the repository.
-- Copy into the repository root so these exist: .local/spike/models/buffalo_sc/manifest.json, license-evidence.json, det_500m.onnx, w600k_mbf.onnx, and .local/spike/profiles/frozen-phase1b-v1.json. Copy any other files in the archive's buffalo_sc folder too.
-- Only if the archive contains services/worker/.env, copy it over the existing one (it is a renewed credential). Otherwise keep the existing file.
-- Verify by name and size only: det_500m.onnx 2,524,817 bytes; w600k_mbf.onnx 13,616,099 bytes.
-- Git install: run `git check-ignore services/api/.env services/worker/.env .local/flutter/development.json .local/spike/models/buffalo_sc/manifest.json .local/spike/models/buffalo_sc/w600k_mbf.onnx .local/spike/profiles/frozen-phase1b-v1.json` and confirm every path is printed.
-- Delete the unencrypted temporary extraction folder. Let me decide about the encrypted archive.
-
-F. Refresh dependencies and images
-- Windows: `.\scripts\windows\setup.ps1 -SkipContainerBuild` (start-demo.ps1 builds the images in step G).
-- macOS: `flutter pub get --enforce-lockfile` in apps/teacher and in apps/student, then `make build` in the repository root. Do not use scripts/setup.sh for this upgrade.
-
-G. Start
-- Ensure Docker Desktop is running with Linux containers.
-- Windows: `.\scripts\windows\start-demo.ps1` (add `-Browser edge` only if Chrome is unavailable).
-- macOS: `make up`, then in two separate Terminal windows:
-  cd apps/teacher && ../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5300 --dart-define-from-file=../../.local/flutter/development.json
-  cd apps/student && ../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5301 --dart-define-from-file=../../.local/flutter/development.json
-
-H. Verify ML without any face data (on Windows add `-f compose.windows.yaml` after `docker compose`)
-- `http://127.0.0.1:8000/health/ready` returns ready.
-- `docker compose ps` shows redis, api, worker and agent running (not restarting).
-- `docker compose logs --tail 100 worker agent` contains none of: "Configure the scoped local worker first.", "Worker API must use HTTPS or local loopback.", "This milestone uses a private local Redis broker.", MODEL_PERMISSION_REQUIRED, LICENSE_EVIDENCE_MISMATCH, MODEL_HASH_MISMATCH, PROFILE_MODEL_MISMATCH, 401, 403, unauthorized or expired.
-- Run this exactly and expect the single line "model and profile OK":
-  docker compose exec worker /opt/venv/bin/python -c "from pathlib import Path; from facetrack_ml.config import load_manifest, load_profile, canonical_hash; m = load_manifest(Path('/workspace/.local/spike/models/buffalo_sc/manifest.json')); load_profile(Path('/workspace/.local/spike/profiles/frozen-phase1b-v1.json'), canonical_hash(m.model_dump())); print('model and profile OK')"
-
-I. Functional check
-- Open Teacher at http://localhost:5300 and Student at http://localhost:5301. I will type my demo passwords into the apps myself; never ask me to paste them here.
-- Confirm the Teacher and Student subject lists load and the faculty dashboard (overall, semester-wise and subject-wise attendance) opens, using read-only navigation only.
-
-J. If something fails
-- Report the failing step, command and error text (without secrets) and stop. Do not roll back unless I ask.
-- Rollback when I ask: stop services; Git `git switch --detach <recorded commit>` or ZIP rename the folders back; restore services/api/.env, services/worker/.env and .local from the backup; rebuild and start (Windows start-demo.ps1; macOS `make build` then `make up`). Tell me that older code may report NOT_READY because the hosted database is at 0008_admin.
-
-Note: Rishi's backend also processes jobs from the same hosted project. If Rishi is demonstrating, stop my backend afterwards (Windows stop-demo.ps1, macOS make down) unless Rishi says otherwise.
-
-Completion report: a short table with Passed/Failed for backup, code update (record old and new commit, or ZIP), ML files present and Git-ignored, API readiness, four container states, worker/agent log check, model/profile load check, Teacher web and Student web. List any action I still have to take. Do not claim success for a check that did not run.
-```
+Give the assistant the checkout path and the location of the encrypted archive.
+Ask it to follow this guide from the start, report failed checks, and leave
+credentials and hosted data untouched. Enter archive and account passwords
+directly in the extraction tool or app.
 
 ## Related guides
 

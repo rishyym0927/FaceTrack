@@ -1,58 +1,46 @@
 # FaceTrack Teacher
 
-Separate Flutter Android/web app for faculty (and admins). Faculty manage their assigned subjects: join codes, student requests, rosters, face-enrolment review, sessions, timetable import, attendance publication and reports. Both apps share authentication, API transport, theme and controls through `packages/app_core`; permissions come from the backend, never from which app is opened.
+The Teacher app runs on Android and the web. Faculty manage assigned subjects, approve join requests, review face enrolment, take attendance, publish results and download private reports. The API checks active memberships and assignments. Accounts with an active admin membership also see **Admin**.
 
-Verified state and open acceptance checks are tracked in [`PROGRESS.md`](../../PROGRESS.md).
+## Run locally
 
-## Faculty dashboard
-
-The home screen (`lib/teacher_dashboard.dart`) shows faculty-published attendance across every assigned subject: an overall percentage, semester filter and semester-wise bars, sortable subject-wise statistics (tap to open the subject), a distribution chart, a needs-attention list of students below 75%, and **Export report** for a semester CSV. Percentages use assessed classes only; unassessed or excused classes never count as absence. It is computed in the app from each subject's `attendance-summary`.
-
-## Administration
-
-Accounts with an active admin membership also see the **Admin** tab (`lib/teacher_admin.dart`). **Overview** shows a setup checklist with the next step, statistics, charts and the institute-wide attendance dashboard. **1 · Academic setup** creates semester terms, subjects, sections and subject allocations. **2 · People** adds faculty and students, lists them, and creates a login for anyone listed without one (**Create login**, using the record's own email). **3 · Access & assignments** assigns faculty to subjects and grants roles by picking a person. Every section opens with numbered instructions; each task is a folded card that shows how much exists and opens its form, and the next unfinished step opens automatically. The server re-checks the admin role on every write.
-
-Complete host setup and configuration: [installation guide](../../docs/INSTALLATION.md).
-
-From this app directory, using the already configured ignored public-only file:
+Follow the [installation guide](../../docs/INSTALLATION.md) to start the API and prepare the public Flutter configuration. From `apps/teacher` on macOS or Linux:
 
 ```sh
 ../../scripts/flutter pub get --enforce-lockfile
 ../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5300 --dart-define-from-file=../../.local/flutter/development.json
-../../scripts/flutter build web --dart-define-from-file=../../.local/flutter/development.json
-../../scripts/flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=../../.local/flutter/development.json
+../../scripts/flutter test
+node --test test_web/classroom_capture_test.cjs
 ```
 
-On Windows, use the global `flutter` command and backslash paths, or start the full application with `..\..\scripts\windows\start-demo.ps1` from PowerShell. See the [Windows guide](../../docs/WINDOWS_SETUP.md). The `scripts/flutter` shell wrapper is for macOS/Linux, not PowerShell.
+For local Android use, run `../../scripts/android-connect` after connecting or reconnecting the authorized phone. The app ID is `dev.facetrack.teacher`. See [Windows setup](../../docs/WINDOWS_SETUP.md) for PowerShell commands and [Azure deployment](../../docs/DEPLOY_AZURE.md#phone-apps-release-build) for signed APKs that use HTTPS. Check the [project checkpoint](../../PROGRESS.md) for physical-device results.
 
-The API must be running on local port 8000. Login reaches hosted Supabase, but subjects require this local API; internet access alone is insufficient in the current development setup. On macOS, authorize USB debugging and run `../../scripts/android-connect` after reconnecting the cable. On Windows, run `..\..\scripts\windows\android-connect.ps1`. App ID: `dev.facetrack.teacher`. Use `flutter devices` and the same public configuration for interactive development.
+## Faculty workflows
 
-Debug network policy permits HTTP only to localhost/127.0.0.1. Release requires HTTPS and your release signing configuration. Android Studio/emulator and iOS are not required for this slice.
+- **Subjects** links to assigned subjects, pending work, attendance summaries and the faculty dashboard. The dashboard uses published, assessed sessions and offers semester-level CSV export.
+- **Face enrolments** shows eligible students awaiting review. Open the private video, verify identity and all five poses, and approve with both confirmations or reject with a reason. Refresh on version conflict. Expired footage requires fresh enrolment.
+- **Sessions** creates a manual session or opens **Import timetable**. Use **Download CSV template**, add any missing room code, and use **Choose CSV** to validate the file. The CSV must be at most 1 MiB. Review the rows and confirm a matching date in the term. The import creates sessions for that day and retains the weekly rules. See [timetable architecture](../../MASTER_DESIGN.md#10-timetable-integration) for revision and overlap rules.
+- **Attendance queries** lists open queries for assigned subjects. Rejection requires a reason. Acceptance creates a new corrected publication and report.
+- **Reports** offers CSV and PDF downloads through short-lived private links after closing or publishing a session. Email requires a configured, permitted Resend sender.
 
-Before shipping Android capture, ML Kit, or release packaging changes, run the [signed Teacher camera check](../../docs/CAMERA_VALIDATION.md#teacher-android-signed-release-check). It covers the recording transition, tracking boxes and the saved clip on a physical device.
+## Capture and publish
+
+1. Open the session to freeze its approved roster. Select **Scan classroom**, then **Start scan** with only consenting participants in view. The scanner captures short segments with audio off. Green boxes indicate good framing. Recognition suggestions appear after processing.
+2. Select **Stop scan** to release the camera and finish any uploads. Retry an interrupted upload from the recovery screen. If the reservation has expired, discard the unsent segment and record again while the session is open or continue to manual review.
+3. Select **Go to review**. A usable capture defaults matched students to **Present** and other approved roster members to **Absent**, including those outside the footage. Without usable footage, select a mark for each student manually.
+4. Review or change the marks, then select **Publish attendance**. Published results are immutable. A later correction requires a reason and creates another revision.
+
+Use the [Teacher signed Android check](../../docs/CAMERA_VALIDATION.md#teacher-android-signed-release-check) and [continuous scan acceptance](../../docs/CAMERA_VALIDATION.md#continuous-scan-acceptance) for release testing.
+
+## Administration
+
+Use **Overview** for the setup checklist and institute statistics. **Academic setup** manages terms, subjects, sections and allocations. **People** manages faculty, students and their logins. **Access** assigns faculty and manages roles. Select **Take the tour** to see the guided walkthrough.
 
 ## Preserved local camera spike
 
-Product login is the default entrypoint. The original capture implementation is retained in `lib/spike_app.dart` and launched separately:
+Product sign-in is the default entry point. The separate prototype saves local recordings and sidecars.
 
 ```sh
 ../../scripts/flutter run -d chrome -t lib/main_spike.dart --web-hostname localhost --web-port 5302
 ../../scripts/flutter build web -t lib/main_spike.dart --output build/spike
-../../scripts/flutter test
 ```
-
-The spike saves local recordings/sidecars; the product Sessions tab has its own signed private classroom upload. Keep all existing consent, calibration/test separation and 24-hour raw-media rules.
-
-See root `MASTER_DESIGN.md` for scope, the [installation guide](../../docs/INSTALLATION.md) for configuration, and `PROGRESS.md` for actual verification and remaining checks.
-
-## Face enrolment review
-
-In an assigned subject, open Face enrolments. Only actively enrolled students awaiting review appear. Open the short-lived private video, review identity and all five poses, then approve with both explicit confirmations or reject with a reason. Refresh after a stale-version conflict. Expired footage requires fresh enrolment. Approval activates encrypted templates; it does not create attendance. Do not approve a recording solely because processing succeeded.
-
-## Sessions, timetable and reports
-
-In an assigned subject, **Sessions** creates a manual session or expands **Import timetable**. Add any missing room code first. Download the exact 14-column template, fill assigned academic values, select a CSV under 1 MiB and inspect validated rows. The app suggests the next date matching a CSV weekday; confirm that date or pick another matching day inside the term. Confirmation materializes sessions **for that day only** while retaining the weekly rule for future dates; a nonmatching date is rejected. Opening and closing scheduled sessions remains manual. Re-imports preserve opened history and reject stale previews/overlaps.
-
-Open a session to freeze the approved roster. Record a short classroom clip with only consenting participants, audio off, and upload it while the local API/worker run. Suggestions need human review; missed/unknown students remain unassessed. Close, save explicit decisions, acknowledge unassessed rows, then publish. A later correction requires a reason and creates a new immutable revision. Reports appear after closing/publication: download CSV or PDF using short-lived private grants. Email stays disabled until a permitted Resend sender is configured. Never mark a student absent merely because a capture failed.
-
-The **Attendance queries** tab lists open queries for assigned offerings. Rejecting requires a reason. Accepting creates a new immutable corrected publication/report; it does not rewrite the earlier publication. Only the latest published Absent result can be queried by its own student.

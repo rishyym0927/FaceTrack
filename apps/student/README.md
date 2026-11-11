@@ -1,38 +1,31 @@
 # FaceTrack Student
 
-Separate Flutter Android/web app. Students link their approved identity, join subjects with a faculty join code, enrol their face with consent, see their own published attendance and raise an attendance query. Both apps share authentication, API transport, theme and controls through `packages/app_core`; permissions come from the backend.
+The Student app runs on Android and the web. Students sign in with an institute-provisioned account, link an approved identity when prompted, and request access to a subject with a faculty join code. Faculty must approve the request before the student joins the roster.
 
-Verified state and open acceptance checks are tracked in [`PROGRESS.md`](../../PROGRESS.md).
+## Run locally
 
-Complete host setup and configuration: [installation guide](../../docs/INSTALLATION.md).
-
-From this app directory, using the already configured ignored public-only file:
+Follow the [installation guide](../../docs/INSTALLATION.md) to start the API and prepare the public Flutter configuration. From `apps/student` on macOS or Linux:
 
 ```sh
 ../../scripts/flutter pub get --enforce-lockfile
 ../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5301 --dart-define-from-file=../../.local/flutter/development.json
-../../scripts/flutter build web --dart-define-from-file=../../.local/flutter/development.json
-../../scripts/flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=../../.local/flutter/development.json
+../../scripts/flutter test
 ```
 
-On Windows, use the global `flutter` command and backslash paths, or start the full application with `..\..\scripts\windows\start-demo.ps1` from PowerShell. See the [Windows guide](../../docs/WINDOWS_SETUP.md). The `scripts/flutter` shell wrapper is for macOS/Linux, not PowerShell.
-
-The API must be running on local port 8000. Login reaches hosted Supabase, but subjects require this local API; internet access alone is insufficient in the current development setup. On macOS, authorize USB debugging and run `../../scripts/android-connect` after reconnecting the cable. On Windows, run `..\..\scripts\windows\android-connect.ps1`. App ID: `dev.facetrack.student`. Use `flutter devices` and the same public configuration for interactive development.
-
-Debug network policy permits HTTP only to localhost/127.0.0.1. Release requires HTTPS and your release signing configuration. Android Studio/emulator and iOS are not required for this slice.
-
-See root `MASTER_DESIGN.md` for scope, the [installation guide](../../docs/INSTALLATION.md) for configuration, and `PROGRESS.md` for actual verification and remaining checks.
+For local Android use, run `../../scripts/android-connect` after connecting or reconnecting the authorized phone. The app ID is `dev.facetrack.student`. See [Windows setup](../../docs/WINDOWS_SETUP.md) for PowerShell commands and [Azure deployment](../../docs/DEPLOY_AZURE.md#phone-apps-release-build) for signed APKs that use HTTPS. Check the [project checkpoint](../../PROGRESS.md) for physical-device results.
 
 ## Face enrolment
 
-Before shipping changes to Android capture, ML Kit, or release packaging, run the [signed Android camera check](../../docs/CAMERA_VALIDATION.md#student-android-signed-release-check). It covers the sideways preview at recording start and missing release-only face guidance seen on the Samsung reference phone.
+1. Open **Enrolment**, read the versioned notice, and decide whether to consent.
+2. Select **Record guided video** and follow the five pose prompts with audio off. Review the clip and retake it if needed.
+3. Select **Upload for processing**. A faculty member reviews identity and poses before the resulting template can be used.
+4. If an upload is interrupted, retry the same recording while the reservation is valid. Native pending clips are stored privately and can survive an app restart. Browser clips are temporary. An expired 15-minute reservation requires a fresh recording.
+5. Use the consent withdrawal action to revoke templates and queue deletion of private media.
 
-Open Enrolment, read the versioned notice and consent only voluntarily. Record alone using all five prompts, review playback, and select Upload for processing. The API, Redis, Celery and agent must be running on the local development computer; internet access is needed for private Storage. Keep USB connected while the API is local. Native pending recordings remain in private app storage; web recordings are temporary and disappear when the page closes.
+Before distributing a signed release with camera, detector or packaging changes, run the [Student Android release check](../../docs/CAMERA_VALIDATION.md#student-android-signed-release-check).
 
-Upload progress and errors appear beside the upload button. Retry upload reuses the same attempt and completion key; do not discard a recoverable recording. The application reservation lasts 15 minutes. An expired attempt requires a fresh recording. Processing produces a review candidate, not active recognition permission. A faculty member must verify identity and poses. Withdraw consent to revoke templates and queue media deletion.
+## Attendance
 
-## Published attendance
+The **Attendance** tab shows published records first, with trends below. Open an approved subject for its published history, revision notes, and summary. Only assessed published sessions count toward the attendance percentage.
 
-Open an approved subject to view your own published session results and revision notes after the faculty member publishes them. Unpublished or unassessed sessions do not count as absence. A percentage is shown only when assessed sessions provide a denominator; no other student's attendance is accessible.
-
-For the latest published **Absent** result, the student can raise one written attendance query and see its open/accepted/rejected state. The backend derives the student from the authenticated account; no student ID is accepted from the client. Acceptance creates a corrected immutable publication. Push/email notifications and evidence attachments are not implemented.
+A student can submit a written query for their latest published **Absent** result and see its resolution. Faculty acceptance publishes an immutable correction.

@@ -111,7 +111,7 @@ A GPU does not improve accuracy by itself. It only makes sense for continuous ro
 - Target of presence recall above 95%, precision at least 99.5% and false attendance at most 0.1% is **unproven**.
 
 **What I can honestly promise:**
-- Recognition failure never marks anyone absent. Misses stay *Unassessed* for the teacher, and a teacher publishes every result. So the harm from a miss is review time, not wrong records.
+- After processing, an unmatched student starts as draft Absent. A teacher must verify the draft before publishing. A failed job alone does not generate absence evidence.
 - A false match is the risk that matters. Two corroborating frames reduce it but do not prove identity or liveness (a photo can still pass).
 - I cannot give a classroom accuracy percentage today. The earliest honest number comes from the pilot gate: at least 100 students, 30 independent sessions, 3 rooms or days, with absentees and non-roster people, reported with confidence intervals.
 

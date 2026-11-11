@@ -36,7 +36,7 @@ Expected locally on 27 October: root **42 passing, one expected failure** docume
 
 The code is in `services/worker/src/facetrack_ml`. The worker bridge is in `services/worker/src/facetrack_worker`. Unit tests are in `tests` and `services/worker/tests`. Read `MASTER_DESIGN.md` for requirements, `PROGRESS.md` for the actual checkpoint and `docs/ML_SPIKE.md` for the detailed experiment guide.
 
-No training is necessary for this demo: enrolment stores encrypted templates from a pretrained model. A matching result is **not** proof of identity, liveness or attendance. Unknown or missed people remain unassessed until the faculty member decides.
+No training is necessary for this demo: enrolment stores encrypted templates from a pretrained model. A matching result is **not** proof of identity, liveness or attendance. See the [product attendance rules](../MASTER_DESIGN.md#attendance) for draft marks and faculty publication.
 
 ## 3. Authorized demo operator only
 

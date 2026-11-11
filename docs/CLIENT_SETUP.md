@@ -1,12 +1,14 @@
 # FaceTrack first-time setup for a nontechnical user (Windows or macOS)
 
-This guide is for a **first install**, carried out by **Claude Code or another Claude session with terminal and file access**. A normal browser chat cannot install software. If FaceTrack is already installed and only needs updating, use [the upgrade guide](UPGRADE_EXISTING_INSTALL.md) instead.
+For ordinary demo access, open the hosted [Student](https://facetrack.centralindia.cloudapp.azure.com/student/) or [Teacher](https://facetrack.centralindia.cloudapp.azure.com/teacher/) app with an approved account.
 
-The data stays in the owner's hosted Supabase project. The client's computer runs the Teacher and Student web apps (Flutter) and the backend (FastAPI, Redis, Celery worker and agent) in Docker Linux containers.
+This guide is for an **authorized local backend install**, optionally assisted by a terminal-enabled coding assistant. If FaceTrack is already installed and only needs updating, use [the upgrade guide](UPGRADE_EXISTING_INSTALL.md) instead.
+
+Local development uses the owner's hosted Supabase project with Flutter web and Linux service containers on the developer's machine. Coordinate worker ownership before starting the local worker and agent.
 
 ## What Rishi must send separately
 
-The public repository intentionally excludes credentials and licensed model files. Send one encrypted archive through a private channel, and its password through a different channel. The archive must keep this structure:
+The repository excludes credentials and licensed model files. Share backend configuration only with authorized operators who need to run the local stack. Send one encrypted archive through a private channel, and its password through a different channel. The archive must keep this structure:
 
 ```text
 facetrack-private-config/
@@ -21,7 +23,7 @@ facetrack-private-config/
 
 Send the Student and Teacher login details separately through a password manager or another private channel. Never put passwords, `.env` contents, model files, recordings or templates into GitHub or an AI chat message.
 
-The worker credential in `services/worker/.env` expires 30 days after it was provisioned. If processing later reports an expired or unauthorized worker, the client contacts Rishi. She must not seed, migrate, rotate keys or reprovision the shared project.
+The worker credential is time-limited. Contact the operator if it is expired or rejected. The operator owns schema, provisioning and credential changes to the shared project.
 
 ## Prompt to copy into Claude Code
 

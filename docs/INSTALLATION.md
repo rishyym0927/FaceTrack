@@ -1,6 +1,6 @@
 # FaceTrack installation and setup
 
-This is the canonical setup guide for the current repository. It describes the software that is actually implemented as of **27 October 2026** (migration head `0008_admin`).
+Use this guide to set up a development copy of FaceTrack. The API expects migration head `0008_admin`. For the hosted demo and release procedure, see [Azure deployment](DEPLOY_AZURE.md).
 
 FaceTrack has three different run modes. Choose one before installing anything:
 
@@ -30,7 +30,7 @@ Teacher web/Android ─┘
 - Student web uses `http://localhost:5301`; Teacher web uses `http://localhost:5300`.
 - FastAPI uses `http://127.0.0.1:8000` in development.
 - Supabase Auth, PostgreSQL and private Storage are hosted and require internet access.
-- Redis, Celery, the job agent and CPU inference run on the local computer.
+- In a local setup, Redis, Celery, the job agent and CPU inference run on the development host. The hosted demo runs them on the Azure VM. Use one worker and agent pair per shared environment.
 - Android reaches the local API through `adb reverse tcp:8000 tcp:8000`.
 - The API is one modular service. The worker is a separate process so video work does not block HTTP requests.
 
@@ -69,19 +69,9 @@ flutter devices
 
 The project requires Python `>=3.11,<3.12`; do not install its packages into a newer system Python.
 
-### Locked dependency baseline
+### Locked dependencies
 
-The lockfiles, not this table, are authoritative. The audited resolutions are:
-
-| Area | Main locked versions |
-|---|---|
-| Root ML | NumPy 2.4.6, OpenCV headless 4.14.0.94, ONNX Runtime 1.31.0, cryptography 47.0.0, Pydantic 2.14.1, imageio-ffmpeg 0.6.0 |
-| API | FastAPI 0.160.0, Uvicorn 0.54.0, SQLAlchemy 2.0.55, psycopg 3.3.6, Alembic 1.20.1, HTTPX 0.28.1 |
-| Worker | Celery 5.6.3, Redis client 6.4.0, pandas 3.1.0, openpyxl 3.1.5, ReportLab 4.5.1 plus the root ML package |
-| Flutter shared | supabase_flutter 2.18.3, Riverpod 3.4.3, go_router 17.5.0, Dio 5.11.1, secure storage 10.3.4 |
-| Capture/apps | camera 0.12.1, ML Kit face detection 0.15.1, video_player 2.14.1, file_picker 13.1.0 |
-
-Use `uv sync --locked` and `flutter pub get --enforce-lockfile`. Do not update packages as part of setup.
+Use the checked-in `uv.lock` and `pubspec.lock` files with `uv sync --locked` and `flutter pub get --enforce-lockfile`. The root ML, API, and worker each have a separate Python environment. [The toolchain receipt](../toolchain.json) records the original validated toolchain.
 
 ## 4. Fastest setup with an existing private package
 
@@ -303,7 +293,7 @@ ON CONFLICT DO NOTHING;
 
 After signing in again, the admin opens **Admin → Overview** and follows the setup checklist: semester term, subjects, sections, subject allocations, faculty, faculty assignments and students. Every step links to its form. Further admins and faculty roles are granted from **Admin → Access & assignments**; the SQL step is never needed again.
 
-Admins can create a login when adding someone, or later with **Create login** next to anyone in the faculty or student directory who has none; the account uses the record's own official email and is linked and given its role automatically. Creating login accounts from the Admin tab needs `SUPABASE_SERVICE_ROLE_KEY` in `services/api/.env`. Without it, admins can still create faculty and student records, and students can sign up and link their enrolment number themselves.
+Admins can create a login when adding someone, or later with **Create login** next to anyone in the faculty or student directory who has none; the account uses the record's own official email and is linked and given its role automatically. Creating login accounts from the Admin tab needs `SUPABASE_SERVICE_ROLE_KEY` in `services/api/.env`. Without it, admins can still create faculty and student records. The operator must provision sign-in accounts separately. An authenticated student with a matching official record can claim that identity. Public signup is deferred.
 
 ## 6. Native macOS developer path
 
@@ -347,7 +337,7 @@ cd ../teacher
 ../../scripts/flutter build apk --debug --target-platform android-arm64 --dart-define-from-file=../../.local/flutter/development.json
 ```
 
-Development Android permits loopback HTTP only in the debug manifest. Release builds require HTTPS and proper signing.
+Development Android permits loopback HTTP only in the debug manifest. Use the [signed release procedure](DEPLOY_AZURE.md#phone-apps-release-build) for the hosted HTTPS API.
 
 For camera or Android packaging changes, test the signed APK on a physical phone as well as running the debug build. Follow the signed camera check for [Student](CAMERA_VALIDATION.md#student-android-signed-release-check) or [Teacher](CAMERA_VALIDATION.md#teacher-android-signed-release-check).
 
@@ -390,6 +380,14 @@ apps/teacher
 
 On Windows, replace `../../scripts/flutter` with `flutter`.
 
+Run the browser scanner tests from the repository root using Node.js:
+
+```sh
+node --test apps/teacher/test_web/classroom_capture_test.cjs
+```
+
+These tests simulate browser camera and upload behavior. Use the [camera validation guide](CAMERA_VALIDATION.md) for physical and authenticated acceptance.
+
 ## 9. Configuration reference
 
 ### `services/api/.env` — private, server only
@@ -405,9 +403,9 @@ On Windows, replace `../../scripts/flutter` with `flutter`.
 | `TEMPLATE_KEYS`, `TEMPLATE_KEY_ID` | Biometrics | Separate AES keyring for face templates |
 | `ENROLLMENT_BUCKET` | Optional override | Defaults to `facetrack-enrollment-dev` |
 | `DOCUMENTS_BUCKET` | Optional override | Defaults to `facetrack-documents-dev` |
-| `CORS_ORIGINS` | Yes for web | Exact JSON list; defaults to ports 5300 and 5301 |
+| `CORS_ORIGINS` | Override for other origins | Exact JSON list. Defaults to localhost ports 5300 and 5301. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional | Lets admins create login accounts from the Admin tab; blank disables only that option |
-| `ENVIRONMENT` | Yes | Development label |
+| `ENVIRONMENT` | Optional | Defaults to `development`. |
 | `RESEND_API_KEY`, `RESEND_FROM` | Optional | Faculty report email; blank disables delivery |
 | `FACULTY_REPORT_URL` | Email only | Teacher (faculty) application base URL |
 

@@ -57,7 +57,7 @@ From the repo root, API tests must be pointed at `services/api/tests` explicitly
 
 **ML:** `services/worker/src/facetrack_ml/` is the **frozen** product pipeline (decode → quality → SCRFD → alignment → ArcFace 512D → exact NumPy roster-scoped cosine match → temporal corroboration). Do not alter its source, profile, templates or matching settings. `experiments/ml_accuracy/` is isolated research and must never be imported by production code. Model weights, profile and templates live in `.local/` (git-ignored).
 
-**Attendance semantics:** Recognition only produces suggestions. Failure, a limited capture or a missing template leaves attendance *Unassessed*. The API's `proposed_absent` displays as "Not recognized", and the Teacher review pre-fills those rows as a draft Absent (client request, 27 Oct 2026); nothing is final until the teacher saves or publishes. Teachers decide and publish. Publications are immutable revisions, and later changes are corrections. Roles and eligibility come from approved memberships/profiles and enrolment approval, never from signup metadata or possession of a join code.
+**Attendance semantics:** See the [master design](MASTER_DESIGN.md#attendance) for draft defaults, publication and corrections.
 
 **Database:** migration head `0008_admin`, 37 forced-RLS business tables (`/health/ready` checks both). Runtime uses restricted role `facetrack_api` (`DATABASE_URL`). The owner credential (`MIGRATION_DATABASE_URL`) is used only by Alembic and `tools/`. Never edit an applied migration; add a new one (SQL lives in `services/api/migrations/*.sql`, wrapped by `versions/`). Never expose the business schema through Supabase's Data API.
 
@@ -73,5 +73,5 @@ From the repo root, API tests must be pointed at `services/api/tests` explicitly
 - Don't reinstall or restart the phone app while the user is recording. Don't regenerate worker credentials on routine startup. Don't reseed or rerun provisioning on the already-provisioned hosted project.
 - Never accept consent or approve identity or poses on a user's behalf, and never publish attendance without human review.
 - Never commit secrets, `.env`, recordings, embeddings, templates, ONNX files or participant-level results. Keep email delivery disabled (no Resend sender).
-- Don't claim accuracy, latency, liveness or capacity targets without measurement. State the actual deployment mode honestly (cloud data + local processing).
+- Don't claim accuracy, latency, liveness or capacity targets without measurement. Use the [checkpoint](PROGRESS.md) for deployment and acceptance evidence.
 - Update `PROGRESS.md` after meaningful milestones; record failures and checks not run.

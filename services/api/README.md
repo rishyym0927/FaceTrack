@@ -1,6 +1,6 @@
 # FaceTrack API
 
-FastAPI owns authentication, tenant/object authorization, academic records, biometric lifecycle, sessions, attendance publication/queries, timetable imports, private reports and durable job state. The architecture authority is [`MASTER_DESIGN.md`](../../MASTER_DESIGN.md); the canonical setup is [`docs/INSTALLATION.md`](../../docs/INSTALLATION.md).
+FastAPI verifies Supabase Auth tokens and manages tenant and object authorization, academic records, biometric enrolment, sessions, attendance publication and queries, timetables, private reports and durable job state. The architecture authority is [`MASTER_DESIGN.md`](../../MASTER_DESIGN.md); the canonical setup is [`docs/INSTALLATION.md`](../../docs/INSTALLATION.md).
 
 ## Current contract
 
@@ -11,17 +11,20 @@ FastAPI owns authentication, tenant/object authorization, academic records, biom
 - Supabase ES256 user-token verification; no development login bypass
 - generated OpenAPI: [`contracts/openapi.json`](../../contracts/openapi.json)
 
-Implemented route groups:
+Use the OpenAPI snapshot for exact methods, parameters and request bodies. It includes the
+internal worker contract. Azure serves the public app API and blocks both the internal routes
+and interactive API documentation.
 
-- `/health/*`
-- `/v1/me`, identity claim, academics, offerings, join codes, enrolment requests/rosters
-- consent, biometric enrolment, upload/review and job status
-- sessions, frozen roster, classroom captures, attendance review/publication/corrections/history
-- student attendance disputes and teacher resolution
-- rooms, timetable import/schedule and private report/download/delivery
-- per-subject attendance summary (`/v1/offerings/{id}/attendance-summary`) used by the faculty and admin dashboards
-- admin provisioning `/v1/admin/*`: terms, subjects, sections, allocations, faculty, students, memberships and assignments (every write re-checked by an `app.admin_*` database function)
-- scoped `/internal/v1/*` worker lease/input/result/reconciliation endpoints
+| Workflow | Entry points |
+| --- | --- |
+| Health and account | `GET /health/live`, `GET /health/ready`, `GET /v1/me`, `POST /v1/identity/claim` |
+| Subjects and enrolment | `GET /v1/offerings`, `/v1/offerings/{offering_id}/join-code`, `POST /v1/enrollment-requests`, `GET /v1/me/enrollments` |
+| Face enrolment | `GET /v1/privacy/notice`, `/v1/consents`, `GET /v1/me/biometric-enrollment`, `/v1/biometric-enrollments` |
+| Classroom capture and attendance | `/v1/sessions`, `/v1/sessions/{identifier}/captures`, `/v1/captures/{identifier}`, `GET /v1/me/attendance` |
+| Attendance summaries and disputes | `GET /v1/offerings/{offering_id}/attendance-summary`, `GET /v1/me/attendance-disputes`, `POST /v1/attendance-disputes/{identifier}/resolve` |
+| Timetables and reports | `/v1/rooms`, `/v1/media-reservations`, `/v1/timetable-imports`, `GET /v1/sessions/{identifier}/reports`, `GET /v1/reports/{identifier}/download` |
+| Institute administration | `/v1/admin/*` for terms, subjects, sections, allocations, faculty, students, memberships and assignments |
+| Processing | `/internal/v1/*` for scoped worker leases, inputs, results and reconciliation |
 
 ## Native development
 
@@ -35,13 +38,13 @@ cd services/api
 .venv/bin/ruff check app migrations tools tests
 ```
 
-The test suite uses only the guarded local `facetrack_test` database, mocked Auth/Storage and synthetic identities. It never calls live Supabase. PostgreSQL 16 `initdb` and `pg_ctl` must be on PATH. Stop only the managed cluster with:
+The test suite uses the guarded local `facetrack_test` database, mocked Auth/Storage and synthetic identities. Hosted acceptance uses a separate smoke command. PostgreSQL 16 `initdb` and `pg_ctl` must be on PATH. Stop only the managed cluster with:
 
 ```sh
 .venv/bin/python -m tools.local_db stop
 ```
 
-Start the API:
+After [configuring an environment](../../docs/INSTALLATION.md), start the API from `services/api`:
 
 ```sh
 .venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log
@@ -55,15 +58,14 @@ Readiness checks the restricted runtime role, migration `0008_admin`, 37 forced-
 
 ## Docker development
 
-From the repository root:
+With a configured API environment, start the API from the repository root:
 
 ```sh
-docker compose build api
-docker compose up -d api
+docker compose up -d --build --wait api
 docker compose logs -f api
 ```
 
-The canonical `compose.yaml` mounts this source directory and private `.local` state. Only port 8000 binds to host loopback.
+The canonical `compose.yaml` mounts this source directory and private `.local` state. Port 8000 binds to host loopback. See the installation guide to start Redis, the worker and the agent together.
 
 ## Configuration
 
@@ -77,26 +79,19 @@ Key rules:
 - `CORS_ORIGINS` must be exact HTTP(S) origins; non-loopback HTTP is rejected.
 - Resend values are optional. Private CSV/PDF downloads work without email.
 
-## New project provisioning commands
+## Provisioning
 
-Run these only for an empty development project and in the order documented in the installation guide:
+Follow [first-time owner setup](../../docs/INSTALLATION.md#5-first-time-owner-setup-with-a-new-supabase-project)
+for the ordered commands and expected results. For native development, run the same Python modules
+and Alembic commands from `services/api` with this service's virtual environment.
 
-```text
-python -m tools.configure_supabase SESSION_POOLER_URI_WITH_[YOUR-PASSWORD]
-python -m tools.configure_auth
-python -m tools.provision_role
-alembic upgrade head
-python -m tools.seed --users-file DEMO_USERS_JSON --out DEMO_IDS_JSON
-python -m tools.configure_biometrics
-python -m tools.provision_enrollment
-python -m tools.provision_documents
-```
+Use an existing environment as-is for routine startup. Owner provisioning, migration, demo seeding
+and worker credential changes are separate operator actions. The scoped worker credential expires
+30 days after provisioning.
 
-The configuration commands prompt for secrets without echoing them. `provision_enrollment` refuses to overwrite an existing worker environment. The scoped worker credential expires after 30 days; do not rotate it during normal startup.
-
-For an already provisioned hosted project, do not reseed, rerun migrations or regenerate credentials merely to start the app.
-
-The first admin is granted once by the operator with one SQL statement (see [installation §5.6](../../docs/INSTALLATION.md#56-make-the-first-admin-and-set-up-the-institute)); after that, admins manage everything from the Teacher app's **Admin** tab. Creating login accounts from that tab needs the optional, server-only `SUPABASE_SERVICE_ROLE_KEY`.
+After [granting the first admin](../../docs/INSTALLATION.md#56-make-the-first-admin-and-set-up-the-institute),
+authorized institute admins use the Teacher app's **Admin** tab. Creating login accounts there also
+requires the optional server-only `SUPABASE_SERVICE_ROLE_KEY`.
 
 ## Controlled demo seed
 
@@ -123,17 +118,33 @@ The optional hosted smoke command obtains real sessions and intentionally exerci
 
 Enter passwords only at its hidden prompts.
 
-## API conventions
+## Request conventions
 
-- `/v1/*` requires a Bearer user token.
-- Institute-scoped routes require `X-Institute-ID`.
-- Mutating requests use `Idempotency-Key`; optimistic writes also use `If-Match`.
-- Retry a network failure with the same logical key/body. Refresh after a 409 version conflict.
-- Lists use UUID cursors and `limit` 1–200.
-- Errors use `error.code`, `message`, `request_id`, `retryable` and sanitized `details`.
-- User roles come from approved memberships/profiles, never signup metadata or app selection.
-- Join codes create pending requests, not attendance eligibility.
-- Failed recognition never becomes absence. Teachers resolve proposals and publish.
+- Send a Supabase Auth user access token as `Authorization: Bearer …` on protected routes. The privacy notice and health endpoints are public.
+- Send the active institute UUID in `X-Institute-ID` on institute-scoped routes. Permissions come from approved memberships and profiles. Join codes create pending requests.
+- Follow the endpoint's OpenAPI header requirements. Idempotent writes accept `Idempotency-Key`. Versioned writes require `If-Match` with the current resource version. Retry a network failure with the same key and payload. On a version conflict, reload before submitting a new decision.
+- For paginated lists, follow `next_cursor` with the same filters until it is null. Use a `limit` from 1 to 200 where supported. Treat cursor values as opaque.
+- Errors return an `error` object with `code`, `message`, `request_id`, `retryable` and `details`. Use the request ID to correlate sanitized logs.
+
+For example, with an authorized test user's access token and institute UUID loaded into the shell:
+
+```sh
+curl --fail-with-body --silent --show-error \
+  --header "Authorization: Bearer ${FACETRACK_ACCESS_TOKEN}" \
+  --header "X-Institute-ID: ${FACETRACK_INSTITUTE_ID}" \
+  "http://127.0.0.1:8000/v1/me/attendance?limit=20"
+```
+
+### Attendance and timetable workflows
+
+1. The teacher opens a session and the API freezes the approved roster. Each classroom segment uses a capture reservation, upload grant and upload completion call. Processing updates drafts asynchronously.
+2. After usable capture, corroborated matches start as **Present** and remaining roster members as **Absent**. With no usable capture, the teacher marks the roster manually. Draft decisions can be changed before publication.
+3. The teacher closes the session, waits for pending processing and submits `POST /v1/sessions/{identifier}/finalize`. The API requires **Present** or **Absent** for each roster member and creates an immutable revision. Student history reads the latest revision for each session and uses stable ordering across corrections.
+4. Corrections and accepted disputes create a new revision. A legacy revision with marks that cannot carry forward to a binary publication yields `409 REVIEW_REQUIRED` and preserves the existing revision.
+
+For timetables, reserve a private CSV upload, submit `POST /v1/timetable-imports`, review the parsed result
+and commit with `POST /v1/timetable-imports/{identifier}/commit`. Creating the import rechecks faculty
+access and reservation ownership and purpose after Storage validation.
 
 ## Storage and retention
 
@@ -141,7 +152,7 @@ Enter passwords only at its hidden prompts.
 - `facetrack-documents-dev`: private CSV/PDF, maximum 25 MiB
 - application upload reservations: 15 minutes
 - review/report grants: short-lived and object-scoped
-- raw media: delete after decision/processing and within the 24-hour target
+- raw media: eligible for cleanup after decision or processing, with a 24-hour retention target
 
 Cleanup/reconciliation runs through the worker agent while the host is awake. Offline time can delay cleanup, so check the backlog after restart.
 

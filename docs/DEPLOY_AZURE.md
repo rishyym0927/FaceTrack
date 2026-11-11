@@ -11,9 +11,9 @@ FaceTrack runs online on a single Azure virtual machine. Data stays in the hoste
 
 ## The server
 
-- Azure for Students subscription, resource group `facetrack-rg`, VM `facetrack-vm`, Central India, `Standard_B2as_v2` (2 vCPU, 8 GB, burstable), Ubuntu 24.04, 64 GB Standard SSD, static public IP with DNS label `facetrack`. About US$45 a month from student credit.
+- Azure for Students subscription, resource group `facetrack-rg`, VM `facetrack-vm`, Central India, `Standard_B2as_v2` (2 vCPU, 8 GB, burstable), Ubuntu 24.04, 64 GB Standard SSD, static public IP with DNS label `facetrack`. Check actual spend and credit in the Azure portal.
 - Firewall: 80 and 443 open; SSH (22) only from the operator's IP. Port 8000 is never opened: the API listens on `127.0.0.1` and Caddy fronts it.
-- Login: `ssh -i ~/.ssh/facetrack_azure azureuser@facetrack.centralindia.cloudapp.azure.com`. The key exists only on the operator's Mac.
+- Login: `ssh -i ~/.ssh/facetrack_azure azureuser@facetrack.centralindia.cloudapp.azure.com`. Use the operator's authorized SSH key.
 - Layout: code in `/opt/facetrack` (from `git archive origin/main`), web builds served at `/srv/facetrack/{teacher,student}`, Caddy config in `/etc/caddy/Caddyfile` (copy of [deploy/azure/Caddyfile](../deploy/azure/Caddyfile)).
 - Private files copied over SSH: `services/api/.env`, `services/worker/.env`, `.local/spike/models/buffalo_sc/` and `.local/spike/profiles/frozen-phase1b-v1.json`. On the server, `MIGRATION_DATABASE_URL` is removed from the API `.env` (the runtime never uses the owner credential) and `CORS_ORIGINS` includes the public origin.
 - Caddy blocks `/internal/*` (the agent reaches the API on the private Docker network) and the OpenAPI docs pages.
@@ -34,28 +34,42 @@ deploy/azure/deploy.sh            # ships origin/main, rebuilds containers and b
 deploy/azure/deploy.sh --web-only # only the web apps
 ```
 
-Both builds transfer into a new release directory before the shared `web-current`
-pointer changes. The first run converts the existing app directories into
+Use a full deploy when a change affects the API or worker. Both web builds transfer into a new release directory before the shared `web-current` pointer changes. The first run converts the existing app directories into
 symlinks while preserving their content. The script checks the public HTML and
 JavaScript for both apps and restores the previous pointer on failure. A full
 deploy also restores the previous service tree if the web checks fail. Keep
 `/srv/facetrack` writable by the deploy user and retain the previous release
 directory for recovery.
 
+The deploy reads `.local/flutter/production.json` with the same four public values as [development configuration](INSTALLATION.md#55-configure-flutter) and the public HTTPS API origin. It deploys the remote `main` revision and carries forward private environment and model files. Apply any required schema change separately before deploying code that needs it.
 
-It needs `.local/flutter/production.json` (a copy of `development.json` with `API_BASE_URL` set to the public address). It never ships uncommitted local edits and never touches the server's `.env` or model files. No migration runs on deploy.
+After the script succeeds, verify the public endpoints and check container state:
+
+```sh
+base=https://facetrack.centralindia.cloudapp.azure.com
+curl -fsS "$base/health/ready"
+curl -fsS -o /dev/null "$base/student/"
+curl -fsS -o /dev/null "$base/teacher/"
+```
+
+The readiness response should be `{"status":"ready"}`. Verify authenticated sign-in and classroom recording separately using controlled accounts. Public smoke checks cover served files and service readiness.
 
 ## Phone apps (release build)
 
 Release APKs are signed with the key in `.local/release/signing/` (`facetrack-release.jks` and `key.properties`, both git-ignored). **Back up both files somewhere private**: an app signed with a different key cannot update an installed one. From a clean worktree of `origin/main`:
 
 ```sh
-export FACETRACK_KEY_PROPERTIES=$PWD/.local/release/signing/key.properties
-# in apps/teacher and apps/student
-../../scripts/flutter build apk --release --split-per-abi --dart-define-from-file=../../.local/flutter/production.json
+export FACETRACK_KEY_PROPERTIES="$PWD/.local/release/signing/key.properties"
+for app in student teacher; do
+  (
+    cd "apps/$app" || exit 1
+    ../../scripts/flutter build apk --release --target-platform android-arm64 \
+      --dart-define-from-file=../../.local/flutter/production.json
+  ) || exit 1
+done
 ```
 
-Most phones use `app-arm64-v8a-release.apk` (about 22 MB Teacher, 34 MB Student). Installing it over an earlier **debug** build fails (different signing key): uninstall the old app first, after any pending upload has finished.
+Each app writes `build/app/outputs/flutter-apk/app-release.apk` inside its directory. Verify both APK signatures using Android SDK Build Tools’ `apksigner verify`. An existing debug build uses a different signing key. Finish pending uploads before uninstalling it to install the release build.
 
 Before distributing an APK that changes camera capture, Flutter or CameraX, ML Kit, or Android packaging, run the signed Android camera check for [Student](CAMERA_VALIDATION.md#student-android-signed-release-check) or [Teacher](CAMERA_VALIDATION.md#teacher-android-signed-release-check), as affected. Earlier releases passed Flutter tests but lost ML Kit initialization under R8 and rotated the preview only when native recording started. A debug build cannot cover the release optimizer.
 
@@ -71,7 +85,7 @@ docker compose logs --tail 100 api worker agent
 - Containers restart automatically after a reboot.
 - Pause billing: `az vm deallocate -g facetrack-rg -n facetrack-vm`; resume: `az vm start -g facetrack-rg -n facetrack-vm` (the IP and name stay).
 - SSH refused after the operator's IP changes: `az network nsg rule update -g facetrack-rg --nsg-name facetrack-vmNSG -n default-allow-ssh --source-address-prefixes <new-ip>/32`.
-- The worker credential is time-limited. The current one expires on **22 November 2026 (06:23 UTC)**. When it is rejected the agent logs "Worker credential rejected or expired" every minute and processing pauses (uploads still succeed and wait in the queue). The owner reissues it with the provisioning tool and replaces `WORKER_TOKEN` in `services/worker/.env` on the VM, then runs `docker compose up -d worker agent`. That is a deliberate owner action, never part of routine deploys. Do not reseed or reprovision.
+- The worker credential is time-limited. An expired or rejected credential pauses processing while uploads wait in the queue. Contact the operator for credential replacement. After updating the private worker configuration, recreate the worker and agent with `docker compose up -d --force-recreate worker agent` and check the agent logs.
 - "Enrolment agent waiting for local API/broker" means the agent cannot reach the API or Redis (network or startup), not a credential problem.
 
 ## Limits to state honestly
@@ -79,4 +93,3 @@ docker compose logs --tail 100 api worker agent
 - B-series VMs are burstable: long recognition jobs can slow down once CPU credits run out.
 - The InsightFace model permission covers the non-commercial academic demonstration only.
 - The phone app still points wherever its APK was built for; a phone build against this server needs `--dart-define-from-file=.local/flutter/production.json`.
-- Student credit expires on 13 April 2027.

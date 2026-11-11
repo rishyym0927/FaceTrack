@@ -46,7 +46,7 @@ Check a milestone only after its required outcomes are verified. Implemented cod
 
   Complete restart/retry rehearsal, private-media cleanup inspection, authenticated visual/device checks, physical Windows acceptance if it will be used, and two full demo rehearsals. Freeze optional work before presentation day.
 
-## Before 28 October
+## Remaining rehearsal checks
 
 1. Verify frozen receipt and service health.
 2. Run available consented real recognition cases; report failures honestly.
@@ -58,11 +58,12 @@ Check a milestone only after its required outcomes are verified. Implemented cod
 ## After the demonstration
 
 - [ ] Obtain model rights for institute deployment.
-- [ ] Deploy HTTPS API and always-on worker capacity.
+- [x] Deploy the HTTPS API and both web apps with demo CPU processing. See the [Azure release checkpoint](PROGRESS.md#azure-audit-release--11-november).
+- [ ] Validate always-on processing capacity and recovery for the pilot.
 - [ ] Run a supervised multi-room classroom pilot and measure accuracy/coverage.
 - [ ] Benchmark queue delay, memory and throughput for 20 concurrent classes.
 - [ ] Add automatic timetable scheduling/reconciliation.
 - [ ] Configure backups, restore tests, monitoring/Sentry and CI/CD.
-- [ ] Add public registration/recovery and web-only administration after institute policy approval.
+- [ ] Add public registration and password recovery after institute policy approval.
 
 **Working rule:** real inference only for demonstrations; processing failure never becomes absence; teachers publish authoritative attendance; every accuracy, latency and capacity target requires measurement.

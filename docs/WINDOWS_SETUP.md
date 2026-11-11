@@ -25,7 +25,7 @@ flutter doctor
 flutter devices
 ```
 
-Docker Compose must be v2.20 or newer. Start Docker Desktop and wait until the Linux engine is ready.
+The Windows launcher uses the `compose.windows.yaml` compatibility file, which requires Docker Compose v2.20 or newer. Start Docker Desktop and wait until the Linux engine is ready.
 
 ## 2. Clone and prepare
 
@@ -61,7 +61,7 @@ Set-Location C:\FaceTrack
 .\scripts\windows\start-demo.ps1
 ```
 
-Use `-Browser edge` if Chrome is unavailable. The script:
+Use `-Browser edge` if Chrome is unavailable. Use `-BackendOnly` to run only the services. The default launch:
 
 - starts Redis, API, worker and agent in Linux containers;
 - waits for API readiness;
@@ -103,7 +103,7 @@ Enable USB debugging, connect and unlock the phone, then accept the authorizatio
 flutter devices
 ```
 
-The helper restores port 8000 forwarding. Keep USB connected while the API is local. Do not reinstall an app while a recording is active.
+The helper restores port 8000 forwarding. Keep USB connected while the API is local. Finish any active recording before reinstalling an app. See [Android development builds](INSTALLATION.md#7-android-device) and use native `flutter` in PowerShell.
 
 ## 6. Model-test console only
 

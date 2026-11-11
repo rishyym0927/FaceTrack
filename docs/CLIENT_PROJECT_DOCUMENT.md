@@ -31,13 +31,13 @@ Rather than acting as an unpredictable "black box", FaceTrack combines establish
 2. **Creates a biometric template (ArcFace via ONNX Runtime):** ArcFace converts an aligned face crop into a normalized 512-number vector. This vector remains sensitive biometric data: FaceTrack encrypts active templates and keeps raw private video only for the bounded review/retention period.
 3. **Compares Only Within the Class Roster (NumPy):** The model does not search the entire college directory. NumPy performs fast matrix multiplication comparing detected faces only against the students enrolled in that specific subject for speed and accuracy.
 4. **Multi-Frame Double Check:** To reduce accidental misidentification, the algorithm requires compatible recognition evidence in at least two temporally separated frames. This corroboration does not prove identity or liveness.
-5. **Suggests Presence (Never Absences):** Corroborated matches are highlighted as **"Proposed Present"**. Anyone not matched is shown as **"Not recognized"** or **"Unassessed"** for the faculty member's final judgment; nobody is marked absent automatically.
+5. **Prepares a draft for faculty review:** After processing, corroborated matches start as Present and other approved students start as Absent. Faculty can change either mark before publishing.
 
 ---
 
 ## 3. How the User Interface (UI) Works
 
-The apps are designed for everyday faculty and students with zero learning curve:
+Student and Teacher have separate interfaces.
 
 ### Student Interface:
 - **Guided Camera Outline:** During enrolment, students see a face guide with simple front/left/right/up/down cues and progress indicators. This is capture guidance, not identity or liveness verification.
@@ -47,11 +47,8 @@ The apps are designed for everyday faculty and students with zero learning curve
 ### Faculty Interface:
 - **Attendance dashboard:** The home screen shows overall, semester-wise and subject-wise attendance, a distribution chart, students below 75% and a downloadable semester report.
 - **Controlled session opening:** The faculty member opens a scheduled or manually created session, which freezes the subject's approved roster for that session.
-- **Camera Sweep:** A live 10-second sweep camera screen opens with an on-screen timer. Audio is muted automatically.
-- **Interactive Review Sheet:** After processing, the roster shows clear color-coded statuses:
-  - 🟢 **Proposed Present:** Corroborated model evidence that still requires a faculty decision.
-  - 🟡 **Not recognized:** Processing worked but the student was not matched; the faculty member decides.
-  - ⚪ **Unassessed:** Clearly flagged for the faculty member to mark *Present*, *Absent*, *Late*, or *Excused*.
+- **Camera Sweep:** Faculty start and stop a classroom scan. The scan records short segments with audio off and shows upload progress and retry status.
+- **Review sheet:** Faculty check or change every Present or Absent draft mark. If no recording result is available, faculty enter the marks manually.
 - **Publish & Export:** The faculty member confirms every decision and publishes. Private PDF and CSV attendance sheets can then be downloaded.
 
 ### Admin Interface:

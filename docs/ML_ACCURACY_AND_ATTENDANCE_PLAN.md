@@ -12,8 +12,8 @@ Accuracy changes run only in `experiments/ml_accuracy`. They use separate manife
 Attendance uses a teacher-confirmed automatic draft:
 
 - A corroborated identity becomes `proposed_present`.
-- An eligible student without a corroborated match after a sufficiently usable, successful capture becomes `proposed_absent`, displayed as **Not recognized**.
-- Template-ineligible students, limited captures and processing failures remain `unassessed`.
+- After a usable capture, approved roster members without corroborated matches can receive `proposed_absent`.
+- Limited or failed captures do not create absence evidence. The Teacher review defaults unmatched rows to draft Absent after a processed scan, including limited results. Without a processed result, teachers enter marks manually.
 - Teachers must convert every proposal to an explicit final status before publication.
 - A similarity score is evidence of resemblance, not a probability of attendance or absence.
 

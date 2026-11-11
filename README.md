@@ -2,16 +2,16 @@
 
 FaceTrack is a human-reviewed, face-assisted attendance system with separate Student and Teacher (faculty) Flutter apps. Students join their subjects and enrol a face template with consent. Faculty create sessions, upload short classroom videos, review recognition suggestions, publish attendance and download CSV/PDF reports. Admins set up semester terms, subjects, sections, faculty and students.
 
-The current demonstration uses:
+The [Azure demo](docs/DEPLOY_AZURE.md) and local development use:
 
 - Flutter web and Android clients
 - FastAPI with a restricted PostgreSQL runtime role
 - hosted Supabase Auth, PostgreSQL and private Storage
-- local Redis, Celery and CPU inference
+- private Redis, Celery and CPU inference
 - SCRFD detection and ArcFace-family 512D embeddings through ONNX Runtime
 - faculty-controlled attendance publication
 
-Face recognition never publishes attendance by itself. A missed face, processing failure or ineligible template remains unassessed until the faculty member decides.
+After a processed scan, Teacher review starts with draft Present for corroborated matches and draft Absent for everyone else. With no processed result, teachers enter marks manually. A teacher can change any draft mark before publishing.
 
 ## Start here
 
@@ -34,6 +34,8 @@ Private configuration and approved model files are deliberately excluded from Gi
 
 ## Current status
 
+The [Student web app](https://facetrack.centralindia.cloudapp.azure.com/student/) and [Teacher web app](https://facetrack.centralindia.cloudapp.azure.com/teacher/) require approved demo accounts. See [PROGRESS.md](PROGRESS.md) for the deployed revision and verification.
+
 - Database: migration head `0008_admin`, 37 business tables with forced row-level security
 - Student and Teacher apps (web and Android) use the institute's terms: Subject, Section, Semester term, Faculty
 - Faculty home shows an attendance dashboard: overall, semester-wise and subject-wise figures, a distribution chart, a needs-attention list and a CSV report
@@ -41,7 +43,7 @@ Private configuration and approved model files are deliberately excluded from Gi
 - Verified with real people: consented face enrolment and template activation; one classroom session reviewed and published; student history; timetable import; CSV/PDF downloads
 - Student Android recording orientation and live guidance verified on Samsung SM-M356B with signed build `1efb093`. See the [camera release check](docs/CAMERA_VALIDATION.md#student-android-signed-release-check).
 - Independent real recognition acceptance: **1 of 6** held-out scenarios. Synthetic benchmarks are reported separately and are not classroom accuracy
-- Still open: faculty email (no permitted Resend sender), physical Windows/Linux acceptance, cloud deployment, institute-scale accuracy and capacity
+- Still open: faculty email (no permitted Resend sender), physical Windows/Linux acceptance, authenticated Azure camera-to-publication checks, institute-scale accuracy and capacity
 
 Do not claim >95% accuracy, a two-second end-to-end response, liveness detection or 20 simultaneous classes from the current evidence.
 
@@ -64,7 +66,7 @@ Do not claim >95% accuracy, a two-second end-to-end response, liveness detection
 ## Documentation
 
 - [Installation](docs/INSTALLATION.md): canonical setup and configuration for macOS, Windows and Linux
-- [Client setup](docs/CLIENT_SETUP.md): first install for a nontechnical user, done by Claude Code
+- [Client setup](docs/CLIENT_SETUP.md): first install for a nontechnical user, with a terminal-enabled assistant
 - [Upgrade an existing install](docs/UPGRADE_EXISTING_INSTALL.md): bring an older install up to date with full ML
 - [Windows](docs/WINDOWS_SETUP.md) and [Linux](docs/LINUX_SETUP.md) checklists, and [platform support](docs/PLATFORM_SUPPORT.md)
 - [Master design](MASTER_DESIGN.md): architecture and product rules

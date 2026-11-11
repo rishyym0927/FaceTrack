@@ -2,6 +2,11 @@
 
 **Reviewed:** 11 November 2026 (Asia/Kolkata)
 
+## Documentation review — 11 November
+
+- Consolidated setup around the installation guide, with platform, upgrade, camera and Azure runbooks for their specific workflows. Updated the API and worker references, product attendance rules and verified deployment status. Generated OpenAPI matched the checked-in contract. Relative links and heading anchors, Compose configuration, deployment activation tests and browser scanner tests passed.
+- Documentation only. Authenticated device, classroom and staging rollback acceptance remain tracked below.
+
 ## Azure audit release — 11 November
 
 - Pushed and deployed `d77202a` to Azure, including the remaining verified UI cleanup. Both web builds passed served HTML and JavaScript checksum checks. Public readiness, Student and Teacher returned HTTP 200. API, Redis, worker and agent were healthy, and both changed API modules matched the release.
@@ -246,8 +251,8 @@ The root suite's expected failure records the frozen baseline's degenerate-landm
 - The public repository cannot run real inference by itself. Private `.env`, model, profile and demo credentials must be provisioned or securely transferred.
 - Do not regenerate the existing worker token on routine startup; it is scoped and time-limited.
 - Never commit credentials, tokens, recordings, embeddings, templates, ONNX files or participant-level results.
-- Raw-media cleanup and job reconciliation run only while the local agent is awake. Inspect backlog after restart.
-- Public signup/recovery, admin UI, iOS/native desktop, cloud inference, backups/restore acceptance, model deployment rights and institute-scale load testing remain later work.
+- Raw-media cleanup and job reconciliation require a running agent. Inspect backlog after restart.
+- Public signup/recovery, iOS/native desktop, production inference capacity, backups/restore acceptance, model deployment rights and institute-scale load testing remain later work.
 
 ## Frozen prototype evidence
 
