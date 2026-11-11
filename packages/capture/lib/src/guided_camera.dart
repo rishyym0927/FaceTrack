@@ -73,6 +73,10 @@ class LiveFaceTracker extends ChangeNotifier {
 
 class GuidedCamera extends ChangeNotifier {
   GuidedCamera({this.enrollmentGuidance = false, this.analyzerFactory});
+  static const enrollmentMinimumSeconds = 10;
+  // The file starts at the first encoded frame, which can lag camera startup.
+  static const enrollmentStopSeconds = enrollmentMinimumSeconds + 2;
+  static const enrollmentMaximumSeconds = 25;
 
   final bool enrollmentGuidance;
   final PoseFrameAnalyzer Function(CameraController)? analyzerFactory;
@@ -163,6 +167,7 @@ class GuidedCamera extends ChangeNotifier {
   Future<void>? _pendingAnalysis;
   Timer? _previewExpiry;
   DateTime? _lastAnalysis;
+  final _recordingClock = Stopwatch();
   int elapsed = 0, epoch = 0;
   List<String> poses = [];
   XFile? clip;
@@ -365,13 +370,18 @@ class GuidedCamera extends ChangeNotifier {
           return;
         }
         recording = true;
-        timer = Timer.periodic(const Duration(seconds: 1), (_) {
-          elapsed++;
+        _recordingClock
+          ..reset()
+          ..start();
+        timer = Timer.periodic(const Duration(milliseconds: 250), (_) {
+          final seconds = _recordingClock.elapsed.inSeconds;
+          if (seconds == elapsed) return;
+          elapsed = seconds;
           if (elapsed >= 2) guidance?.unavailable(DateTime.now());
           emit();
-          if (elapsed >= (enrollmentGuidance ? 25 : 15) ||
+          if (elapsed >= (enrollmentGuidance ? enrollmentMaximumSeconds : 15) ||
               (enrollmentGuidance &&
-                  elapsed >= 10 &&
+                  elapsed >= enrollmentStopSeconds &&
                   (guidance?.allCaptured ?? false))) {
             timer?.cancel();
             unawaited(stop());
@@ -440,6 +450,8 @@ class GuidedCamera extends ChangeNotifier {
   Future<void> stop({int minimumSeconds = 10}) async {
     if (!recording || busy || (kIsWeb && enrollmentGuidance)) return;
     timer?.cancel();
+    _recordingClock.stop();
+    elapsed = _recordingClock.elapsed.inSeconds;
     _faceExpiry?.cancel();
     faceTracker.clear();
     busy = true;
@@ -455,9 +467,14 @@ class GuidedCamera extends ChangeNotifier {
           await current.setFlashMode(FlashMode.off);
         } catch (_) {}
       }
-      if (disposed || generation != epoch || elapsed < minimumSeconds) {
+      if (disposed ||
+          generation != epoch ||
+          elapsed <
+              (enrollmentGuidance ? enrollmentStopSeconds : minimumSeconds)) {
         await files.remove(value.path);
-        error = 'Record the full guided video.';
+        error = enrollmentGuidance
+            ? 'Keep recording until the guided capture finishes automatically.'
+            : 'Record for at least $minimumSeconds seconds before stopping.';
       } else {
         clip = value;
       }
@@ -507,6 +524,7 @@ class GuidedCamera extends ChangeNotifier {
   Future<void> interrupt() async {
     final generation = ++epoch;
     timer?.cancel();
+    _recordingClock.stop();
     _faceExpiry?.cancel();
     faceTracker.clear();
     final old = controller;

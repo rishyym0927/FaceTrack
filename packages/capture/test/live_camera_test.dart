@@ -56,8 +56,7 @@ void main() {
       expect(camera.controlMessage, contains('Tap-to-focus is unavailable'));
       expect(camera.recording, true);
 
-      camera.elapsed = 15;
-      await camera.stop();
+      await camera.stop(minimumSeconds: 0);
       expect(camera.clip?.path, 'synthetic.mp4');
       expect(camera.recording, false);
     },

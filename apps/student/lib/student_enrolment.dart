@@ -558,7 +558,12 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                 ),
                 if (a.reason != null) ...[
                   const SizedBox(height: 8),
-                  Text(a.reason!),
+                  Text(switch (a.reason) {
+                    'CLIP_TOO_SHORT' => 'The saved video was under 10 seconds. Record again and let the camera stop on its own, even after all directions are captured.',
+                    'INVALID_MEDIA' => 'The video could not be read. Record again and wait for the camera to finish saving it.',
+                    'MULTIPLE_FACES' => 'More than one face appeared. Record again with only your face in view.',
+                    _ => a.reason!,
+                  }),
                 ],
                 if (['expired', 'rejected', 'failed'].contains(a.status))
                   const Padding(
@@ -598,7 +603,7 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   ),
                   const SizedBox(height: 8),
                   const Text(
-                    'Use good lighting and keep only yourself in frame. Hold each prompted direction until its circle fills. Recording lasts 10–25 seconds; audio stays off.',
+                    'Use good lighting and keep only your face in frame. Follow each direction and let the camera stop on its own. Recording takes 12–25 seconds with audio off.',
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -1049,7 +1054,9 @@ class _CaptureControls extends StatelessWidget {
     final detail =
         camera.error ??
         camera.controlMessage ??
-        (timed
+        (camera.recording && guidance?.allCaptured == true
+            ? 'Keep facing the camera until recording stops automatically.'
+            : timed
             ? 'Live guidance is unavailable. Follow the timed prompts.'
             : guidance?.hint ?? 'Opening live face guidance…');
     return Material(

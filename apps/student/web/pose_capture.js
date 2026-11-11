@@ -3,6 +3,10 @@ window.FaceTrackCapture = {
   _stop: null,
   cancel() { window.FaceTrackCapture._stop?.(true); },
   async record(order, onFrame) {
+    // The processor validates 10 seconds of encoded video. Leave two seconds
+    // for recorder startup and the gap between the final frame and stop.
+    const earliestStopMs = 12000;
+    const maximumMs = 25000;
     const root = document.createElement('div');
     root.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#f3f7f5;font-family:system-ui,sans-serif;color:#17392f;overflow:auto';
     const card = document.createElement('div');
@@ -51,7 +55,7 @@ window.FaceTrackCapture = {
     root.append(card);
     document.body.append(root);
 
-    let stream, recorder, landmarker, interval, started, resolveStopped, resolveStart;
+    let stream, recorder, landmarker, interval, started, recordedMs = 0, resolveStopped, resolveStart;
     let latest = { allCaptured: false, completed: [], current: order[0], hint: '' };
     let cancelled = false, stopped = false, lastAnalysis = 0;
     let mirrored = false, lastValid = 0, timed = false, lastVideoTime = -1, previewTurns = 0;
@@ -81,7 +85,9 @@ window.FaceTrackCapture = {
     const stoppedPromise = new Promise(resolve => { resolveStopped = resolve; });
     const render = () => {
       prompt.textContent = latest.current ? `Look ${latest.current}` : 'All directions captured';
-      hint.textContent = latest.hint || 'Keep only your face in the guide';
+      hint.textContent = latest.allCaptured
+        ? 'Keep facing the camera until recording stops automatically.'
+        : latest.hint || 'Keep only your face in the guide';
       circles.replaceChildren(...order.map(pose => {
         const item = document.createElement('span');
         const done = latest.completed.includes(pose);
@@ -108,6 +114,7 @@ window.FaceTrackCapture = {
       if (stopped) return;
       stopped = true;
       cancelled = discard;
+      if (started !== undefined) recordedMs = performance.now() - started;
       resolveStart?.();
       if (recorder?.state === 'recording') recorder.stop();
       else resolveStopped();
@@ -205,8 +212,15 @@ window.FaceTrackCapture = {
       recorder.ondataavailable = event => { if (event.data.size) chunks.push(event.data); };
       recorder.onstop = resolveStopped;
       recorder.onerror = () => stop(true);
+      const recorderStarted = new Promise(resolve => {
+        recorder.onstart = () => {
+          started = performance.now();
+          resolve();
+        };
+      });
       recorder.start();
-      started = performance.now();
+      await Promise.race([recorderStarted, stoppedPromise]);
+      if (stopped) return null;
       const canvas = document.createElement('canvas');
       canvas.width = 24; canvas.height = 18;
       const context = canvas.getContext('2d', { willReadFrequently: true });
@@ -214,7 +228,7 @@ window.FaceTrackCapture = {
       interval = setInterval(() => {
         if (stopped) return;
         const elapsed = performance.now() - started;
-        if (elapsed >= 25000 || (latest.allCaptured && elapsed >= 10000)) {
+        if (elapsed >= maximumMs || (latest.allCaptured && elapsed >= earliestStopMs)) {
           stop();
           return;
         }
@@ -262,7 +276,7 @@ window.FaceTrackCapture = {
       }, 100);
       await stoppedPromise;
       const blob = new Blob(chunks, { type: mime });
-      if (cancelled || blob.size === 0 || performance.now() - started < 10000) return null;
+      if (cancelled || blob.size === 0 || recordedMs < earliestStopMs) return null;
       return URL.createObjectURL(blob);
     } finally {
       if (window.FaceTrackCapture._stop === stop) window.FaceTrackCapture._stop = null;

@@ -1334,6 +1334,12 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       'finalized',
     ].contains(s['status']);
     final status = s['status'] as String;
+    final canRecord =
+        rows
+            .where((row) => row['recognition_eligible'] == true)
+            .take(2)
+            .length ==
+        2;
     final captured =
         capture != null ||
         rows.any(
@@ -1427,15 +1433,18 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                   style: Theme.of(context).textTheme.titleLarge,
                 ),
                 const SizedBox(height: 8),
-                const Text(
-                  'Scan the room, then tap Stop scan. The camera closes while uploads finish.',
+                Text(
+                  canRecord
+                      ? 'Open the camera, then tap Start scan. Move slowly across the room and tap Stop scan when finished. Keep this page open while the clips upload.'
+                      : 'This session needs at least two students with approved face enrolments. Go to review to mark attendance manually, or open a new session after two enrolments are approved.',
                 ),
                 const SizedBox(height: 12),
                 Align(
                   alignment: Alignment.centerLeft,
                   child: FilledButton.icon(
                     onPressed:
-                        busy ||
+                        !canRecord ||
+                            busy ||
                             camera.busy ||
                             scanActive ||
                             camera.recording ||
@@ -1446,13 +1455,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                     label: const Text('Scan classroom'),
                   ),
                 ),
-                ExpansionTile(
-                  title: const Text('Recording tips'),
-                  children: const [RecordingTips()],
-                ),
+                if (canRecord)
+                  ExpansionTile(
+                    title: const Text('Recording tips'),
+                    children: const [RecordingTips()],
+                  ),
                 if (captureCoverage(rows) case final coverage?)
                   CaptureQualityNote(coverage),
                 ExpansionTile(
+                  enabled: canRecord || camera.clip != null,
                   title: const Text('Record a single clip'),
                   children: [
                     if (camera.cameras.length > 1 && camera.clip == null)
@@ -2077,15 +2088,18 @@ bool _captureIsPending(Object? status) =>
 class RecordingTips extends StatelessWidget {
   const RecordingTips({super.key});
   static const tips = [
-    (Icons.light_mode_outlined, 'Light on faces, no window behind students.'),
-    (Icons.social_distance_outlined, 'Stay 0.5–1 m from each face.'),
+    (Icons.light_mode_outlined, 'Make sure light falls on students’ faces.'),
+    (
+      Icons.social_distance_outlined,
+      'Move closer if faces look small or blurry.',
+    ),
     (
       Icons.timer_outlined,
-      'Hold each face steady for 3–4 seconds, then move slowly.',
+      'Pause on each group for a few seconds before moving to the next.',
     ),
     (
       Icons.video_library_outlined,
-      'Each clip is 15 s with audio off. For a bigger class, record 2–3 clips: each adds recognised students.',
+      'The scan saves short clips automatically with audio off.',
     ),
     (
       Icons.cloud_upload_outlined,

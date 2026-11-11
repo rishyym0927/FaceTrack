@@ -381,7 +381,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                               style: const TextStyle(color: Colors.white),
                             ),
                           const Text(
-                            'Move across the room, then tap Stop scan. Green boxes mean well framed. Student suggestions appear after each short segment is processed; review them before publishing.',
+                            'Move slowly and pause on each group. A green box means a face is well framed. When you finish, tap Stop scan and wait for uploads.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.white70),
                           ),
@@ -567,7 +567,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                         : scan.error != null
                         ? (scan.retryable
                               ? 'Upload paused'
-                              : 'Recording cannot be uploaded')
+                              : 'Recording needs attention')
                         : scan.canLeave
                         ? 'Scan complete'
                         : 'Uploading recording',

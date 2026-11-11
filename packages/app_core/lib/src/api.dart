@@ -255,8 +255,14 @@ class ApiClient {
         final status = e.response?.statusCode;
         final code = error is Map ? error['code'] as String? : null;
         final biometricMessage = switch (code) {
+          'ENROLLMENT_NOT_READY' => 'Face enrolment is unavailable for this institute. Ask your project administrator to check the processing setup.',
+          'INSUFFICIENT_TEMPLATES' => 'This session needs two students with approved face enrolments before it can accept recordings. Use manual review, or open a new session after both enrolments are approved.',
+          'SESSION_STATE' => 'This session is no longer accepting recordings. Return to the session and check its status.',
+          'CAPTURE_TIME' => 'The recording was made outside this session’s capture window. Check the session time and your device clock.',
+          'MODEL_UNAVAILABLE' => 'Classroom recognition has not been configured. Ask your project administrator to check the processing setup.',
           'UPLOAD_EXPIRED' => 'The upload reservation expired. Discard this attempt and record a new video.',
-          'MEDIA_MISMATCH' => 'The uploaded video metadata could not be verified. Retry upload; contact support if this persists.',
+          'MEDIA_MISMATCH' =>
+            'The server could not verify this video. Record a new clip.',
           'MEDIA_CHANGED' => 'This attempt is reserved for a different recording. Discard it before recording again.',
           'MEDIA_NOT_AVAILABLE' =>
             'The video has not finished uploading. Retry upload to resume.',
