@@ -12,7 +12,7 @@
 
 - Admin creates a class group with term, branch and semester. Faculty creation uses full name and official email, with an initial password only when creating a login. Faculty pickers and account views omit employee numbers. Student enrolment numbers remain required.
 - The API supplies stable internal values for omitted legacy fields, preserving existing group labels, identifiers and database constraints. A blank section cell in the existing timetable CSV selects the default group. No migration is needed.
-- Verified 63 API tests, 84 Teacher tests, 21 Student tests and 72 shared-core tests. Flutter analysis passed, and the Admin suite was rerun after the final faculty search wording. The OpenAPI snapshot was regenerated. Changes are local. Next action is deploy the API and web together, then verify creation with controlled records before provisioning the MTech cohort.
+- Verified 63 API tests, 84 Teacher tests, 21 Student tests and 72 shared-core tests. Flutter analysis passed, and the Admin suite was rerun after the final faculty search wording. The OpenAPI snapshot was regenerated. Deployed API and both web apps together from `052669f`. Both sites passed served-artifact verification, public readiness returned HTTP 200, and API/worker/agent were healthy. Changed API modules and the deployed frozen profile matched local checksums. The authenticated Admin form creation walkthrough remains open.
 
 ## Documentation review — 11 November
 
