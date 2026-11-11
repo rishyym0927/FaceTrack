@@ -163,7 +163,7 @@ async def test_timetable_import_rechecks_access_after_storage_lookup(bio, change
         assert state == (None if change == "delete" else ("reserved",))
 
 
-async def import_ready(b, key="import", revision=0, rows=None):
+async def import_ready(b, key="import", revision=0, rows=None, section="A"):
     await allow_documents(b)
     with connect(b.urls["owner"]) as c:
         c.execute(
@@ -208,7 +208,7 @@ async def import_ready(b, key="import", revision=0, rows=None):
         "course_code": "CS401",
         "branch": "CSE",
         "semester": "5",
-        "section": "A",
+        "section": section,
         "teacher_email": "teacher@example.test",
         "room_code": "R1",
         "weekday": ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"][day.weekday()],
@@ -232,6 +232,18 @@ async def import_ready(b, key="import", revision=0, rows=None):
     preview = await b.client.get("/v1/timetable-imports/" + imp, headers=b.headers("teacher"))
     assert preview.status_code == 200, preview.text
     return preview.json(), day, row
+
+
+async def test_timetable_accepts_blank_section_for_default_group(bio):
+    b = bio
+    with connect(b.urls["owner"]) as c:
+        c.execute(
+            """UPDATE app.class_groups g SET section='ALL'
+            FROM app.offerings o WHERE o.id=%s AND o.class_group_id=g.id""",
+            (b.ids["offering"],),
+        )
+    preview, _, _ = await import_ready(b, section="")
+    assert preview["status"] == "ready", preview
 
 
 async def test_timetable_preview_commit_reimport_and_tenant_boundary(bio):

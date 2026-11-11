@@ -122,6 +122,9 @@ class Term(Strict):
     version: int
 
 
+DEFAULT_GROUP_SECTION = "ALL"
+
+
 class ClassGroup(Strict):
     id: UUID
     term_id: UUID

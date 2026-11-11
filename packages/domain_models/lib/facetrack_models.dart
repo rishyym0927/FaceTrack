@@ -89,7 +89,8 @@ class Offering {
   final String id, title, courseCode, termCode, branch, section, status;
   final int semester, version;
   String get subtitle =>
-      '$courseCode · $branch · ${semesterLabel(semester)} · Section $section';
+      '$courseCode · $branch · ${semesterLabel(semester)}'
+      '${section == 'ALL' ? '' : ' · Section $section'}';
   String get termTitle => termLabel(termCode);
 }
 
@@ -138,7 +139,8 @@ class Academic {
   /// or "CSE · 3rd Semester · Section CSE1".
   String get label {
     if (semester != null) {
-      return '$branch · ${semesterLabel(semester!)} · Section $section';
+      return '$branch · ${semesterLabel(semester!)}'
+          '${section == 'ALL' ? '' : ' · Section $section'}';
     }
     if (title != null) return code == null ? title! : '$code · $title';
     final c = code ?? '';

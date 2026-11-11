@@ -2,6 +2,18 @@
 
 **Reviewed:** 11 November 2026 (Asia/Kolkata)
 
+## IGDTUW test accounts — 11 November
+
+- Created a separate hosted IGDTUW institute, Semester 1 (1 August–15 December 2026), one CSE–AI group, room 306 and five offerings. Demo institutes remain active.
+- Provisioned 25 roster students and four faculty with separate initial passwords, 125 approved course enrolments and four faculty assignments. Mathematics for AI has no faculty assignment. Verified one Student and one Teacher login through hosted Auth and the production API, each with only the IGDTUW membership. The two additional Student accounts need official enrolment numbers. The MTech roster and the two pending Student accounts received no admin access. Separately, four synthetic accounts were assigned to IGDTUW only, with one Teacher/Admin and three Student roles. Live sign-in and role checks passed for all four.
+- IGDTUW has no scoped worker identity. Account access is verified. Biometric processing requires separately authorized model and worker provisioning before live enrolment testing.
+
+## Class setup without section labels or faculty employee numbers — 11 November
+
+- Admin creates a class group with term, branch and semester. Faculty creation uses full name and official email, with an initial password only when creating a login. Faculty pickers and account views omit employee numbers. Student enrolment numbers remain required.
+- The API supplies stable internal values for omitted legacy fields, preserving existing group labels, identifiers and database constraints. A blank section cell in the existing timetable CSV selects the default group. No migration is needed.
+- Verified 63 API tests, 84 Teacher tests, 21 Student tests and 72 shared-core tests. Flutter analysis passed, and the Admin suite was rerun after the final faculty search wording. The OpenAPI snapshot was regenerated. Changes are local. Next action is deploy the API and web together, then verify creation with controlled records before provisioning the MTech cohort.
+
 ## Documentation review — 11 November
 
 - Consolidated setup around the installation guide, with platform, upgrade, camera and Azure runbooks for their specific workflows. Updated the API and worker references, product attendance rules and verified deployment status. Generated OpenAPI matched the checked-in contract. Relative links and heading anchors, Compose configuration, deployment activation tests and browser scanner tests passed.

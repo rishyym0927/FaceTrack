@@ -75,7 +75,7 @@ void main() {
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(find.text('Teaching at a glance'), findsOneWidget);
-        expect(find.text('Employee number'), findsOneWidget);
+        expect(find.text('Employee number'), findsNothing);
         // Late counts as Present; excused folds into Unassessed.
         expect(
           find.text('Marked across your subjects: Present 3 · Absent 1'),

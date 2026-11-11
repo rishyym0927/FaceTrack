@@ -8,7 +8,7 @@ needs SUPABASE_SERVICE_ROLE_KEY; without it the identity/role endpoints still wo
 
 from datetime import date
 from typing import Annotated, Literal
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 from fastapi import Depends, Header, Query, Request
@@ -16,7 +16,7 @@ from pydantic import Field, model_validator
 
 from .db import many, one, transaction
 from .errors import APIError
-from .schemas import Strict
+from .schemas import DEFAULT_GROUP_SECTION, Strict
 from .security import check_cursor, idempotent, page, roles
 from .security import remember as remember_effect
 
@@ -108,7 +108,7 @@ class GroupCreate(Strict):
     term_id: UUID
     branch: str = Field(min_length=1, max_length=50)
     semester: int = Field(ge=1, le=20)
-    section: str = Field(min_length=1, max_length=32)
+    section: str = Field(default=DEFAULT_GROUP_SECTION, min_length=1, max_length=32)
 
 
 class OfferingCreate(Strict):
@@ -131,6 +131,10 @@ class IdentityCreate(Strict):
         if self.create_login and not self.password:
             raise ValueError("password is required when create_login is true")
         return self
+
+
+class TeacherCreate(IdentityCreate):
+    number: str | None = Field(default=None, min_length=1, max_length=32)
 
 
 class LoginCreate(Strict):
@@ -261,7 +265,7 @@ def install(app, engine, settings, principal, storage, auth):
         return await provision(request, user, institute_id, body, key, call)
 
     @app.post("/v1/admin/teachers", status_code=201)
-    async def create_teacher(body: IdentityCreate, request: Request, user: User, institute_id: Institute, key: Key):
+    async def create_teacher(body: TeacherCreate, request: Request, user: User, institute_id: Institute, key: Key):
         return await provision(
             request, user, institute_id, body, key, _identity_call(body, "teacher", auth, settings)
         )
@@ -336,18 +340,24 @@ def _identity_call(body, kind, auth, settings):
     """Build the write that creates an identity row and, optionally, a login account."""
     number_column = {"teacher": "admin_create_teacher", "student": "admin_create_student"}[kind]
 
+    email = body.official_email.strip().lower()
+    number = body.number
+    if number is None:
+        # Keep the legacy storage field without asking faculty for an employee number.
+        number = uuid5(NAMESPACE_URL, f"facetrack:faculty:{email}").hex
+
     async def call(conn):
         # Insert the record first so a duplicate fails before any account exists.
         row = await one(
             conn,
             f"SELECT app.{number_column}(:n,:name,:e) AS id",
-            {"n": body.number, "name": body.official_name, "e": body.official_email},
+            {"n": number, "name": body.official_name, "e": email},
         )
         identity_id = str(row["id"])
         auth_user_id = None
         if body.create_login:
             auth_user_id, created = await obtain_login(
-                conn, auth, settings, body.official_email.lower(), body.password
+                conn, auth, settings, email, body.password
             )
             await link_login(conn, auth, settings, kind, identity_id, auth_user_id, created)
         return {"id": identity_id, "auth_user_id": auth_user_id, "login_created": bool(auth_user_id)}

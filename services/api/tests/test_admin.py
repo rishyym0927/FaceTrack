@@ -52,9 +52,12 @@ async def test_admin_provisions_full_academic_chain_and_enables_teacher_access(b
     group = await b.client.post(
         "/v1/admin/class-groups",
         headers=admin("group"),
-        json={"term_id": term.json()["id"], "branch": "CSE", "semester": 6, "section": "B"},
+        json={"term_id": term.json()["id"], "branch": "CSE", "semester": 6},
     )
     assert group.status_code == 201, group.text
+    groups = await b.client.get("/v1/academics/class-groups", headers=b.headers("unassigned"))
+    assert groups.status_code == 200
+    assert next(row for row in groups.json()["items"] if row["id"] == group.json()["id"])["section"] == "ALL"
     offering = await b.client.post(
         "/v1/admin/offerings",
         headers=admin("offering"),
@@ -141,7 +144,6 @@ async def test_admin_teacher_creation_with_login_links_account_and_role(backend,
         "/v1/admin/teachers",
         headers=b.headers("unassigned", key="tlogin"),
         json={
-            "number": "EMP-900",
             "official_name": "New Faculty",
             "official_email": "newfaculty@example.test",
             "create_login": True,
@@ -153,7 +155,7 @@ async def test_admin_teacher_creation_with_login_links_account_and_role(backend,
     assert created.json()["auth_user_id"] == auth_id
     with connect(b.urls["owner"]) as c:
         linked = c.execute(
-            "SELECT auth_user_id FROM app.teachers WHERE institute_id=%s AND employee_number='EMP-900'",
+            "SELECT auth_user_id FROM app.teachers WHERE institute_id=%s AND official_email='newfaculty@example.test'",
             (UUID(b.ids["institute"]),),
         ).fetchone()
         assert linked and str(linked[0]) == auth_id

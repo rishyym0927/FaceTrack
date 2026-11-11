@@ -1166,21 +1166,22 @@ class AccountPage extends ConsumerWidget {
         children: [
           Text('Profile', style: Theme.of(context).textTheme.titleMedium),
           const SizedBox(height: 4),
-          detail(
-            Icons.tag,
-            student ? 'Enrolment number' : 'Employee number',
-            person?.number ?? '',
-            trailing: person == null
-                ? null
-                : IconButton(
-                    tooltip: 'Copy',
-                    icon: const Icon(Icons.copy_outlined),
-                    onPressed: () {
-                      Clipboard.setData(ClipboardData(text: person.number));
-                      showMessage(context, 'Copied to clipboard.');
-                    },
-                  ),
-          ),
+          if (student)
+            detail(
+              Icons.tag,
+              'Enrolment number',
+              person?.number ?? '',
+              trailing: person == null
+                  ? null
+                  : IconButton(
+                      tooltip: 'Copy',
+                      icon: const Icon(Icons.copy_outlined),
+                      onPressed: () {
+                        Clipboard.setData(ClipboardData(text: person.number));
+                        showMessage(context, 'Copied to clipboard.');
+                      },
+                    ),
+            ),
           detail(Icons.mail_outline, 'Email', email ?? ''),
           detail(Icons.account_balance_outlined, 'Institute', auth.instituteName),
           Padding(

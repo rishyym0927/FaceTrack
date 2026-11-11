@@ -369,7 +369,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
               ),
               SizedBox(height: 8),
               Text(
-                'Use one row per weekly period. Match the approved semester term, subject code, section, faculty email and room code. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as BCS201-CSE1-Mon-09.',
+                'Use one row per weekly period. Match the approved semester term, subject code, faculty email and room code. Leave the section column blank for a class group created without a section. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as BCS201-CSE1-Mon-09.',
               ),
             ],
           ),
@@ -401,7 +401,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
             ),
             for (final row in rows.take(12))
               Text(
-                '${row['course_code']} · ${row['branch']} ${row['section']} · ${row['weekday']} ${row['start_time']}–${row['end_time']} · ${row['room_code']}',
+                '${row['course_code']} · ${row['branch']}${row['section'] == '' || row['section'] == 'ALL' ? '' : ' ${row['section']}'} · ${row['weekday']} ${row['start_time']}–${row['end_time']} · ${row['room_code']}',
               ),
             if (rows.length > 12) Text('… and ${rows.length - 12} more'),
             TextButton(

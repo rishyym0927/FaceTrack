@@ -18,7 +18,7 @@ from .attendance import remember, session
 from .biometric_types import Epoch
 from .db import many, one, transaction
 from .errors import APIError
-from .schemas import Strict
+from .schemas import DEFAULT_GROUP_SECTION, Strict
 from .security import audit, idempotent, roles, teacher_access
 
 CSV_COLUMNS = [
@@ -182,11 +182,14 @@ async def normalized_rows(conn, institute, term, actor, rows):
     result = []
     keys = set()
     for raw in rows:
-        if set(raw) != set(CSV_COLUMNS) or any(not x or len(x) > 254 for x in raw.values()):
+        if set(raw) != set(CSV_COLUMNS) or any(
+            len(value) > 254 or (not value and column != "section")
+            for column, value in raw.items()
+        ):
             raise APIError(
                 422,
                 "INVALID_TIMETABLE",
-                "Use all required CSV columns with nonempty bounded fields.",
+                "Use all CSV columns. Only the section field may be blank.",
             )
         try:
             weekday = ["MON", "TUE", "WED", "THU", "FRI", "SAT", "SUN"].index(raw["weekday"])
@@ -227,7 +230,7 @@ async def normalized_rows(conn, institute, term, actor, rows):
                 "course": raw["course_code"],
                 "branch": raw["branch"],
                 "semester": semester,
-                "section": raw["section"],
+                "section": raw["section"] or DEFAULT_GROUP_SECTION,
                 "email": raw["teacher_email"].lower(),
                 "room": raw["room_code"],
                 "actor": actor,

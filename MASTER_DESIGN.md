@@ -279,6 +279,13 @@ Mutation POSTs accept `Idempotency-Key`: same actor/route/key/body returns origi
 
 Errors: `{error:{code,message,request_id,retryable,details}}`. Use 401 authentication, 403 disallowed action, 404 inaccessible/missing object, 409 state/version conflict, 413 size, 415 media, 422 validation, 429 quota, 503 dependency outage. Never return database/stack details.
 
+Admin creates a class group from term, branch and semester. The API supplies
+the internal default group key when no legacy section is specified. Faculty
+provisioning uses official email as the unique identity within the institute.
+The API supplies a stable internal value for the legacy employee-number column
+when a caller omits it. Existing labelled groups, faculty profiles, and student
+enrolment numbers retain their identifiers.
+
 ### Initial endpoints
 
 | Routes | Contract and permission |

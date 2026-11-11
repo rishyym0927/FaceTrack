@@ -231,7 +231,7 @@ class _CourseFormState extends State<_CourseForm> {
     final onSubmit = widget.onSubmit;
     return _Form(
       title: 'Add subject',
-      help: 'Add each subject once; the same subject can be allocated to several sections.',
+      help: 'Add each subject once; the same subject can be allocated to several class groups.',
       action: 'Create subject',
       onSubmit: onSubmit,
       fields: (_) => [
@@ -262,15 +262,12 @@ class _GroupForm extends StatefulWidget {
 
 class _GroupFormState extends State<_GroupForm> {
   String? term;
-  final branch = TextEditingController(),
-      sem = TextEditingController(),
-      section = TextEditingController();
+  final branch = TextEditingController(), sem = TextEditingController();
 
   @override
   void dispose() {
     branch.dispose();
     sem.dispose();
-    section.dispose();
     super.dispose();
   }
 
@@ -278,10 +275,9 @@ class _GroupFormState extends State<_GroupForm> {
   Widget build(BuildContext context) {
     term ??= widget.terms.length == 1 ? widget.terms.first.id : null;
     return _Form(
-      title: 'Add section',
-      help:
-          'A section is one group of students, e.g. CSE · 3rd Semester · CSE1.',
-      action: 'Create section',
+      title: 'Add class group',
+      help: 'A class group combines a branch and semester for one term.',
+      action: 'Create class group',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
         _Dropdown(
@@ -311,12 +307,6 @@ class _GroupFormState extends State<_GroupForm> {
             return (n == null || n < 1 || n > 20) ? 'Enter 1–20.' : null;
           },
         ),
-        _field(
-          section,
-          'Section (e.g. CSE1)',
-          max: 32,
-          helper: 'As written on the timetable, e.g. CSE1 or CSE2.',
-        ),
       ],
       collect: () {
         if (term == null) return null;
@@ -324,7 +314,6 @@ class _GroupFormState extends State<_GroupForm> {
           'term_id': term,
           'branch': branch.text.trim(),
           'semester': int.parse(sem.text.trim()),
-          'section': section.text.trim(),
         };
       },
     );
@@ -356,8 +345,8 @@ class _OfferingFormState extends State<_OfferingForm> {
   @override
   Widget build(BuildContext context) {
     return _Form(
-      title: 'Allocate subject to a section',
-      help: 'Repeat for every subject each section studies.',
+      title: 'Allocate subject to a class group',
+      help: 'Repeat for every subject each class group studies.',
       action: 'Allocate subject',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
@@ -380,7 +369,7 @@ class _OfferingFormState extends State<_OfferingForm> {
           label: 'Section',
           value: group,
           items: {for (final g in widget.groups) g.id: g.label},
-          empty: 'Add a section first.',
+          empty: 'Add a class group first.',
           onChanged: (v) {
             group = v;
             rebuild();
@@ -408,11 +397,12 @@ class _OfferingFormState extends State<_OfferingForm> {
 class _IdentityForm extends StatefulWidget {
   const _IdentityForm({
     required this.title,
-    required this.numberLabel,
-    required this.numberHelp,
+    this.numberLabel,
+    this.numberHelp,
     required this.onSubmit,
   });
-  final String title, numberLabel, numberHelp;
+  final String title;
+  final String? numberLabel, numberHelp;
   final _Submit onSubmit;
   @override
   State<_IdentityForm> createState() => _IdentityFormState();
@@ -440,7 +430,8 @@ class _IdentityFormState extends State<_IdentityForm> {
       action: 'Create',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
-        _field(number, widget.numberLabel, max: 32, helper: widget.numberHelp),
+        if (widget.numberLabel case final label?)
+          _field(number, label, max: 32, helper: widget.numberHelp),
         _field(
           name,
           'Full name',
@@ -493,7 +484,7 @@ class _IdentityFormState extends State<_IdentityForm> {
           ),
       ],
       collect: () => {
-        'number': number.text.trim(),
+        if (widget.numberLabel != null) 'number': number.text.trim(),
         'official_name': name.text.trim(),
         'official_email': email.text.trim(),
         'create_login': login,
@@ -534,7 +525,7 @@ class _AssignFormState extends State<_AssignForm> {
             for (final o in widget.offerings)
               o.id: '${o.title} · ${o.subtitle}',
           },
-          empty: 'Allocate a subject to a section first.',
+          empty: 'Allocate a subject to a class group first.',
           onChanged: (v) {
             offering = v;
             rebuild();
@@ -546,7 +537,7 @@ class _AssignFormState extends State<_AssignForm> {
           items: {
             for (final t in widget.teachers)
               t['id'] as String:
-                  '${t['official_name']} (${t['employee_number']})',
+                  '${t['official_name']} (${t['official_email']})',
           },
           empty: 'Add faculty first.',
           onChanged: (v) {
@@ -608,7 +599,7 @@ class _RoleFormState extends State<_RoleForm> {
     for (final t in widget.teachers)
       if (t['auth_user_id'] != null)
         t['auth_user_id'] as String:
-            '${t['official_name']} (${t['employee_number']}) · Faculty',
+            '${t['official_name']} (${t['official_email']}) · Faculty',
     for (final s in widget.students)
       if (s['auth_user_id'] != null)
         s['auth_user_id'] as String:
@@ -749,7 +740,8 @@ class _Directory extends StatefulWidget {
     required this.onCreateLogin,
     this.fresh,
   });
-  final String title, numberKey;
+  final String title;
+  final String? numberKey;
   final List<Json> people;
   final Future<String?> Function(Json person, String password) onCreateLogin;
 
@@ -797,7 +789,7 @@ class _DirectoryState extends State<_Directory> {
       if (filter == _LoginFilter.linked && !has) return false;
       if (filter == _LoginFilter.missing && has) return false;
       if (q.isEmpty) return true;
-      return '${p['official_name']} ${p[widget.numberKey]} ${p['official_email']}'
+      return '${p['official_name']} ${p[widget.numberKey] ?? ''} ${p['official_email']}'
           .toLowerCase()
           .contains(q);
     }).toList();
@@ -838,10 +830,12 @@ class _DirectoryState extends State<_Directory> {
           TextField(
             controller: _search,
             onChanged: (_) => setState(() {}),
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               isDense: true,
-              prefixIcon: Icon(Icons.search, size: 20),
-              hintText: 'Search name, number or email',
+              prefixIcon: const Icon(Icons.search, size: 20),
+              hintText: widget.numberKey == null
+                  ? 'Search name or email'
+                  : 'Search name, number or email',
             ),
           ),
           const SizedBox(height: 8),
@@ -858,7 +852,10 @@ class _DirectoryState extends State<_Directory> {
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
                 color:
-                    widget.fresh != null && p[widget.numberKey] == widget.fresh
+                    widget.fresh != null &&
+                        (p[widget.numberKey ?? 'official_email'] as String?)
+                                ?.toLowerCase() ==
+                            widget.fresh?.toLowerCase()
                     ? _green.withValues(alpha: .10)
                     : theme.colorScheme.surfaceContainerLowest,
               ),
@@ -888,7 +885,10 @@ class _DirectoryState extends State<_Directory> {
                           style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
                         Text(
-                          '${p[widget.numberKey]} · ${p['official_email'] ?? ''}',
+                          [
+                            if (widget.numberKey != null) p[widget.numberKey],
+                            p['official_email'],
+                          ].whereType<String>().join(' · '),
                           style: TextStyle(
                             color: theme.colorScheme.onSurfaceVariant,
                             fontSize: 13,

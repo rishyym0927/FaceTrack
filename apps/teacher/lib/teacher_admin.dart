@@ -237,15 +237,15 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       _Target.subject,
     ),
     _Step(
-      'Add sections',
-      'Branch, semester and section, e.g. CSE · 3rd Semester · CSE1.',
+      'Add class groups',
+      'Branch and semester, e.g. CSE · 3rd Semester.',
       groups.length,
       _Section.academics,
       _Target.section,
     ),
     _Step(
-      'Allocate subjects to sections',
-      'Links a subject to the section that studies it. Faculty and students work inside these.',
+      'Allocate subjects to class groups',
+      'Links a subject to the class group that studies it. Faculty and students work inside these.',
       offerings.length,
       _Section.academics,
       _Target.allocation,
@@ -297,30 +297,28 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     _Target.section => _GroupForm(
       terms: terms,
       onSubmit: (b) => _run(
-        'Section created.',
+        'Class group created.',
         () => _post('/v1/admin/class-groups', b),
-        created: b['section'] as String?,
+        created: b['branch'] as String?,
       ),
     ),
     _Target.allocation => _OfferingForm(
       courses: courses,
       groups: groups,
       onSubmit: (b) => _run(
-        'Subject allocated to the section.',
+        'Subject allocated to the class group.',
         () => _post('/v1/admin/offerings', b),
         created: b['title'] as String?,
       ),
     ),
     _Target.faculty => _IdentityForm(
       title: 'Add faculty',
-      numberLabel: 'Employee number',
-      numberHelp: 'Exactly as on institute records.',
       onSubmit: (b) => _run(
         b['create_login'] == true
             ? 'Faculty created with a login account.'
             : 'Faculty record created.',
         () => _post('/v1/admin/teachers', b),
-        created: b['number'] as String?,
+        created: b['official_email'] as String?,
       ),
     ),
     _Target.student => _IdentityForm(
@@ -389,7 +387,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     _TourStep(
       title: 'The setup timeline',
       body:
-          'Seven steps in order: term, subjects, sections, allocations, faculty, '
+          'Seven steps in order: term, subjects, class groups, allocations, faculty, '
           'assignments and students. Each shows how many you have created.',
       section: _Section.overview,
       target: _k['timeline'],
@@ -408,7 +406,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       title: 'Academic setup',
       body:
           'Four cards, filled in order. A card stays locked until what it needs exists, '
-          'for example sections need a semester term first.',
+          'for example class groups need a semester term first.',
       section: _Section.academics,
       target: _k['academic'],
       icon: Icons.account_tree_outlined,
@@ -599,7 +597,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  '${name.isEmpty ? 'Your institute' : name}: set up subjects and sections, '
+                  '${name.isEmpty ? 'Your institute' : name}: set up subjects and class groups, '
                   'add people and control who can do what.',
                   style: const TextStyle(
                     color: Color(0xffd5e9e2),
@@ -717,7 +715,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       _Section.academics => (
         icon: Icons.account_tree_outlined,
         title: 'Academic setup',
-        about: 'Terms, subjects, sections',
+        about: 'Terms, subjects, class groups',
         badge: complete ? 'done' : null,
       ),
       _Section.people => (
@@ -925,7 +923,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                 _quick(
                   Icons.link_outlined,
                   'Allocate subject',
-                  'Subject to a section',
+                  'Subject to a class group',
                   () => _open(_Target.allocation),
                 ),
                 _quick(
@@ -964,8 +962,8 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               'Institute at a glance',
               tip: const _InfoTip(
                 'What these numbers mean',
-                'Semester terms, subjects and sections make up the academic structure. An '
-                    'allocation is one subject taught to one section. "With login" counts people '
+                'Semester terms, subjects and class groups make up the academic structure. An '
+                    'allocation is one subject taught to one class group. "With login" counts people '
                     'who can sign in.',
               ),
             ),
@@ -983,7 +981,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                   icon: Icons.menu_book_outlined,
                 ),
                 StatTile(
-                  label: 'Sections',
+                  label: 'Class groups',
                   value: groups.length,
                   icon: Icons.groups_2_outlined,
                 ),
@@ -1254,17 +1252,17 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       children: [
         _chartTitle(
           'By semester',
-          'Sections and subject allocations in each semester',
+          'Class groups and subject allocations in each semester',
         ),
         if (semesters.isEmpty)
-          const Text('Add sections to see them by semester.')
+          const Text('Add class groups to see them by semester.')
         else
           BarDistribution(
             labelWidth: 132,
             bars: [
               for (final s in semesters) ...[
                 BarDatum(
-                  '${semesterLabel(s)} sections',
+                  '${semesterLabel(s)} class groups',
                   sections[s] ?? 0,
                   const Color(0xff146653),
                 ),
@@ -1291,7 +1289,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         tip: const _InfoTip(
           'Semester term',
           'A semester term is the period classes run in, such as 2026-ODD (Odd Semester 2026). '
-              'Create it first: sections belong to a term.',
+              'Create it first: class groups belong to a term.',
         ),
         items: [for (final t in terms) t.label],
         fresh: fresh,
@@ -1307,7 +1305,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         tip: const _InfoTip(
           'Subject',
           'A subject is a course with a code, e.g. BCS 201 · Design & Analysis of Algorithm. '
-              'Add it once; it can then be taught to several sections.',
+              'Add it once; it can then be taught to several class groups.',
         ),
         items: [for (final c in courses) c.label],
         fresh: fresh,
@@ -1317,16 +1315,16 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       _SetupCard(
         number: 3,
         icon: Icons.groups_2_outlined,
-        title: 'Sections',
-        about: 'A group of students: branch, semester and section.',
+        title: 'Class groups',
+        about: 'A group of students: branch and semester.',
         tip: const _InfoTip(
-          'Section',
-          'A section is one group of students that attends classes together, e.g. '
-              'CSE · 3rd Semester · CSE1. It belongs to a semester term.',
+          'Class group',
+          'A class group is one group of students that attends classes together, e.g. '
+              'CSE · 3rd Semester. It belongs to a semester term.',
         ),
         items: [for (final g in groups) g.label],
         fresh: fresh,
-        addLabel: 'Add section',
+        addLabel: 'Add class group',
         blocked: terms.isEmpty ? 'Create a semester term first.' : null,
         onAdd: () => _open(_Target.section),
       ),
@@ -1334,11 +1332,11 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         number: 4,
         icon: Icons.link_outlined,
         title: 'Allocations',
-        about: 'Which subject each section studies.',
+        about: 'Which subject each class group studies.',
         tip: const _InfoTip(
           'Allocation',
-          'An allocation links one subject to one section. Faculty take attendance and students '
-              'join inside allocations, so add one for every subject a section studies.',
+          'An allocation links one subject to one class group. Faculty take attendance and students '
+              'join inside allocations, so add one for every subject a class group studies.',
         ),
         items: [for (final o in offerings) '${o.title} · ${o.subtitle}'],
         fresh: fresh,
@@ -1346,7 +1344,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         blocked: courses.isEmpty
             ? 'Add a subject first.'
             : groups.isEmpty
-            ? 'Add a section first.'
+            ? 'Add a class group first.'
             : null,
         onAdd: () => _open(_Target.allocation),
       ),
@@ -1355,7 +1353,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       const _Heading(
         'Academic setup',
         subtitle:
-            'Build the structure in order: term → subjects → sections → allocations. '
+            'Build the structure in order: term → subjects → class groups → allocations. '
             'Use the names and codes from the timetable.',
       ),
       LayoutBuilder(
@@ -1452,9 +1450,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                     ? 'Student directory'
                     : 'Faculty directory',
                 people: peopleStudents ? students : teachers,
-                numberKey: peopleStudents
-                    ? 'enrollment_number'
-                    : 'employee_number',
+                numberKey: peopleStudents ? 'enrollment_number' : null,
                 fresh: fresh,
                 onCreateLogin: (p, password) => _addLogin(kind, p, password),
               ),
@@ -1542,7 +1538,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                   'missing from the list, add them in People or give them the Faculty role.',
             ),
             points: const [
-              'Do this for every subject after allocating it to a section.',
+              'Do this for every subject after allocating it to a class group.',
               'A subject can have more than one faculty member.',
             ],
             action: FilledButton.icon(
@@ -1558,7 +1554,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               padding: const EdgeInsets.only(top: 8),
               child: _Note(
                 offerings.isEmpty
-                    ? 'Allocate a subject to a section first (Academic setup).'
+                    ? 'Allocate a subject to a class group first (Academic setup).'
                     : 'Add faculty first (People).',
               ),
             ),

@@ -223,6 +223,62 @@ void main() {
     expect(find.text('Semester term created.'), findsOneWidget);
   });
 
+  testWidgets('New class groups and faculty omit legacy identifiers', (
+    tester,
+  ) async {
+    final h = await _admin(tester);
+    final posts = <RequestOptions>[];
+    h.services.api.dio.httpClientAdapter = _adapter(
+      h.account,
+      posts,
+      academics: {
+        'terms': [
+          {'id': 'term1', 'code': '2026-ODD', 'version': 1},
+        ],
+      },
+    );
+    await _pumpAdmin(tester, h);
+    await section(tester, 'Academic setup');
+    await tester.tap(find.text('Add class group'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Branch (e.g. CSE)'),
+      'CSE-AI',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Semester (1–20)'),
+      '1',
+    );
+    await tester.tap(find.text('Create class group'));
+    await tester.pumpAndSettle();
+    expect(posts.single.data, {
+      'term_id': 'term1',
+      'branch': 'CSE-AI',
+      'semester': 1,
+    });
+
+    await section(tester, 'People');
+    await tester.tap(find.text('Add faculty'));
+    await tester.pumpAndSettle();
+    expect(find.text('Employee number'), findsNothing);
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Full name'),
+      'Dr Example',
+    );
+    await tester.enterText(
+      find.widgetWithText(TextFormField, 'Official email'),
+      'faculty@example.edu',
+    );
+    await tester.tap(find.text('Create'));
+    await tester.pumpAndSettle();
+    expect(posts.last.path, '/v1/admin/teachers');
+    expect(posts.last.data, {
+      'official_name': 'Dr Example',
+      'official_email': 'faculty@example.edu',
+      'create_login': false,
+    });
+  });
+
   testWidgets('A failed create keeps the form open with the reason', (
     tester,
   ) async {
@@ -269,7 +325,7 @@ void main() {
     expect(find.text('Create a semester term first.'), findsOneWidget);
     final add = tester.widget<ButtonStyleButton>(
       find.ancestor(
-        of: find.text('Add section'),
+        of: find.text('Add class group'),
         matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
       ),
     );
@@ -298,7 +354,12 @@ void main() {
     );
     await _pumpAdmin(tester, h);
     await section(tester, 'Academic setup');
-    for (final t in ['Semester terms', 'Subjects', 'Sections', 'Allocations']) {
+    for (final t in [
+      'Semester terms',
+      'Subjects',
+      'Class groups',
+      'Allocations',
+    ]) {
       expect(find.text(t), findsWidgets);
     }
     expect(find.text('Odd Semester 2026 (2026-ODD)'), findsOneWidget);
@@ -433,7 +494,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Person with a login account'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Dr Rao (E10) · Faculty').last);
+    await tester.tap(find.text('Dr Rao (rao@example.edu) · Faculty').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Update role'));
     await tester.pumpAndSettle();
@@ -485,7 +546,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Faculty').last);
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Dr Rao (E10)').last);
+    await tester.tap(find.text('Dr Rao (rao@example.edu)').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Assign'));
     await tester.pumpAndSettle();

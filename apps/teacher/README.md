@@ -34,7 +34,7 @@ Use the [Teacher signed Android check](../../docs/CAMERA_VALIDATION.md#teacher-a
 
 ## Administration
 
-Use **Overview** for the setup checklist and institute statistics. **Academic setup** manages terms, subjects, sections and allocations. **People** manages faculty, students and their logins. **Access** assigns faculty and manages roles. Select **Take the tour** to see the guided walkthrough.
+Use **Overview** for the setup checklist and institute statistics. **Academic setup** manages terms, subjects, class groups and allocations. **People** manages faculty, students and their logins. **Access** assigns faculty and manages roles. Select **Take the tour** to see the guided walkthrough.
 
 ## Preserved local camera spike
 
@@ -44,3 +44,5 @@ Product sign-in is the default entry point. The separate prototype saves local r
 ../../scripts/flutter run -d chrome -t lib/main_spike.dart --web-hostname localhost --web-port 5302
 ../../scripts/flutter build web -t lib/main_spike.dart --output build/spike
 ```
+
+New class groups require a term, branch and semester. Faculty records use full name and official email. A password is needed only when creating a login.

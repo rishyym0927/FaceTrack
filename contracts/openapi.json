@@ -10114,7 +10114,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/IdentityCreate"
+                "$ref": "#/components/schemas/TeacherCreate"
               }
             }
           }
@@ -12317,7 +12317,8 @@
             "type": "string",
             "maxLength": 32,
             "minLength": 1,
-            "title": "Section"
+            "title": "Section",
+            "default": "ALL"
           }
         },
         "additionalProperties": false,
@@ -12325,8 +12326,7 @@
         "required": [
           "term_id",
           "branch",
-          "semester",
-          "section"
+          "semester"
         ],
         "title": "GroupCreate"
       },
@@ -13215,6 +13215,60 @@
           "status"
         ],
         "title": "StudentProfile"
+      },
+      "TeacherCreate": {
+        "properties": {
+          "number": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 32,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Number"
+          },
+          "official_name": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Official Name"
+          },
+          "official_email": {
+            "type": "string",
+            "maxLength": 254,
+            "minLength": 3,
+            "title": "Official Email"
+          },
+          "create_login": {
+            "type": "boolean",
+            "title": "Create Login",
+            "default": false
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 128,
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "official_name",
+          "official_email"
+        ],
+        "title": "TeacherCreate"
       },
       "TeacherProfile": {
         "properties": {
