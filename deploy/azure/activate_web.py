@@ -37,9 +37,16 @@ def prepare_legacy_layout(root):
     # directories. This also resumes a partially completed first migration.
     for app, path in aliases.items():
         target = f"web-current/{app}"
-        if path.is_symlink() and os.readlink(path) == target:
+        if path.is_symlink():
+            if os.readlink(path) != target:
+                raise ValueError(f"Unexpected live symlink: {path}")
             continue
-        if not path.is_dir() or path.is_symlink():
+        if not path.exists():
+            if not (root / target).is_dir():
+                raise ValueError(f"Missing legacy build: {app}")
+            replace_link(path, target)
+            continue
+        if not path.is_dir():
             raise ValueError(f"Unexpected live directory: {path}")
         with tempfile.TemporaryDirectory(dir=root) as temporary:
             backup = Path(temporary) / app

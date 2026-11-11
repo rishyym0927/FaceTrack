@@ -1,6 +1,9 @@
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import os
 from pathlib import Path
 import tempfile
+from threading import Thread
 from unittest import TestCase, main
 from unittest.mock import patch
 
@@ -52,13 +55,19 @@ class WebReleaseTests(TestCase):
 
     def test_success_switches_both_apps_and_retains_previous_build(self):
         self.write_build(self.stage, "next")
-        with patch("activate_web.smoke") as smoke:
-            activate(self.root, self.stage, "https://unused.test")
+        handler = partial(SimpleHTTPRequestHandler, directory=self.root)
+        with ThreadingHTTPServer(("127.0.0.1", 0), handler) as server:
+            thread = Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                activate(self.root, self.stage, f"http://127.0.0.1:{server.server_port}")
+            finally:
+                server.shutdown()
+                thread.join()
         self.assert_live("next")
         self.assertEqual(os.readlink(self.root / "web-current"), self.stage.name)
         previous, = self.root.glob("release-legacy-*")
         self.assertEqual((previous / "teacher" / "index.html").read_text(), "previous teacher index.html")
-        smoke.assert_called_once()
 
 
 if __name__ == "__main__":
