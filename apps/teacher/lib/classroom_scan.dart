@@ -1,8 +1,24 @@
 import 'dart:async';
 
 import 'package:camera/camera.dart';
+import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:flutter/material.dart';
+
+String? terminalClassroomUploadMessage(Object error) {
+  if (error is! AppFailure) return null;
+  if (const {
+    'UPLOAD_EXPIRED',
+    'INSUFFICIENT_TEMPLATES',
+    'CAPTURE_TIME',
+    'SESSION_STATE',
+    'CAPTURE_SIZE',
+    'MEDIA_MISMATCH',
+  }.contains(error.code)) {
+    return error.message;
+  }
+  return null;
+}
 
 /// At most two complete segments are retained, including the active upload.
 /// Camera capture pauses under backpressure; it never grows an unbounded queue.
@@ -15,7 +31,8 @@ class ClassroomScan extends ChangeNotifier {
   final List<XFile> _queue = [];
   bool scanning = false, sending = false, collecting = false, closed = false;
   bool ended = false, releasing = false;
-  String? error;
+  String? error, cameraError;
+  bool retryable = true;
   double? uploadProgress;
   String? uploadStatus;
   int submitted = 0;
@@ -34,13 +51,14 @@ class ClassroomScan extends ChangeNotifier {
 
   Future<void> start() async {
     if (closed || ended || scanning || camera.busy || error != null) return;
+    cameraError = null;
     scanning = true;
     _emit();
     await camera.initialize();
-    if (ended) return;
+    if (closed || ended) return;
     if (!camera.ready) {
       scanning = false;
-      error = camera.error ?? 'Camera unavailable. Please retry.';
+      cameraError = camera.error ?? 'Camera unavailable. Please retry.';
       _emit();
       return;
     }
@@ -62,7 +80,7 @@ class ClassroomScan extends ChangeNotifier {
         camera.clip == null &&
         camera.error != null) {
       scanning = false;
-      error = camera.error;
+      cameraError = camera.error;
     }
     if (ended) await _finishCamera();
     _emit();
@@ -98,18 +116,18 @@ class ClassroomScan extends ChangeNotifier {
         final file = _queue.first;
         reportUpload('Preparing upload…');
         await upload(file);
+        if (closed) return;
         _queue.removeAt(0);
         submitted++;
-        try {
-          await removeOwnedClip(file.path);
-        } catch (_) {
-          /* Uploaded private media cleanup can retry on OS cache eviction. */
-        }
+        await _remove(file);
         _emit();
         await _next();
       }
-    } catch (_) {
-      error = 'Upload paused. Your captured segment is kept here. Check your connection and retry.';
+    } catch (failure) {
+      if (closed) return;
+      final terminalMessage = terminalClassroomUploadMessage(failure);
+      retryable = terminalMessage == null;
+      error = terminalMessage ?? 'Upload paused. Your captured segment is kept here. Check your connection and retry.';
       await stop();
     } finally {
       sending = false;
@@ -148,6 +166,7 @@ class ClassroomScan extends ChangeNotifier {
   }
 
   Future<void> retry() async {
+    if (!retryable || closed) return;
     error = null;
     _emit();
     await _send();
@@ -160,17 +179,29 @@ class ClassroomScan extends ChangeNotifier {
     final remaining = [..._queue];
     _queue.clear();
     for (final file in remaining) {
-      await removeOwnedClip(file.path);
+      await _remove(file);
     }
     await camera.discard();
     error = null;
     _emit();
   }
 
+  Future<void> _remove(XFile file) async {
+    try {
+      await removeOwnedClip(file.path);
+    } catch (_) {
+      // The OS can still evict an app-owned cache file.
+    }
+  }
+
   @override
   void dispose() {
     closed = true;
     camera.removeListener(_cameraChanged);
+    for (final file in _queue) {
+      unawaited(_remove(file));
+    }
+    _queue.clear();
     super.dispose();
   }
 }
@@ -400,9 +431,9 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                               camera.controlMessage!,
                               style: const TextStyle(color: Colors.white70),
                             ),
-                          if (camera.error != null)
+                          if (scan.cameraError != null || camera.error != null)
                             Text(
-                              camera.error!,
+                              scan.cameraError ?? camera.error!,
                               style: const TextStyle(color: Colors.amber),
                             ),
                           if (!scan.scanning &&
@@ -434,10 +465,11 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                             spacing: 12,
                             children: [
                               if (scan.error != null) ...[
-                                FilledButton(
-                                  onPressed: scan.sending ? null : scan.retry,
-                                  child: const Text('Retry upload'),
-                                ),
+                                if (scan.retryable)
+                                  FilledButton(
+                                    onPressed: scan.sending ? null : scan.retry,
+                                    child: const Text('Retry upload'),
+                                  ),
                                 TextButton(
                                   onPressed: scan.sending
                                       ? null
@@ -533,7 +565,9 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                     scan.releasing || scan.camera.busy
                         ? 'Closing camera…'
                         : scan.error != null
-                        ? 'Upload paused'
+                        ? (scan.retryable
+                              ? 'Upload paused'
+                              : 'Recording cannot be uploaded')
                         : scan.canLeave
                         ? 'Scan complete'
                         : 'Uploading recording',
@@ -561,10 +595,11 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                       '${scan.submitted} uploaded · ${scan.pending} remaining',
                     ),
                   if (scan.error != null && !scan.sending) ...[
-                    FilledButton(
-                      onPressed: scan.retry,
-                      child: const Text('Retry upload'),
-                    ),
+                    if (scan.retryable)
+                      FilledButton(
+                        onPressed: scan.retry,
+                        child: const Text('Retry upload'),
+                      ),
                     TextButton(
                       onPressed: () async {
                         final discard = await showDialog<bool>(

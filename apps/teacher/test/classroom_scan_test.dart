@@ -1,15 +1,17 @@
 import 'dart:async';
 
 import 'package:flutter/services.dart';
+import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_teacher/classroom_scan.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class FakeScanCamera extends GuidedCamera {
   int starts = 0, stops = 0;
+  bool available = true;
   @override
   Future<void> initialize() async {
-    ready = true;
+    ready = available;
   }
 
   @override
@@ -101,6 +103,41 @@ void main() {
     expect(calls, ['retained', 'retained']);
     expect(scan.pending, 0);
   });
+  test('camera failure can restart without an upload retry', () async {
+    final camera = FakeScanCamera()..available = false;
+    final scan = ClassroomScan(camera, (_) async {});
+    addTearDown(scan.dispose);
+    await scan.start();
+    expect(scan.cameraError, isNotNull);
+    expect(scan.error, isNull);
+    expect(scan.pending, 0);
+
+    camera.available = true;
+    await scan.start();
+    expect(scan.cameraError, isNull);
+    expect(camera.starts, 1);
+  });
+
+  test('expired upload keeps the segment until explicit discard', () async {
+    final camera = FakeScanCamera();
+    var attempts = 0;
+    final scan = ClassroomScan(camera, (_) async {
+      attempts++;
+      throw const AppFailure('Reservation expired.', code: 'UPLOAD_EXPIRED');
+    });
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('retained');
+    await Future<void>.delayed(Duration.zero);
+    expect(scan.error, 'Reservation expired.');
+    expect(scan.retryable, false);
+    expect(scan.pending, 1);
+    await scan.retry();
+    expect(attempts, 1);
+    await scan.discardPending();
+    expect(scan.pending, 0);
+  });
+
   test('Stop closes the camera immediately and drops a short tail', () async {
     final camera = FakeScanCamera();
     final scan = ClassroomScan(camera, (_) async {});

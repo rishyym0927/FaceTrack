@@ -970,9 +970,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     report?.call('Preparing recording…');
     final state = scanUploads.putIfAbsent(file.path, _ScanUpload.new);
     final bytes = await file.length();
-    if (bytes > 26214400) {
+    if (bytes == 0 || bytes > 26214400) {
       throw const AppFailure(
-        'Captured segment exceeds 25 MiB. Please lower camera resolution.',
+        'Captured segment is empty or exceeds 25 MiB. Record again at a lower resolution.',
+        code: 'CAPTURE_SIZE',
       );
     }
     final hash = (await sha256.bind(file.openRead()).first).toString();
@@ -998,37 +999,57 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       }
     }
     final current = state.capture!;
-    if (!state.uploaded) {
-      final grant = await services.api.send(
+    Future<void> commit() async {
+      if (!mounted) throw const AppFailure('Session closed.');
+      report?.call('Verifying upload…');
+      await services.api.send(
         'POST',
-        '/v1/captures/${current['id']}/upload-grant',
+        '/v1/captures/${current['id']}/upload-complete',
         institute: institute,
-      );
-      uploader = ResumableUpload();
-      await uploader!.upload(
-        file,
-        grant,
-        services.config.publishableKey,
-        resumeUrl: state.resumeUrl,
-        progress: (value) => report?.call('Uploading recording…', value),
-        checkpoint: (url) async {
-          state.resumeUrl = url;
+        mutation: state.complete,
+        body: {
+          'asset_id': current['asset_id'],
+          'byte_size': bytes,
+          'sha256': hash,
         },
       );
-      state.uploaded = true;
     }
-    report?.call('Verifying upload…');
-    await services.api.send(
-      'POST',
-      '/v1/captures/${current['id']}/upload-complete',
-      institute: institute,
-      mutation: state.complete,
-      body: {
-        'asset_id': current['asset_id'],
-        'byte_size': bytes,
-        'sha256': hash,
-      },
-    );
+
+    bool committed = false;
+    if (state.resumeUrl != null) {
+      try {
+        await commit();
+        committed = true;
+      } on AppFailure catch (e) {
+        if (e.code != 'MEDIA_NOT_AVAILABLE') rethrow;
+        state.uploaded = false;
+      }
+    }
+    if (!committed) {
+      if (!state.uploaded) {
+        if (!mounted) throw const AppFailure('Session closed.');
+        final grant = await services.api.send(
+          'POST',
+          '/v1/captures/${current['id']}/upload-grant',
+          institute: institute,
+        );
+        if (!mounted) throw const AppFailure('Session closed.');
+        uploader = ResumableUpload();
+        await uploader!.upload(
+          file,
+          grant,
+          services.config.publishableKey,
+          resumeUrl: state.resumeUrl,
+          progress: (value) => report?.call('Uploading recording…', value),
+          checkpoint: (url) async {
+            state.resumeUrl = url;
+          },
+        );
+        state.uploaded = true;
+      }
+      await commit();
+    }
+    if (!mounted) return;
     capture = {...current, 'status': 'queued'};
     captureStatusId = null;
     captureStatusRequest = null;
@@ -1041,14 +1062,26 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     ClassroomScan? scan;
     try {
       await camera.interrupt();
+      if (!mounted) return;
       if (kIsWeb) {
         await scanClassroomInBrowser(
-          onSegment: (file) => uploadScanSegment(
-            file,
-            report: (message, [value]) => updateBrowserClassroomStatus(
-              value == null ? message : '$message ${(value * 100).round()}%',
-            ),
-          ),
+          onSegment: (file) async {
+            try {
+              await uploadScanSegment(
+                file,
+                report: (message, [value]) => updateBrowserClassroomStatus(
+                  value == null
+                      ? message
+                      : '$message ${(value * 100).round()}%',
+                ),
+              );
+              return null;
+            } catch (error) {
+              final message = terminalClassroomUploadMessage(error);
+              if (message == null) rethrow;
+              return message;
+            }
+          },
           onStarted: () {},
         );
       } else {
@@ -1078,7 +1111,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     } finally {
       scan?.dispose();
       scanUploads.clear();
-      await camera.interrupt();
+      if (mounted) await camera.interrupt();
       if (mounted) {
         setState(() => scanActive = false);
         await load(keepDecisions: true);

@@ -47,7 +47,7 @@
   let active;
   const api = {
     FaceTracker, recordPart,
-    cancel() { active?.cancel(); },
+    cancel() { active?.cancel({ discard: true }); },
     status(message) { if (active) active.result.textContent = message; },
     async scan(onSegment, onStarted) {
       if (active) throw new Error('A classroom camera is already open.');
@@ -75,7 +75,7 @@
       let lastVideoTime = -1, lastDetection = 0, detectorBusy = false, detectorClosed = false;
       const tracker = new FaceTracker(), analysis = document.createElement('canvas');
       const analysisContext = analysis.getContext('2d', { willReadFrequently: true });
-      let wake;
+      let wake, abortUpload;
       const ready = new Promise(resolve => { wake = resolve; });
       const clearOverlay = () => overlay.getContext('2d').clearRect(0, 0, overlay.width, overlay.height);
       const releaseStream = async () => {
@@ -116,7 +116,7 @@
           finish();
           return;
         }
-        cancelled = true; finishing = true; wake(); retryResolve?.(false);
+        cancelled = true; finishing = true; wake(); abortUpload?.(); retryResolve?.(false);
         if (recorder?.state === 'recording') recorder.stop();
       };
       active = { cancel, result };
@@ -186,6 +186,7 @@
       try {
         await openCamera(); if (cancelled) return;
         const devices = (await navigator.mediaDevices.enumerateDevices()).filter(d => d.kind === 'videoinput' && d.deviceId);
+        if (cancelled) return;
         devices.forEach((device, index) => { const option = document.createElement('option'); option.value = device.deviceId; option.textContent = device.label || `Camera ${index + 1}`; select.append(option); });
         select.value = stream.getVideoTracks()[0].getSettings().deviceId || select.value;
         select.hidden = devices.length < 2;
@@ -242,23 +243,34 @@
           try {
             let uploaded = false;
             while (!uploaded && !cancelled) {
+              let terminalMessage;
               try {
                 result.textContent = 'Uploading recording…';
-                await onSegment(url);
-                uploaded = true;
-                submitted++;
+                const cancelledUpload = new Promise(resolve => { abortUpload = resolve; });
+                terminalMessage = await Promise.race([onSegment(url), cancelledUpload]);
+                if (cancelled) break;
+                if (!terminalMessage) {
+                  uploaded = true;
+                  submitted++;
+                  continue;
+                }
+              } catch (_) {
+                if (cancelled) break;
+              } finally {
+                abortUpload = null;
               }
-              catch (_) {
-                finish();
-                await closePreview();
-                result.textContent = 'Upload failed. This part is kept here; retry before closing.';
-                close.disabled = false;
-                retry.hidden = false; retry.focus();
-                const again = await new Promise(resolve => { retryResolve = resolve; retry.onclick = () => resolve(true); });
-                retry.hidden = true; retryResolve = null;
-                close.disabled = true;
-                if (!again) break;
-              }
+              finish();
+              await closePreview();
+              if (cancelled) break;
+              result.textContent = terminalMessage ||
+                'Upload failed. This part is kept here; retry before closing.';
+              close.disabled = false;
+              retry.hidden = Boolean(terminalMessage);
+              if (terminalMessage) close.focus(); else retry.focus();
+              const again = await new Promise(resolve => { retryResolve = resolve; retry.onclick = () => resolve(true); });
+              retry.hidden = true; retryResolve = null;
+              close.disabled = true;
+              if (!again) break;
             }
           } finally { pendingPart = false; URL.revokeObjectURL(url); }
         }

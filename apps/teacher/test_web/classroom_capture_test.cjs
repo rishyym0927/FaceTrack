@@ -51,7 +51,7 @@ test('external cancellation settles the current part without stopping the shared
   assert.ok((await part).size > 0);
 });
 
-test('stopping a scan releases the camera before an in-flight upload finishes', async () => {
+async function withUploadScan(run, transfer) {
   const api = globalThis.FaceTrackClassroom;
   const nodes = new Map();
   let removed = false;
@@ -90,23 +90,20 @@ test('stopping a scan releases the camera before an in-flight upload finishes', 
     Object.defineProperty(globalThis, key, { configurable: true, value });
   }
   globalThis.MediaRecorder = FakeRecorder;
-  let finishUpload, startedUpload;
+  let finishUpload, failUpload, startedUpload;
   const uploadStarted = new Promise(resolve => { startedUpload = resolve; });
-  const upload = new Promise(resolve => { finishUpload = resolve; });
-  const scan = api.scan(async () => { startedUpload(); await upload; }, () => {});
+  const upload = new Promise((resolve, reject) => { finishUpload = resolve; failUpload = reject; });
+  const scan = api.scan(async () => { startedUpload(); return transfer ? transfer() : upload; }, () => {});
   try {
     await new Promise(resolve => setImmediate(resolve));
     root.querySelector('.start').onclick();
     await new Promise(resolve => setImmediate(resolve));
     FakeRecorder.instances.at(-1).stop();
     await uploadStarted;
-    root.querySelector('.stop').onclick();
-    assert.equal(track.stopped, true);
-    assert.equal(root.querySelector('video').srcObject, null);
-    assert.equal(root.querySelector('.stage').hidden, true);
-    assert.equal(removed, false);
+    await run({ api, scan, root, track, removed: () => removed, failUpload });
   } finally {
     finishUpload();
+    api.cancel();
     await scan;
     for (const [key, descriptor] of Object.entries(restore)) {
       if (descriptor) Object.defineProperty(globalThis, key, descriptor);
@@ -114,4 +111,45 @@ test('stopping a scan releases the camera before an in-flight upload finishes', 
     }
   }
   assert.equal(removed, true);
+}
+
+test('stopping a scan releases the camera before an in-flight upload finishes', async () => {
+  await withUploadScan(async ({ root, track, removed }) => {
+    root.querySelector('.stop').onclick();
+    assert.equal(track.stopped, true);
+    assert.equal(root.querySelector('video').srcObject, null);
+    assert.equal(root.querySelector('.stage').hidden, true);
+    assert.equal(removed(), false);
+  });
+});
+
+test('owner teardown removes the scanner during an unresolved upload', async () => {
+  await withUploadScan(async ({ api, scan, track, removed, failUpload }) => {
+    api.cancel();
+    await scan;
+    assert.equal(track.stopped, true);
+    assert.equal(removed(), true);
+    failUpload(new Error('cancelled'));
+  });
+});
+
+test('owner teardown removes a scanner waiting for retry', async () => {
+  await withUploadScan(async ({ api, scan, root, removed, failUpload }) => {
+    failUpload(new Error('offline'));
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(root.querySelector('.retry').hidden, false);
+    api.cancel();
+    await scan;
+    assert.equal(removed(), true);
+  });
+});
+
+test('an expired upload offers discard without an ineffective retry', async () => {
+  await withUploadScan(async ({ root, track }) => {
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(track.stopped, true);
+    assert.equal(root.querySelector('.result').textContent, 'Upload reservation expired.');
+    assert.equal(root.querySelector('.retry').hidden, true);
+    assert.equal(root.querySelector('.close').disabled, false);
+  }, () => 'Upload reservation expired.');
 });
