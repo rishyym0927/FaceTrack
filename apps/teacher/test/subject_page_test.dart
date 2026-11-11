@@ -1,3 +1,6 @@
+import 'dart:async';
+
+import 'package:dio/dio.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_teacher/teacher_classes.dart';
 import 'package:facetrack_teacher/teacher_sessions.dart';
@@ -86,6 +89,48 @@ void main() {
     expect(sessionGroup({'status': 'scheduled'}), SessionGroup.upcoming);
     expect(sessionGroup({'status': 'finalized'}), SessionGroup.published);
     expect(sessionGroup({'status': 'cancelled'}), SessionGroup.cancelled);
+  });
+
+  testWidgets('Late pending-work response cannot replace refreshed counts', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    final older = Completer<ResponseBody>();
+    var disputeCalls = 0;
+    final base = _adapter(h);
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((request) async {
+      if (request.path != '/v1/offerings/o1/attendance-disputes') {
+        return base.handler(request);
+      }
+      if (++disputeCalls == 1) return older.future;
+      return jsonResponse({
+        'items': [
+          {'id': 'new-query'},
+        ],
+        'next_cursor': null,
+      });
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(
+          classesBuilder: (_) => const TeacherClassDetail(id: 'o1'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(disputeCalls, 1);
+    await tester.tap(find.byTooltip('Refresh subject'));
+    await tester.pumpAndSettle();
+    expect(disputeCalls, 2);
+    expect(find.text('1 open query'), findsOneWidget);
+    older.complete(jsonResponse({'items': [], 'next_cursor': null}));
+    await tester.pumpAndSettle();
+    expect(find.text('1 open query'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
   });
 
   for (final width in const [360.0, 1280.0]) {

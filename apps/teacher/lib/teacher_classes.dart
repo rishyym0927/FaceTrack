@@ -371,13 +371,16 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
 
   Future<void> refresh() async {
     if (!mounted) return;
-    setState(() => record = api.offering(institute, widget.id));
-    setState(() => sessionsVersion++);
+    final updated = api.offering(institute, widget.id);
+    setState(() {
+      record = updated;
+      sessionsVersion++;
+    });
     await Future.wait([
       requests.load(),
       students.load(),
       faces.load(),
-      _loadWork(),
+      ApiClient.freshReads(_loadWork),
     ]);
   }
 
@@ -623,7 +626,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             ],
             loaded: work != null,
             failed: work?.failed ?? const [],
-            onRetry: _loadWork,
+            onRetry: () => ApiClient.freshReads(_loadWork),
             onOpen: (t) => setState(() => tab = t),
           ),
           const SizedBox(height: 20),
