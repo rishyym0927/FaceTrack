@@ -99,6 +99,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
   bool loading = true;
   Object? error;
   List<Json> records = [];
+  bool hasOlderRecords = false;
   List<Json> disputes = [];
   final titles = <String, Offering>{};
   final failed = <String>[];
@@ -161,15 +162,34 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
       }
     }
 
+    Future<(List<Json>, bool)> attendanceRows() async {
+      final rows = <Json>[];
+      String? cursor;
+      for (var pageNumber = 0; pageNumber < 5; pageNumber++) {
+        final page = await api.send(
+          'GET',
+          '/v1/me/attendance',
+          institute: institute,
+          query: {'limit': 200, 'cursor': ?cursor},
+        );
+        rows.addAll((page['items'] as List).cast<Json>());
+        cursor = page['next_cursor'] as String?;
+        if (cursor == null || !mounted || generation != _generation) break;
+      }
+      return (rows, cursor != null);
+    }
+
     try {
       final results = await Future.wait([
-        fetchAllPages(api, '/v1/me/attendance', institute),
+        attendanceRows(),
         subjects(),
         disputeRows(),
       ]);
       if (!mounted || generation != _generation) return;
       setState(() {
-        records = results[0] as List<Json>;
+        final (loadedRecords, hasMore) = results[0] as (List<Json>, bool);
+        records = loadedRecords;
+        hasOlderRecords = hasMore;
         disputes = queries;
         titles
           ..clear()
@@ -187,6 +207,16 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
       if (!mounted || generation != _generation) return;
       setState(() {
         error = e;
+        if (e is AppFailure && [401, 403, 404].contains(e.status)) {
+          records = [];
+          hasOlderRecords = false;
+          disputes = [];
+          titles.clear();
+          failed.clear();
+          subject = null;
+          status = null;
+          range = AttendanceRange.all;
+        }
         loading = false;
       });
     }
@@ -204,11 +234,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
   @override
   Widget build(BuildContext context) {
     final header = PageHeader(
-      compact: true,
-      eyebrow: 'ATTENDANCE',
-      icon: Icons.insights_outlined,
       title: 'Your attendance',
-      subtitle: 'Published attendance across all your subjects. Only faculty-published decisions count.',
       action: OutlinedButton.icon(
         onPressed: loading ? null : load,
         icon: const Icon(Icons.refresh),
@@ -254,6 +280,11 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
       onRefresh: load,
       children: [
         header,
+        if (error != null)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: ErrorView(error!, retry: load),
+          ),
         if (failed.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
@@ -262,14 +293,20 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
+        if (hasOlderRecords)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Text(
+              'Records, filters and trends cover the latest ${records.length} published records. Open a subject to see its older records.',
+            ),
+          ),
         _filters(context),
-        const SizedBox(height: 16),
-        _overview(context, AttendanceStats(scoped)),
         const SizedBox(height: 16),
         _records(context, listed),
         ExpansionTile(
           title: const Text('Attendance trends'),
           children: [
+            _overview(context, AttendanceStats(scoped)),
             if (subject == null) _bySubject(context, scoped),
             _trend(context, scoped),
           ],

@@ -68,6 +68,10 @@ void main() {
       // reflect the accepted newer response.
       unawaited(first);
       await tester.pumpAndSettle();
+      final summary = find.text('Attendance summary');
+      await tester.ensureVisible(summary);
+      await tester.tap(summary);
+      await tester.pumpAndSettle();
       expect(find.text('75%'), findsOneWidget);
       expect(find.text('25%'), findsNothing);
       final denied = controller.load();
@@ -83,9 +87,15 @@ void main() {
     (tester) async {
       final h = (await tester.runAsync(() => harness()))!;
       addTearDown(() => tester.runAsync(h.dispose));
+      var disputeCalls = 0;
       h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
         if (r.path == '/v1/me') return jsonResponse(h.account);
         if (r.path == '/v1/me/attendance-disputes') {
+          disputeCalls++;
+          if (r.queryParameters['cursor'] == null) {
+            return jsonResponse({'items': [], 'next_cursor': 'older-queries'});
+          }
+          expect(r.queryParameters['cursor'], 'older-queries');
           // The query was raised against the original Absent publication
           // ('pub1'); accepting it created a new publication ('pub2').
           return jsonResponse({
@@ -101,6 +111,9 @@ void main() {
             'next_cursor': null,
           });
         }
+        if (r.queryParameters['cursor'] == 'older-records') {
+          return jsonResponse({'items': [], 'next_cursor': null});
+        }
         return jsonResponse({
           'items': [
             {
@@ -111,7 +124,7 @@ void main() {
               'starts_at': '2026-10-20T09:00:00Z',
             },
           ],
-          'next_cursor': null,
+          'next_cursor': 'older-records',
           'summary': {
             'percentage': 100,
             'present_or_late': 1,
@@ -136,7 +149,17 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(find.text('Faculty response: Corrected after review'), findsOneWidget);
+      expect(
+        find.text('Faculty response: Corrected after review'),
+        findsOneWidget,
+      );
+      expect(disputeCalls, 2);
+      final loadMore = find.text('Load more');
+      await tester.ensureVisible(loadMore);
+      await tester.tap(loadMore);
+      await tester.pumpAndSettle();
+      expect(disputeCalls, 2);
+      expect(loadMore, findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );

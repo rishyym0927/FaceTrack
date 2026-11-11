@@ -178,150 +178,52 @@ class PageHeader extends StatelessWidget {
   const PageHeader({
     super.key,
     required this.title,
-    required this.subtitle,
+    this.subtitle,
     this.action,
-    this.eyebrow,
-    this.icon = Icons.auto_awesome_outlined,
-    this.compact = false,
   });
-  final String title, subtitle;
+
+  final String title;
+  final String? subtitle;
   final Widget? action;
-  final String? eyebrow;
-  final IconData icon;
-  final bool compact;
+
   @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 24),
-    child: ClipRRect(
-      borderRadius: BorderRadius.circular(24),
+  Widget build(BuildContext context) {
+    final text = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Semantics(
+          header: true,
+          child: Text(title, style: Theme.of(context).textTheme.headlineSmall),
+        ),
+        if (subtitle case final description?) ...[
+          const SizedBox(height: 4),
+          Text(description),
+        ],
+      ],
+    );
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
       child: LayoutBuilder(
-        builder: (context, c) {
-          final stacked =
-              c.maxWidth < 900 ||
-              MediaQuery.textScalerOf(context).scale(1) > 1.3;
-          final text = Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        builder: (context, constraints) {
+          if (action == null) return text;
+          if (constraints.maxWidth < 560 ||
+              MediaQuery.textScalerOf(context).scale(1) > 1.3) {
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [text, const SizedBox(height: 8), action!],
+            );
+          }
+          return Row(
             children: [
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, color: const Color(0xffb9e9af), size: 17),
-                  const SizedBox(width: 8),
-                  Flexible(
-                    child: Text(
-                      (eyebrow ?? 'FACETRACK').toUpperCase(),
-                      style: const TextStyle(
-                        color: Color(0xffc8e9dd),
-                        fontSize: 11,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 2,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                style:
-                    (compact || stacked
-                            ? Theme.of(context).textTheme.headlineMedium
-                            : Theme.of(context).textTheme.headlineLarge)
-                        ?.copyWith(
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: -1.1,
-                          color: Colors.white,
-                        ),
-              ),
-              const SizedBox(height: 10),
-              Text(
-                subtitle,
-                style: Theme.of(context).textTheme.bodyLarge
-                    ?.copyWith(color: const Color(0xffd5e9e2), height: 1.5),
-              ),
-            ],
-          );
-          final actionSurface = action == null
-              ? null
-              : Container(
-                  padding: const EdgeInsets.all(6),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(17),
-                  ),
-                  child: action,
-                );
-          return Stack(
-            children: [
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: const BoxDecoration(
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Color(0xff102f32),
-                        Color(0xff145d54),
-                        Color(0xff218772),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: -38,
-                top: -105,
-                child: Container(
-                  width: 290,
-                  height: 290,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white24, width: 1),
-                  ),
-                ),
-              ),
-              Positioned(
-                right: 40,
-                top: -28,
-                child: Container(
-                  width: 175,
-                  height: 175,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white12, width: 1),
-                  ),
-                ),
-              ),
-              Padding(
-                padding: EdgeInsets.all(compact || stacked ? 20 : 34),
-                child: stacked
-                    ? Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          text,
-                          if (actionSurface != null) ...[
-                            const SizedBox(height: 22),
-                            actionSurface,
-                          ],
-                        ],
-                      )
-                    : Row(
-                        crossAxisAlignment: CrossAxisAlignment.end,
-                        children: [
-                          Expanded(child: text),
-                          if (actionSurface != null) ...[
-                            const SizedBox(width: 24),
-                            actionSurface,
-                          ],
-                        ],
-                      ),
-              ),
+              Expanded(child: text),
+              const SizedBox(width: 16),
+              action!,
             ],
           );
         },
       ),
-    ),
-  );
+    );
+  }
 }
 
 class StatusBadge extends StatelessWidget {

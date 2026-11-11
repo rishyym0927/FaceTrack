@@ -16,7 +16,9 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
   late final String institute;
   late final PagedController<Json> controller;
   Json? summary;
-  List<Json> disputes = [];
+  Map<String, Json> disputes = {};
+  bool disputesReady = false, disputeLoadFailed = false;
+  int disputeGeneration = 0;
   int summaryGeneration = 0;
   @override
   void initState() {
@@ -34,19 +36,6 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         );
         if (mounted && current == summaryGeneration) {
           summary = result['summary'];
-          try {
-            final disputeResult = await api.send(
-              'GET',
-              '/v1/me/attendance-disputes',
-              institute: institute,
-              query: {'limit': 200},
-            );
-            if (mounted && current == summaryGeneration) {
-              disputes = (disputeResult['items'] as List).cast<Json>();
-            }
-          } on AppFailure {
-            // The published marks remain available when query history fails.
-          }
         }
         return PageData<Json>.fromJson(result, (row) => row);
       } on AppFailure catch (e) {
@@ -54,17 +43,66 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
             current == summaryGeneration &&
             [401, 403, 404].contains(e.status)) {
           summary = null;
-          disputes = [];
+          disputes = {};
+          disputesReady = false;
+          disputeGeneration++;
         }
         rethrow;
       }
     });
-    controller.load();
+    refresh();
     watchLifecycle();
   }
 
   @override
-  void refreshOnResume() => controller.load();
+  void refreshOnResume() => refresh();
+
+  Future<void> refresh() async {
+    await Future.wait([controller.load(), loadDisputes()]);
+  }
+
+  Future<void> loadDisputes() async {
+    if (!mounted) return;
+    final generation = ++disputeGeneration;
+    setState(() {
+      disputesReady = false;
+      disputeLoadFailed = false;
+    });
+    try {
+      final latest = <String, Json>{};
+      final seenCursors = <String>{};
+      String? cursor;
+      do {
+        final page = await api.send(
+          'GET',
+          '/v1/me/attendance-disputes',
+          institute: institute,
+          query: {'limit': 200, 'cursor': ?cursor},
+        );
+        if (!mounted || generation != disputeGeneration) return;
+        for (final query in (page['items'] as List).cast<Json>()) {
+          latest.putIfAbsent(query['session_id'] as String, () => query);
+        }
+        cursor = page['next_cursor'] as String?;
+        if (cursor != null && !seenCursors.add(cursor)) {
+          throw const AppFailure(
+            'The attendance query list could not be completed.',
+          );
+        }
+      } while (cursor != null);
+      setState(() {
+        disputes = latest;
+        disputesReady = true;
+      });
+    } on AppFailure catch (e) {
+      if (!mounted || generation != disputeGeneration) return;
+      setState(() {
+        if ([401, 403, 404].contains(e.status)) disputes = {};
+        disputeLoadFailed = true;
+      });
+    }
+  }
+
   @override
   void dispose() {
     unwatchLifecycle();
@@ -111,7 +149,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
     );
     reason.dispose();
     if (submitted == true) {
-      await controller.load();
+      await refresh();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(
@@ -171,7 +209,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
 
   @override
   Widget build(BuildContext context) => ContentPage(
-    onRefresh: () => controller.load(),
+    onRefresh: refresh,
     children: [
       TextButton.icon(
         onPressed: () => goBack(context, '/classes'),
@@ -179,38 +217,17 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         label: const Text('Your subjects'),
       ),
       PageHeader(
-        compact: true,
         title: 'Your published attendance',
-        subtitle: 'Only faculty-published decisions appear here. Processing suggestions are not final attendance.',
-        eyebrow: 'ATTENDANCE HISTORY',
-        icon: Icons.fact_check_outlined,
         action: OutlinedButton(
-          onPressed: () => controller.load(),
+          onPressed: refresh,
           child: const Text('Refresh'),
         ),
       ),
-      AnimatedBuilder(
-        animation: controller,
-        builder: (c, _) => summary == null
-            ? const SizedBox()
-            : Padding(
-                padding: const EdgeInsets.only(bottom: 20),
-                child: Panel(
-                  accent: true,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Published attendance overview',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 16),
-                      _summaryBody(context, summary!),
-                    ],
-                  ),
-                ),
-              ),
-      ),
+      if (disputeLoadFailed)
+        ErrorView(
+          const AppFailure('Could not load attendance queries.'),
+          retry: loadDisputes,
+        ),
       PagedList<Json>(
         controller: controller,
         emptyTitle: 'No published attendance yet',
@@ -224,13 +241,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
           // supersedes the original Absent publication with a new id, so a
           // publication-id match would drop the query note after resolution.
           // disputes arrive newest-first, so the first match is the latest.
-          Json? query;
-          for (final item in disputes) {
-            if (item['session_id'] == r['session_id']) {
-              query = item;
-              break;
-            }
-          }
+          final query = disputes[r['session_id']];
           return Panel(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -263,7 +274,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                   }),
                   if (query['resolution_reason'] != null)
                     Text('Faculty response: ${query['resolution_reason']}'),
-                ] else if (r['status'] == 'absent') ...[
+                ] else if (disputesReady && r['status'] == 'absent') ...[
                   const SizedBox(height: 12),
                   OutlinedButton.icon(
                     onPressed: () => raiseQuery(r),
@@ -273,6 +284,22 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
                 ],
               ],
             ),
+          );
+        },
+      ),
+      ListenableBuilder(
+        listenable: controller,
+        builder: (context, _) {
+          final stats = summary;
+          if (stats == null) return const SizedBox.shrink();
+          return ExpansionTile(
+            title: const Text('Attendance summary'),
+            children: [
+              Padding(
+                padding: const EdgeInsets.all(16),
+                child: _summaryBody(context, stats),
+              ),
+            ],
           );
         },
       ),

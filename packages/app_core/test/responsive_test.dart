@@ -30,7 +30,6 @@ void main() {
                     title:
                         'Advanced Data Structures and Algorithms — Section A',
                     subtitle: 'Review membership and published attendance for your class.',
-                    eyebrow: 'TEACHER WORKSPACE',
                     action: Wrap(
                       spacing: 8,
                       runSpacing: 8,

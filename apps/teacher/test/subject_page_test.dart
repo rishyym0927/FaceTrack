@@ -7,7 +7,12 @@ import 'package:flutter_test/flutter_test.dart';
 
 import '../../../packages/app_core/test/harness.dart';
 
-Map<String, dynamic> _session(String id, String status, String day, {String room = 'E301'}) => {
+Map<String, dynamic> _session(
+  String id,
+  String status,
+  String day, {
+  String room = 'E301',
+}) => {
   'id': id,
   'offering_id': 'o1',
   'status': status,
@@ -28,12 +33,23 @@ Map<String, dynamic> _person(String id, String name, String status) => {
 };
 
 RoutesAdapter _adapter(Harness h) => RoutesAdapter((r) async {
+  if (r.path == '/v1/offerings/o1/attendance-disputes') {
+    return jsonResponse({
+      'error': {'code': 'UNAVAILABLE'},
+    }, 503);
+  }
   if (r.path == '/v1/me') return jsonResponse(h.account);
   if (r.path == '/v1/offerings/o1') {
     return jsonResponse({
-      'id': 'o1', 'title': 'Discrete Mathematics', 'course_code': 'BAS 201',
-      'term_code': '2026-ODD', 'branch': 'CSE', 'semester': 3, 'section': 'CSE1',
-      'version': 1, 'status': 'active',
+      'id': 'o1',
+      'title': 'Discrete Mathematics',
+      'course_code': 'BAS 201',
+      'term_code': '2026-ODD',
+      'branch': 'CSE',
+      'semester': 3,
+      'section': 'CSE1',
+      'version': 1,
+      'status': 'active',
     });
   }
   if (r.path == '/v1/offerings/o1/roster') {
@@ -41,7 +57,10 @@ RoutesAdapter _adapter(Harness h) => RoutesAdapter((r) async {
     return jsonResponse({
       'items': requested
           ? [_person('1', 'Asha Verma', 'requested')]
-          : [_person('2', 'Bina Rao', 'active'), _person('3', 'Chitra Das', 'active')],
+          : [
+              _person('2', 'Bina Rao', 'active'),
+              _person('3', 'Chitra Das', 'active'),
+            ],
       'next_cursor': null,
     });
   }
@@ -70,50 +89,54 @@ void main() {
   });
 
   for (final width in const [360.0, 1280.0]) {
-    testWidgets('Subject page: hero, pending work, grouped sessions and tabs at ${width.toInt()} px', (
-      tester,
-    ) async {
-      tester.view.physicalSize = Size(width, 3000);
-      tester.view.devicePixelRatio = 1;
-      addTearDown(tester.view.resetPhysicalSize);
-      addTearDown(tester.view.resetDevicePixelRatio);
-      final h = (await tester.runAsync(
-        () => harness(role: AppRole.teacher, profileRole: 'teacher'),
-      ))!;
-      addTearDown(() => tester.runAsync(h.dispose));
-      h.services.api.dio.httpClientAdapter = _adapter(h);
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [servicesProvider.overrideWithValue(h.services)],
-          child: ProductApp(
-            classesBuilder: (_) => const TeacherClassDetail(id: 'o1'),
+    testWidgets(
+      'Subject page: hero, pending work, grouped sessions and tabs at ${width.toInt()} px',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 3000);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final h = (await tester.runAsync(
+          () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+        ))!;
+        addTearDown(() => tester.runAsync(h.dispose));
+        h.services.api.dio.httpClientAdapter = _adapter(h);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [servicesProvider.overrideWithValue(h.services)],
+            child: ProductApp(
+              classesBuilder: (_) => const TeacherClassDetail(id: 'o1'),
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-      expect(find.text('Discrete Mathematics'), findsOneWidget);
-      expect(find.text('BAS 201'), findsOneWidget);
-      expect(find.text('Odd Semester 2026'), findsOneWidget);
-      // Pending work is a shortcut to its tab.
-      expect(find.text('1 session to review'), findsOneWidget);
-      expect(find.text('1 join request'), findsOneWidget);
-      // Sessions are grouped by what to do next, with filters.
-      expect(find.text('Needs your action'), findsOneWidget);
-      expect(find.text('Upcoming'), findsWidgets);
-      expect(find.text('Review attendance'), findsOneWidget);
-      await tester.tap(find.widgetWithText(ChoiceChip, 'Published 1'));
-      await tester.pumpAndSettle();
-      expect(find.text('Needs your action'), findsNothing);
-      expect(find.text('View attendance'), findsOneWidget);
-      // The join-request chip opens Students, with requests first.
-      await tester.tap(find.text('1 join request'));
-      await tester.pumpAndSettle();
-      expect(find.text('Waiting for approval · 1'), findsOneWidget);
-      expect(find.text('Asha Verma'), findsOneWidget);
-      expect(find.text('Bina Rao'), findsOneWidget);
-      expect(find.text('Approve'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    });
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('Discrete Mathematics'), findsOneWidget);
+        expect(find.textContaining('BAS 201'), findsOneWidget);
+        expect(find.textContaining('Odd Semester 2026'), findsOneWidget);
+        // Pending work is a shortcut to its tab.
+        expect(find.text('1 session to review'), findsOneWidget);
+        expect(find.text('1 join request'), findsOneWidget);
+        expect(find.text('Could not load attendance queries.'), findsOneWidget);
+        expect(find.text('Retry counts'), findsOneWidget);
+        expect(find.textContaining('All caught up'), findsNothing);
+        // Sessions are grouped by what to do next, with filters.
+        expect(find.text('Needs your action'), findsOneWidget);
+        expect(find.text('Upcoming'), findsWidgets);
+        expect(find.text('Review attendance'), findsOneWidget);
+        await tester.tap(find.widgetWithText(ChoiceChip, 'Published 1'));
+        await tester.pumpAndSettle();
+        expect(find.text('Needs your action'), findsNothing);
+        expect(find.text('View attendance'), findsOneWidget);
+        // The join-request chip opens Students, with requests first.
+        await tester.tap(find.text('1 join request'));
+        await tester.pumpAndSettle();
+        expect(find.text('Waiting for approval · 1'), findsOneWidget);
+        expect(find.text('Asha Verma'), findsOneWidget);
+        expect(find.text('Bina Rao'), findsOneWidget);
+        expect(find.text('Approve'), findsOneWidget);
+        expect(tester.takeException(), isNull);
+      },
+    );
   }
 }

@@ -98,8 +98,9 @@ class HomeHero extends StatelessWidget {
 /// set" only when nothing needs action and nothing is unread, so it never
 /// contradicts the badge. Hidden when the app has no notifications.
 class AttentionCard extends StatelessWidget {
-  const AttentionCard({super.key, this.limit = 3});
+  const AttentionCard({super.key, this.limit = 3, this.hideWhenIdle = false});
   final int limit;
+  final bool hideWhenIdle;
   @override
   Widget build(BuildContext context) {
     final center = NotificationScope.of(context);
@@ -114,6 +115,7 @@ class AttentionCard extends StatelessWidget {
         if (!urgent.contains(n) && center.isUnread(n)) n,
     ];
     final shown = [...urgent, ...fresh].take(limit).toList();
+    if (hideWhenIdle && shown.isEmpty) return const SizedBox.shrink();
     final String title;
     if (urgent.isNotEmpty) {
       title = 'Needs your attention · ${urgent.length}';

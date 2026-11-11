@@ -120,15 +120,70 @@ void main() {
         find.textContaining('Could not load subject names'),
         findsOneWidget,
       );
-      expect(find.text('50%'), findsOneWidget);
+      expect(find.text('50%'), findsNothing);
       expect(find.text('Unassessed'), findsNothing);
       // The status chips filter the record list.
       await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Absent'));
       await tester.tap(find.widgetWithText(ChoiceChip, 'Absent'));
       await tester.pumpAndSettle();
       expect(find.widgetWithText(ListTile, 'Absent'), findsNWidgets(2));
+      final trends = find.text('Attendance trends');
+      await tester.ensureVisible(trends);
+      await tester.tap(trends);
+      await tester.pumpAndSettle();
+      expect(find.text('50%'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
     });
   }
+
+  testWidgets(
+    'Attendance labels bounded results, retains transient data, and clears denied data',
+    (tester) async {
+      final h = (await tester.runAsync(() => harness()))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      var failure = 0;
+      var attendanceCalls = 0;
+      h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+        if (r.path == '/v1/me') return jsonResponse(h.account);
+        if (r.path != '/v1/me/attendance') {
+          return jsonResponse({'items': [], 'next_cursor': null});
+        }
+        attendanceCalls++;
+        if (failure != 0) {
+          return jsonResponse({
+            'error': {'code': 'TEST', 'message': 'Attendance refresh failed'},
+          }, failure);
+        }
+        return jsonResponse({
+          'items': [rows.first],
+          'next_cursor': 'page-$attendanceCalls',
+        });
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [servicesProvider.overrideWithValue(h.services)],
+          child: ProductApp(classesBuilder: (_) => const StudentAttendance()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(attendanceCalls, 5);
+      expect(find.textContaining('latest 5 published records'), findsOneWidget);
+      expect(find.text('Records'), findsOneWidget);
+
+      failure = 503;
+      await tester.tap(find.text('Refresh'));
+      await tester.pumpAndSettle();
+      expect(find.text('Service temporarily unavailable'), findsOneWidget);
+      expect(find.text('Records'), findsOneWidget);
+
+      failure = 403;
+      await tester.tap(find.text('Refresh'));
+      await tester.pumpAndSettle();
+      expect(find.text('Access unavailable'), findsOneWidget);
+      expect(find.text('Records'), findsNothing);
+      expect(find.textContaining('latest 5 published records'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
 }

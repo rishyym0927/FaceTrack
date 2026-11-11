@@ -198,33 +198,28 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
 
   @override
   Widget build(BuildContext context) {
-    final auth = ref.watch(authProvider);
-    String? name;
-    for (final t in auth.account?.teachers ?? const <Person>[]) {
-      if (t.instituteId == institute) name = firstName(t.name);
-    }
     return ContentPage(
       onRefresh: refreshAll,
       children: [
-        HomeHero(
-          title: '${greeting()}${name == null ? '' : ', $name'}',
-          subtitle: 'Open a subject to take attendance, review requests and publish results.',
-          actions: [
-            FilledButton.icon(
-              onPressed: preparing ? null : create,
-              icon: const Icon(Icons.add),
-              label: Text(preparing ? 'Loading…' : 'Add subject'),
-            ),
-            OutlinedButton.icon(
-              onPressed: refreshAll,
-              icon: const Icon(Icons.refresh),
-              label: const Text('Refresh'),
-            ),
-          ],
+        PageHeader(
+          title: 'Subjects',
+          action: Wrap(
+            spacing: 8,
+            children: [
+              FilledButton.icon(
+                onPressed: preparing ? null : create,
+                icon: const Icon(Icons.add),
+                label: Text(preparing ? 'Loading…' : 'Add subject'),
+              ),
+              IconButton(
+                tooltip: 'Refresh subjects',
+                onPressed: refreshAll,
+                icon: const Icon(Icons.refresh),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 16),
-        const AttentionCard(),
-        const SectionTitle('Your subjects'),
+        const AttentionCard(hideWhenIdle: true),
         PagedList(
           controller: controller,
           emptyTitle: 'No assigned subjects',
@@ -243,7 +238,8 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
         const SizedBox(height: 28),
         ListenableBuilder(
           listenable: controller,
-          builder: (context, _) => controller.loading && controller.items.isEmpty
+          builder: (context, _) =>
+              controller.loading && controller.items.isEmpty
               ? const SizedBox.shrink()
               : TeacherDashboard(
                   refreshTick: dashboardTick,
@@ -275,13 +271,15 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
 
   /// Pending work per tab, shown as counts on the tab chips.
   SubjectWork? work;
+  int _workGeneration = 0;
 
   Future<void> _loadWork() async {
+    final generation = ++_workGeneration;
     try {
       final w = await loadSubjectWork(api, institute, await record);
-      if (mounted) setState(() => work = w);
+      if (mounted && generation == _workGeneration) setState(() => work = w);
     } catch (_) {
-      // Counts are a hint; the tabs still work without them.
+      // The subject error view handles failure to load the subject itself.
     }
   }
 
@@ -592,9 +590,6 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
           ),
           _SubjectHero(
             offering: o,
-            students: students,
-            sessions: work?.sessions.length,
-            toReview: _toReview,
             loadingCode: loadingCode,
             onJoinCode: code,
             onRefresh: refresh,
@@ -627,6 +622,8 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                 ),
             ],
             loaded: work != null,
+            failed: work?.failed ?? const [],
+            onRetry: _loadWork,
             onOpen: (t) => setState(() => tab = t),
           ),
           const SizedBox(height: 20),
@@ -753,183 +750,40 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   );
 }
 
-/// The subject's banner: what it is, a few live numbers and its two actions.
 class _SubjectHero extends StatelessWidget {
   const _SubjectHero({
     required this.offering,
-    required this.students,
-    required this.sessions,
-    required this.toReview,
     required this.loadingCode,
     required this.onJoinCode,
     required this.onRefresh,
   });
+
   final Offering offering;
-  final PagedController<Enrollment> students;
-  final int? sessions;
-  final int toReview;
   final bool loadingCode;
   final VoidCallback onJoinCode;
   final Future<void> Function() onRefresh;
 
   @override
-  Widget build(BuildContext context) {
-    final o = offering;
-    Widget chip(IconData icon, String text) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0x26ffffff),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: Colors.white),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              text,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-    Widget stat(String value, String label) => Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      mainAxisSize: MainAxisSize.min,
+  Widget build(BuildContext context) => PageHeader(
+    title: offering.title,
+    subtitle: '${offering.subtitle} · ${offering.termTitle}',
+    action: Wrap(
+      spacing: 8,
+      runSpacing: 8,
       children: [
-        Text(
-          value,
-          style: const TextStyle(
-            color: Colors.white,
-            fontSize: 24,
-            fontWeight: FontWeight.w800,
-          ),
+        OutlinedButton.icon(
+          onPressed: loadingCode ? null : onJoinCode,
+          icon: const Icon(Icons.key_outlined),
+          label: const Text('Join code'),
         ),
-        Text(
-          label,
-          style: const TextStyle(color: Color(0xffcde8de), fontSize: 12),
+        IconButton(
+          tooltip: 'Refresh subject',
+          onPressed: onRefresh,
+          icon: const Icon(Icons.refresh),
         ),
       ],
-    );
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xff0d2a2c), Color(0xff135f50), Color(0xff23906f)],
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Wrap(
-            spacing: 16,
-            runSpacing: 16,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 640),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'FACULTY WORKSPACE',
-                      style: TextStyle(
-                        color: Color(0xffa8e5cf),
-                        fontSize: 12,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: 1.6,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      o.title,
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: -.5,
-                      ),
-                    ),
-                    const SizedBox(height: 10),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: [
-                        chip(Icons.tag, o.courseCode),
-                        chip(
-                          Icons.groups_2_outlined,
-                          '${o.branch} · ${semesterLabel(o.semester)} · Section ${o.section}',
-                        ),
-                        chip(Icons.date_range_outlined, termLabel(o.termCode)),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-              Theme(
-                data: Theme.of(context).copyWith(
-                  filledButtonTheme: FilledButtonThemeData(
-                    style: FilledButton.styleFrom(
-                      backgroundColor: Colors.white,
-                      foregroundColor: const Color(0xff135f50),
-                    ),
-                  ),
-                ),
-                child: Wrap(
-                  spacing: 8,
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  children: [
-                    IconButton(
-                      tooltip: 'Refresh',
-                      color: Colors.white,
-                      onPressed: onRefresh,
-                      icon: const Icon(Icons.refresh),
-                    ),
-                    Tooltip(
-                      message: 'Show or create the code students use to request to join',
-                      child: FilledButton.icon(
-                        onPressed: loadingCode ? null : onJoinCode,
-                        icon: const Icon(Icons.key_outlined),
-                        label: const Text('Join code'),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 20),
-          AnimatedBuilder(
-            animation: students,
-            builder: (context, _) {
-              final n = students.items.length;
-              return Wrap(
-                spacing: 32,
-                runSpacing: 12,
-                children: [
-                  stat(
-                    students.loading && n == 0
-                        ? '–'
-                        : '$n${students.cursor != null ? '+' : ''}',
-                    'students',
-                  ),
-                  stat(sessions == null ? '–' : '$sessions', 'sessions'),
-                  stat('$toReview', 'to review'),
-                ],
-              );
-            },
-          ),
-        ],
-      ),
-    );
-  }
+    ),
+  );
 }
 
 /// Pending work across tabs, each a shortcut to the tab that handles it.
@@ -937,10 +791,14 @@ class _AttentionStrip extends StatelessWidget {
   const _AttentionStrip({
     required this.items,
     required this.loaded,
+    required this.failed,
+    required this.onRetry,
     required this.onOpen,
   });
   final List<(IconData, String, int)> items;
   final bool loaded;
+  final List<String> failed;
+  final VoidCallback onRetry;
   final ValueChanged<int> onOpen;
   @override
   Widget build(BuildContext context) {
@@ -948,7 +806,7 @@ class _AttentionStrip extends StatelessWidget {
     final Widget child;
     if (!loaded) {
       child = const SizedBox.shrink();
-    } else if (items.isEmpty) {
+    } else if (items.isEmpty && failed.isEmpty) {
       child = const _InlineNote(
         icon: Icons.check_circle_outline,
         text: 'All caught up: nothing is waiting for you in this subject.',
@@ -959,13 +817,14 @@ class _AttentionStrip extends StatelessWidget {
         runSpacing: 10,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
-          Text(
-            'Needs you',
-            style: TextStyle(
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurface,
+          if (items.isNotEmpty)
+            Text(
+              'Needs you',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: scheme.onSurface,
+              ),
             ),
-          ),
           for (final (icon, label, tab) in items)
             ActionChip(
               avatar: Icon(icon, size: 18, color: const Color(0xff9a6a00)),
@@ -974,6 +833,13 @@ class _AttentionStrip extends StatelessWidget {
               side: const BorderSide(color: Color(0xfff0d9a6)),
               onPressed: () => onOpen(tab),
             ),
+          if (failed.isNotEmpty)
+            _InlineNote(
+              icon: Icons.info_outline,
+              text: 'Could not load ${failed.join(', ')}.',
+            ),
+          if (failed.isNotEmpty)
+            TextButton(onPressed: onRetry, child: const Text('Retry counts')),
         ],
       );
     }
