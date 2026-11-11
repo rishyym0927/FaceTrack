@@ -109,6 +109,61 @@ async def test_session_roster_manual_publication_correction_history(bio):
         assert len(snapshots) == 2 and snapshots[0][0]["records"][0]["status"] == "present"
 
 
+async def test_correction_does_not_publish_nonbinary_legacy_rows(bio):
+    b = bio
+    with connect(b.urls["owner"]) as c:
+        c.execute(
+            """INSERT INTO app.course_enrollments(institute_id,offering_id,student_id,status)
+            VALUES (%s,%s,%s,'active')""",
+            (b.ids["institute"], b.ids["offering"], b.ids["student2_profile"]),
+        )
+    opened = await open_session(b)
+    sid = opened["id"]
+    close = await b.client.post(
+        f"/v1/sessions/{sid}/close",
+        headers=b.headers("teacher", key="close", version=opened["version"]),
+    )
+    assert close.status_code == 200, close.text
+    final = await b.client.post(
+        f"/v1/sessions/{sid}/finalize",
+        headers=b.headers("teacher", key="final", version=close.json()["version"]),
+        json={
+            "decisions": [
+                {"student_id": b.ids[key], "status": "absent", "reason": "Reviewed"}
+                for key in ("student1_profile", "student2_profile")
+            ]
+        },
+    )
+    assert final.status_code == 200, final.text
+    # Model a previously finalized session whose records use the old status vocabulary.
+    with connect(b.urls["owner"]) as c:
+        c.execute(
+            "UPDATE app.attendance_records SET status='excused' WHERE session_id=%s AND student_id=%s",
+            (sid, b.ids["student2_profile"]),
+        )
+    current = (await b.client.get(f"/v1/sessions/{sid}", headers=b.headers("teacher"))).json()
+    correction = await b.client.post(
+        f"/v1/sessions/{sid}/corrections",
+        headers=b.headers("teacher", key="correction", version=current["version"]),
+        json={
+            "student_id": b.ids["student1_profile"],
+            "status": "present",
+            "reason": "Attendance verified",
+            "publication_revision": 1,
+        },
+    )
+    assert correction.status_code == 409, correction.text
+    assert correction.json()["error"]["code"] == "REVIEW_REQUIRED"
+    with connect(b.urls["owner"]) as c:
+        assert c.execute(
+            "SELECT status FROM app.attendance_records WHERE session_id=%s AND student_id=%s",
+            (sid, b.ids["student1_profile"]),
+        ).fetchone() == ("absent",)
+        assert c.execute(
+            "SELECT revision FROM app.publications WHERE session_id=%s", (sid,)
+        ).fetchall() == [(1,)]
+
+
 async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
     b = bio
     s = await open_session(b)
@@ -634,7 +689,7 @@ async def test_own_attendance_is_newest_first_across_cursor_pages(bio):
     assert starts == sorted(starts, reverse=True)
 
 
-async def test_own_attendance_paging_survives_correction_and_keeps_class_order(bio):
+async def test_own_attendance_paging_survives_correction_and_keeps_same_start_session_order(bio):
     b = bio
     base = datetime.now(timezone.utc)
     sids = []
@@ -644,7 +699,7 @@ async def test_own_attendance_paging_survives_correction_and_keeps_class_order(b
             headers=b.headers("teacher", key=f"fix-{n}"),
             json={
                 "offering_id": b.ids["offering"],
-                "starts_at": (base - timedelta(minutes=n + 1)).isoformat(),
+                "starts_at": (base - timedelta(minutes=1)).isoformat(),
                 "ends_at": (base + timedelta(hours=1)).isoformat(),
             },
         )
@@ -667,23 +722,25 @@ async def test_own_attendance_paging_survives_correction_and_keeps_class_order(b
         )
         assert r.status_code == 200, r.text
         sids.append(s["id"])
+    sids.sort(reverse=True)
     first = (
         await b.client.get("/v1/me/attendance", headers=b.headers("student1"), params={"limit": 1})
     ).json()
     assert first["items"][0]["session_id"] == sids[0]
-    # Correct the session the cursor points at before loading the next page.
-    current = (await b.client.get(f"/v1/sessions/{sids[0]}", headers=b.headers("teacher"))).json()
-    r = await b.client.post(
-        f"/v1/sessions/{sids[0]}/corrections",
-        headers=b.headers("teacher", key="fix-corr", version=current["version"]),
-        json={
-            "student_id": b.ids["student1_profile"],
-            "status": "absent",
-            "reason": "Approved leave",
-            "publication_revision": 1,
-        },
-    )
-    assert r.status_code == 200, r.text
+    # Correct both the cursor session and an unread session tied on start time.
+    for sid in sids[:2]:
+        current = (await b.client.get(f"/v1/sessions/{sid}", headers=b.headers("teacher"))).json()
+        r = await b.client.post(
+            f"/v1/sessions/{sid}/corrections",
+            headers=b.headers("teacher", key="fix-corr", version=current["version"]),
+            json={
+                "student_id": b.ids["student1_profile"],
+                "status": "absent",
+                "reason": "Approved leave",
+                "publication_revision": 1,
+            },
+        )
+        assert r.status_code == 200, r.text
     rest = (
         await b.client.get(
             "/v1/me/attendance",
@@ -695,7 +752,7 @@ async def test_own_attendance_paging_survives_correction_and_keeps_class_order(b
     # The corrected session keeps its class-date place instead of jumping to the top.
     everything = (await b.client.get("/v1/me/attendance", headers=b.headers("student1"))).json()
     assert [x["session_id"] for x in everything["items"]] == sids
-    assert everything["items"][0]["revision"] == 2
+    assert [row["revision"] for row in everything["items"]] == [2, 2, 1]
 
 
 async def test_sequential_scan_segments_preserve_earlier_recognition(bio):

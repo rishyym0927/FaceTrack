@@ -113,6 +113,44 @@ async def test_failed_report_retry_requires_authorized_teacher_and_preserves_sna
     assert after == (before, "queued")
 
 
+async def test_timetable_import_rechecks_reservation_owner_after_storage_lookup(bio):
+    b = bio
+    reservation = await b.client.post(
+        "/v1/media-reservations",
+        headers=b.headers("teacher", key="reserve"),
+        json={"purpose": "timetable", "mime_type": "text/csv", "expected_bytes": 256},
+    )
+    assert reservation.status_code == 201, reservation.text
+    aid = reservation.json()["id"]
+    info = b.app.state.storage.info
+
+    async def changed_owner(asset):
+        with connect(b.urls["owner"]) as c:
+            c.execute(
+                "UPDATE app.media_assets SET owner_user_id=%s WHERE id=%s",
+                (b.users["other_teacher"]["id"], aid),
+            )
+        return await info(asset)
+
+    b.app.state.storage.info = changed_owner
+    r = await b.client.post(
+        "/v1/timetable-imports",
+        headers=b.headers("teacher", key="import"),
+        json={
+            "asset_id": aid,
+            "term_id": b.ids["term"],
+            "base_revision": 0,
+            "byte_size": 256,
+            "sha256": "c" * 64,
+        },
+    )
+    assert r.status_code == 404, r.text
+    with connect(b.urls["owner"]) as c:
+        assert c.execute("SELECT status FROM app.media_assets WHERE id=%s", (aid,)).fetchone() == (
+            "reserved",
+        )
+
+
 async def import_ready(b, key="import", revision=0, rows=None):
     await allow_documents(b)
     with connect(b.urls["owner"]) as c:

@@ -666,16 +666,21 @@ def install(app, engine, settings, principal, storage, auth):
                 return cached
         info = await storage.info(dict(a))
         async with transaction(engine, user.user_id, institute_id) as c:
+            await faculty(c, user.user_id, institute_id)
+            a = await one(
+                c,
+                """SELECT * FROM app.media_assets
+                WHERE institute_id=:i AND id=:id AND owner_user_id=:u AND purpose='timetable'
+                FOR UPDATE""",
+                {"i": institute_id, "id": body.asset_id, "u": user.user_id},
+            )
+            if not a:
+                raise APIError(404, "NOT_FOUND", "Reservation not found.")
             cached, fp = await idempotent(
                 c, user.user_id, institute_id, route, key, body.model_dump()
             )
             if cached:
                 return cached
-            a = await one(
-                c,
-                "SELECT * FROM app.media_assets WHERE institute_id=:i AND id=:id FOR UPDATE",
-                {"i": institute_id, "id": body.asset_id},
-            )
             term = await one(
                 c,
                 "SELECT * FROM app.terms WHERE institute_id=:i AND id=:id",

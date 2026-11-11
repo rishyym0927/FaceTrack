@@ -338,11 +338,11 @@ async def recognition_pending(conn, institute, session_id):
 async def publish(conn, actor, institute, s, reason=None):
     await can_publish(conn, actor, institute, s["offering_id"])
     rows = await attendance(conn, institute, s["id"])
-    if any(x["status"] in ("proposed_present", "proposed_absent") for x in rows):
+    if any(x["status"] not in ("present", "absent") for x in rows):
         raise APIError(
             409,
             "REVIEW_REQUIRED",
-            "Confirm or change every recognition proposal before publishing.",
+            "Choose Present or Absent for every student before publishing.",
         )
     snapshot = {
         **(await report_labels(conn, institute, s)),
@@ -350,7 +350,7 @@ async def publish(conn, actor, institute, s, reason=None):
         "offering_id": str(s["offering_id"]),
         "starts_at": s["starts_at"].isoformat(),
         "policy_version": "session-v1",
-        "incomplete": any(x["status"] == "unassessed" for x in rows),
+        "incomplete": False,
         "records": rows,
     }
     revision = s["attendance_revision"] + 1
@@ -647,13 +647,6 @@ def install(app, engine, settings, principal, storage):
                     409, "PROCESSING_PENDING", "Wait for processing to finish before publishing."
                 )
             await apply_decisions(c, user.user_id, institute_id, identifier, body.decisions)
-            rows = await attendance(c, institute_id, identifier)
-            if finalize and any(x["status"] not in ("present", "absent") for x in rows):
-                raise APIError(
-                    409,
-                    "REVIEW_REQUIRED",
-                    "Choose Present or Absent for every student before publishing.",
-                )
             result = (
                 await publish(c, user.user_id, institute_id, s)
                 if finalize
@@ -731,80 +724,81 @@ def install(app, engine, settings, principal, storage):
     ):
         async with transaction(engine, user.user_id, institute_id) as c:
             st = await bio.student(c, user.user_id, institute_id)
-            rows = await many(
-                c,
-                """SELECT p.id,p.revision,p.published_at,p.snapshot_json,s.starts_at AS class_starts_at FROM app.publications p JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
-            WHERE p.institute_id=:i AND p.revision=s.attendance_revision AND (CAST(:o AS uuid) IS NULL OR s.offering_id=CAST(:o AS uuid))
-            AND EXISTS(SELECT 1 FROM app.session_roster r WHERE r.institute_id=s.institute_id AND r.session_id=s.id AND r.student_id=:student)
-            ORDER BY s.starts_at DESC,p.id DESC""",
-                {
-                    "i": institute_id,
-                    "o": str(offering_id) if offering_id else None,
-                    "student": st["id"],
-                },
-            )
-            items, kept = [], []
-            for r in rows:
-                snapshot = r["snapshot_json"]
-                mine = next(
-                    (x for x in snapshot["records"] if x["student_id"] == str(st["id"])), None
-                )
-                if mine is None:
-                    # Joined the roster after this revision was published: nothing to show.
-                    continue
-                kept.append(r)
-                items.append(
-                    {
-                        "id": r["id"],
-                        "session_id": snapshot["session_id"],
-                        "offering_id": snapshot["offering_id"],
-                        "starts_at": snapshot["starts_at"],
-                        "status": mine["status"],
-                        "reason": mine["reason"],
-                        "assessment_code": mine.get("assessment_code"),
-                        "evidence_summary": mine.get("evidence_summary", {}),
-                        "revision": r["revision"],
-                        "published_at": r["published_at"],
-                    }
-                )
-            present = sum(x["status"] in ("present", "late") for x in items)
-            den = sum(x["status"] in ("present", "late", "absent") for x in items)
-            # Unassessed includes legacy excused results: neither counts.
-            pending = sum(x["status"] not in ("present", "late", "absent") for x in items)
-            filtered = items
+            filters = {"i": institute_id, "o": offering_id, "student": st["id"]}
+            at = None
             if cursor is not None:
-                # Look the cursor up in all publications: a correction replaces the
-                # current one, so it may no longer be in this list.
+                # Old publication IDs still resolve after a correction.
                 at = await one(
                     c,
-                    """SELECT s.id AS session_id,s.starts_at FROM app.publications p
+                    """SELECT s.id,s.starts_at FROM app.publications p
                     JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
-                    WHERE p.institute_id=:i AND p.id=:cur
-                    AND EXISTS(SELECT 1 FROM app.session_roster r WHERE r.institute_id=s.institute_id
-                    AND r.session_id=s.id AND r.student_id=:student)""",
-                    {"i": institute_id, "cur": cursor, "student": st["id"]},
+                    JOIN app.session_roster r ON r.institute_id=s.institute_id AND r.session_id=s.id
+                    WHERE p.institute_id=:i AND p.id=:cur AND r.student_id=:student
+                    AND (CAST(:o AS uuid) IS NULL OR s.offering_id=CAST(:o AS uuid))""",
+                    {**filters, "cur": cursor},
                 )
                 if not at:
                     raise APIError(
                         422, "INVALID_CURSOR", "The list cursor is not valid. Reload the list."
                     )
-                key = (at["starts_at"], cursor)
-                filtered = [
-                    x
-                    for x, r in zip(items, kept)
-                    if (r["class_starts_at"], r["id"]) < key
-                    and x["session_id"] != str(at["session_id"])
-                ]
+            rows = await many(
+                c,
+                """WITH marks AS (
+                    SELECT p.id,p.revision,p.published_at,s.id AS session_id,
+                    s.offering_id,s.starts_at AS class_starts_at,
+                    p.snapshot_json->>'starts_at' AS starts_at,
+                    mark->>'status' AS status,mark->>'reason' AS reason,
+                    mark->>'assessment_code' AS assessment_code,
+                    COALESCE(mark->'evidence_summary','{}'::jsonb) AS evidence_summary
+                    FROM app.session_roster r
+                    JOIN app.sessions s ON s.institute_id=r.institute_id AND s.id=r.session_id
+                    JOIN app.publications p ON p.institute_id=s.institute_id AND p.session_id=s.id
+                        AND p.revision=s.attendance_revision
+                    CROSS JOIN LATERAL jsonb_array_elements(p.snapshot_json->'records') AS mark
+                    WHERE r.institute_id=:i AND r.student_id=:student
+                    AND (CAST(:o AS uuid) IS NULL OR s.offering_id=CAST(:o AS uuid))
+                    AND mark->>'student_id'=CAST(CAST(:student AS uuid) AS text)
+                ), totals AS (
+                    SELECT count(*) FILTER (WHERE status IN ('present','late')) AS attended,
+                    count(*) FILTER (WHERE status IN ('present','late','absent')) AS assessed,
+                    count(*) FILTER (WHERE status NOT IN ('present','late','absent')) AS pending
+                    FROM marks
+                )
+                SELECT totals.*, page.*
+                FROM totals LEFT JOIN LATERAL (
+                    SELECT id,revision,published_at,session_id,offering_id,starts_at,
+                    status,reason,assessment_code,evidence_summary,class_starts_at
+                    FROM marks WHERE status IN ('present','late','absent')
+                    AND (CAST(:before AS timestamptz) IS NULL OR
+                        (class_starts_at,session_id)<(CAST(:before AS timestamptz),CAST(:sid AS uuid)))
+                    ORDER BY class_starts_at DESC,session_id DESC LIMIT :n
+                ) AS page ON true
+                ORDER BY page.class_starts_at DESC,page.session_id DESC""",
+                {
+                    **filters,
+                    "before": at["starts_at"] if at else None,
+                    "sid": at["id"] if at else None,
+                    "n": limit + 1,
+                },
+            )
+            totals = rows[0]
+            present, assessed = totals["attended"], totals["assessed"]
+            items = [
+                {
+                    k: v
+                    for k, v in row.items()
+                    if k not in ("attended", "assessed", "pending", "class_starts_at")
+                }
+                for row in rows
+                if row["id"] is not None
+            ]
             return {
-                **page(
-                    [row for row in filtered if row["status"] in ("present", "late", "absent")],
-                    limit,
-                ),
+                **page(items, limit),
                 "summary": {
                     "present_or_late": present,
-                    "assessed": den,
-                    "unassessed": pending,
-                    "percentage": 100 * present / den if den else None,
+                    "assessed": assessed,
+                    "unassessed": totals["pending"],
+                    "percentage": 100 * present / assessed if assessed else None,
                     "policy_version": "session-v1",
                 },
             }
