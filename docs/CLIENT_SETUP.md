@@ -1,6 +1,6 @@
 # FaceTrack first-time setup for a nontechnical user (Windows or macOS)
 
-For ordinary demo access, open the hosted [Student](https://facetrack.centralindia.cloudapp.azure.com/student/) or [Teacher](https://facetrack.centralindia.cloudapp.azure.com/teacher/) app with an approved account.
+If you already have a sign-in and only want to use the hosted website or install the Android APK, follow the [user guide](USER_GUIDE.md). The steps below are for running a local copy from the repository.
 
 This guide is for an **authorized local backend install**, optionally assisted by a terminal-enabled coding assistant. If FaceTrack is already installed and only needs updating, use [the upgrade guide](UPGRADE_EXISTING_INSTALL.md) instead.
 

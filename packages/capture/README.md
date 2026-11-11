@@ -3,7 +3,7 @@
 This package provides native camera setup, preview and overlays, recording, playback, private pending-clip storage, and signed resumable uploads. The product apps coordinate consent, review and attendance with the API.
 
 - **Student Android** uses `GuidedCamera(enrollmentGuidance: true)` and ML Kit for the server-issued five-pose challenge. Native recordings can be retained in private app storage while the student retries an upload.
-- **Student web** uses one browser stream for preview, local MediaPipe pose guidance and WebM recording. The recording lasts 10–25 seconds. If live guidance is unavailable, timed prompts let the student finish a clip for faculty review. Browser clips do not survive page closure.
+- **Student web** uses one browser stream for preview, local MediaPipe pose guidance and WebM recording. Both Student recorders run for about 12–25 seconds so the encoded clip can meet the worker’s 10-second minimum. If live guidance is unavailable, timed prompts let the student finish a clip for faculty review. Browser clips do not survive page closure.
 - **Teacher Android** uses the shared camera and an ML Kit face analyzer for live framing. The app pauses recording under upload backpressure. **Teacher web** uses `classroom_capture.js` for MediaPipe framing and a record/upload loop. Both support continuous classroom scans with audio off. The single-clip recorder remains available from the session.
 - **Upload** uses `ResumableUpload` for signed TUS requests to the verified Storage origin. The browser or app sends the publishable key and object-scoped upload signature. Resume URLs are checked against the expected origin and path. If a prior transfer may have finished, the app can confirm it before retrying the transfer.
 

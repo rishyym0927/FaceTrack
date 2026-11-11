@@ -2,11 +2,34 @@
 
 **Reviewed:** 11 November 2026 (Asia/Kolkata)
 
+## User and repository documentation — 11 November
+
+- Added a single entry point for hosted web, signed Android installation and role workflows. Updated repository setup, camera validation, Azure worker and report troubleshooting, Android release packaging and the dated pilot budget links.
+- Verified the macOS setup script in a fresh checkout, both Compose configurations, Markdown links and anchors, OpenAPI export, the frozen model receipt, browser scanner tests and the three hosted health/page endpoints. Fresh Windows/Linux host installs and another authenticated camera-to-publication walkthrough remain open.
+
+## Teacher capture review cleanup — 11 November
+
+- Removed the successful frame-detection count banner from attendance review. Kept retake guidance for unclear footage and the roster-based attendance totals. All 84 Teacher tests passed and analysis was clean. Installed the signed `FaceTrack-Teacher-review-cleanup.apk` on the Samsung at 19:59 IST with the camera idle. Verified that both installed APKs match the latest signed files by SHA-256.
+- Enabled report generation on the existing Azure project worker after two final reports stayed queued. Both jobs succeeded and both report records reached `ready`.
+
+## Guided enrolment and classroom capture — 11 November
+
+- Added the fifth sample Student login, enrolled it in `SAMPLE-101` and verified live sign-in and membership. The test subject has two enrolled students and one active face enrolment. Approve the second sample enrolment with the participant’s consent, then open a new session to freeze the updated roster. The existing open session contains one eligible student.
+- The worker reported `CLIP_TOO_SHORT` on a recent hosted enrolment. Android and web now aim for 12–25 seconds against the frozen 10-second encoded minimum. Confirmed Chrome recorded 12.001 seconds with fake camera input and that the worker’s media probe accepted it. Classroom capture explains the two-enrolment requirement before opening the camera and gives specific instructions for known upload failures.
+- Enabled classroom recognition on the existing scoped Azure project worker. Verified 21 capture, 21 Student, 84 Teacher, 72 shared-core and nine browser scanner tests, plus clean Flutter analysis in all four Flutter packages. A physical-device recording and an end-to-end scan with two consenting, enrolled participants remain open.
+- Pushed `f902ac8` and deployed both web apps on Azure. Served camera scripts matched the commit and API readiness passed. Verified both signed arm64 APKs and installed in place on the Samsung with the camera idle at 19:43 IST. Release APKs are in `Downloads/FaceTrack-releases` with `f902ac8` in their names.
+
+## Android release and pilot budget — 11 November
+
+- Built both production-configured arm64 APKs from `ed19516`, which has the same Android app code as deployed release `052669f`. Verified both signatures and installed in place on the Samsung SM-M356B with the camera idle. Android reported successful updates at 19:07 and 19:08 IST. Both APKs are in `Downloads/FaceTrack-releases` with `052669f` in their names. Signed-in and camera checks remain open for this install.
+- Documented the five-month, 100-student funding estimate and verified the Azure VM, disk and IP against the current subscription configuration and Central India retail rates. See [IGDTUW pilot budget](docs/IGDTUW_PILOT_BUDGET.md).
+
 ## IGDTUW test accounts — 11 November
 
 - Created a separate hosted IGDTUW institute, Semester 1 (1 August–15 December 2026), one CSE–AI group, room 306 and five offerings. Demo institutes remain active.
 - Provisioned 25 roster students and four faculty with separate initial passwords, 125 approved course enrolments and four faculty assignments. Mathematics for AI has no faculty assignment. Verified one Student and one Teacher login through hosted Auth and the production API, each with only the IGDTUW membership. The two additional Student accounts need official enrolment numbers. The MTech roster and the two pending Student accounts received no admin access. Separately, four synthetic accounts were assigned to IGDTUW only, with one Teacher/Admin and three Student roles. Live sign-in and role checks passed for all four.
-- IGDTUW has no scoped worker identity. Account access is verified. Biometric processing requires separately authorized model and worker provisioning before live enrolment testing.
+- Added one synthetic Student login and the `SAMPLE-101` testing subject under IGDTUW, with a separate test group. Verified live Student sign-in, active enrolment, and visibility of the subject and its sample-only roster to the assigned sample Teacher. Credentials are in the private local handoff.
+- Resolved the missing profile and worker configuration behind the guided enrolment 503 for the unofficial, non-commercial student research project. Registered the existing frozen model/profile and started an enrolment-only agent and CPU worker on the Azure VM. Verified the model/profile in the Azure runtime and the scoped worker heartbeat. The project pair uses Redis database 4, a separate temporary directory and the private Docker network. The Azure operator's `.facetrack-project-enrolment` directory holds the private configuration and artifacts. Containers restart automatically and use the worker image selected at provisioning, so refresh them when updating the worker and rotate the scoped credential before its 30-day expiry. Next acceptance check is guided capture, upload and processing by a consenting participant.
 
 ## Class setup without section labels or faculty employee numbers — 11 November
 

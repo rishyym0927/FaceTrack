@@ -23,7 +23,7 @@ and interactive API documentation.
 | Classroom capture and attendance | `/v1/sessions`, `/v1/sessions/{identifier}/captures`, `/v1/captures/{identifier}`, `GET /v1/me/attendance` |
 | Attendance summaries and disputes | `GET /v1/offerings/{offering_id}/attendance-summary`, `GET /v1/me/attendance-disputes`, `POST /v1/attendance-disputes/{identifier}/resolve` |
 | Timetables and reports | `/v1/rooms`, `/v1/media-reservations`, `/v1/timetable-imports`, `GET /v1/sessions/{identifier}/reports`, `GET /v1/reports/{identifier}/download` |
-| Institute administration | `/v1/admin/*` for terms, subjects, sections, allocations, faculty, students, memberships and assignments |
+| Institute administration | `/v1/admin/*` for terms, subjects, class groups, allocations, faculty, students, memberships and assignments |
 | Processing | `/internal/v1/*` for scoped worker leases, inputs, results and reconciliation |
 
 ## Native development

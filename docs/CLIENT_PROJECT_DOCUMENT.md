@@ -8,7 +8,7 @@ This is a client-facing overview. For executable setup use [`INSTALLATION.md`](I
 
 ## 1. Project Overview & Problem Statement
 
-- **What is FaceTrack:** FaceTrack is an automated, cross-platform classroom attendance system that identifies enrolled students from a brief 10–15 second video scan recorded on a faculty member's smartphone or web browser.
+- **What is FaceTrack:** FaceTrack is a face-assisted classroom attendance system that proposes matches for enrolled students from short recording segments recorded on a faculty member's smartphone or web browser.
 - **The Problem:** Traditional manual roll calls and paper sign-in sheets waste 10 to 15 minutes of valuable instructional time every lecture, enable fraudulent proxy attendance, and create administrative burdens without real-time records.
 - **What It Solves Exactly:** FaceTrack reduces manual roll calls and dependence on dedicated scanners by using privacy-controlled computer vision to propose who was observed, while keeping faculty in complete control to review, adjust and authoritatively publish attendance.
 
@@ -52,17 +52,17 @@ Student and Teacher have separate interfaces.
 - **Publish & Export:** The faculty member confirms every decision and publishes. Private PDF and CSV attendance sheets can then be downloaded.
 
 ### Admin Interface:
-- **Guided setup:** Admins see a checklist (semester term, subjects, sections, subject allocations, faculty, assignments, students) that always names the next step, plus statistics and charts.
+- **Guided setup:** Admins see a checklist (semester term, subjects, class groups, subject allocations, faculty, assignments, students) that always names the next step, plus statistics and charts.
 - **People and access:** Searchable faculty and student directories, login-account creation, and role and subject assignment without typing account IDs.
 
 ---
 
 ## 4. Deployment Cost Analysis (revised 25 October 2026)
 
-Full workings, sources and assumptions are in [COST_AND_RELIABILITY.md](COST_AND_RELIABILITY.md). Provider prices were read on 25 October 2026 at **₹94.95 per US$**. Totals are infrastructure only. They exclude staff time, room cameras and the **model licence**, which is unpriced (see below). Availability figures are planning targets, not SLAs or measurements. FaceTrack has not yet demonstrated institute-scale throughput.
+For the current Azure pilot estimate, see the [100-student budget](IGDTUW_PILOT_BUDGET.md). Earlier scenario estimates and assumptions are in [COST_AND_RELIABILITY.md](COST_AND_RELIABILITY.md). Provider prices were read on 25 October 2026 at **₹94.95 per US$**. Totals are infrastructure only. They exclude staff time, room cameras and the **model licence**, which is unpriced (see below). Availability figures are planning targets, not SLAs or measurements. FaceTrack has not yet demonstrated institute-scale throughput.
 
 ### Basis of these figures
-- **No GPU.** The measured worker pipeline took 356 ms for a 12-frame clip on a CPU, and matching is limited to the students enrolled in that subject. A CPU server is sufficient at every scale below.
+- **No GPU.** The measured worker pipeline took 356 ms for a 12-frame clip on a CPU, and matching is limited to the students enrolled in that subject. The current deployment uses CPU inference. Higher workloads still require capacity testing.
 - **One server** runs the API, Redis and the recognition worker.
 - **Maintenance staffing** is a support decision, not infrastructure, and is not included.
 - **Hosting region.** An AWS Mumbai server keeps video in India and is cheaper than the European alternatives checked.
@@ -79,7 +79,7 @@ Full workings, sources and assumptions are in [COST_AND_RELIABILITY.md](COST_AND
 
 
 ### How reliable is recognition?
-- Teachers review and publish every result. A missed or uncertain face stays **Unassessed**; it is never marked absent automatically.
+- Teachers review and publish every result. After usable footage is processed, corroborated matches start as draft Present and all other approved students start as draft Absent. Without usable footage, the teacher enters marks manually.
 - The chosen model reports 95.02% on the IJB-C verification benchmark and 99.70% on LFW. These are controlled datasets. Small, dim or turned faces in a classroom are harder, and an independent study found ArcFace at 77.27% top-1 on a mixed-quality dataset.
 - FaceTrack's own evidence so far is one real two-person capture in low light, where one of two students was recognised, and 1 of 6 independent test scenarios passed. **No classroom accuracy percentage can be promised yet.** A supervised pilot (at least 100 students, 30 sessions, 3 rooms or days) will produce the first defensible figure.
 

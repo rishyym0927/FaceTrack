@@ -1,11 +1,11 @@
-# FaceTrack: start here (model testing)
+# FaceTrack model-testing quickstart
+
+To install the Android apps or use the hosted attendance product, see the [user guide](docs/USER_GUIDE.md). To run the full product from a clone, see the [installation guide](docs/INSTALLATION.md).
 
 This page is for someone who wants to **test the face-recognition model** without setting up the full app. There are two ways:
 
 1. **Live testing with real people:** a simple local web page where you enrol a few consenting volunteers and check whether the model recognises them. No login is needed.
 2. **Synthetic testing:** scripted tests on generated faces that report recall, false presence and speed.
-
-The repository also contains the complete application (Teacher and Student apps and the backend). The login-based app needs private accounts and keys that are **not** public; see [docs/INSTALLATION.md](docs/INSTALLATION.md) or, for a nontechnical install done by Claude Code, [docs/CLIENT_SETUP.md](docs/CLIENT_SETUP.md).
 
 ---
 

@@ -1,6 +1,6 @@
 # FaceTrack installation and setup
 
-Use this guide to set up a development copy of FaceTrack. The API expects migration head `0008_admin`. For the hosted demo and release procedure, see [Azure deployment](DEPLOY_AZURE.md).
+Use this guide to run FaceTrack from the repository. For the hosted websites and signed Android APKs, start with the [user guide](USER_GUIDE.md). The API expects migration head `0008_admin`. For the hosted demo and release procedure, see [Azure deployment](DEPLOY_AZURE.md).
 
 FaceTrack has three different run modes. Choose one before installing anything:
 
@@ -30,7 +30,7 @@ Teacher web/Android ─┘
 - Student web uses `http://localhost:5301`; Teacher web uses `http://localhost:5300`.
 - FastAPI uses `http://127.0.0.1:8000` in development.
 - Supabase Auth, PostgreSQL and private Storage are hosted and require internet access.
-- In a local setup, Redis, Celery, the job agent and CPU inference run on the development host. The hosted demo runs them on the Azure VM. Use one worker and agent pair per shared environment.
+- In a local setup, Redis, Celery, the job agent and CPU inference run on the development host. The hosted demo runs them on the Azure VM. Use one worker and agent pair per institute queue. Coordinate with the operator before starting a local worker against the hosted database.
 - Android reaches the local API through `adb reverse tcp:8000 tcp:8000`.
 - The API is one modular service. The worker is a separate process so video work does not block HTTP requests.
 
@@ -101,6 +101,7 @@ services/api/.env
 services/worker/.env
 .local/flutter/development.json
 .local/spike/models/buffalo_sc/manifest.json
+.local/spike/models/buffalo_sc/license-evidence.json
 .local/spike/models/buffalo_sc/det_500m.onnx
 .local/spike/models/buffalo_sc/w600k_mbf.onnx
 .local/spike/profiles/frozen-phase1b-v1.json
@@ -291,7 +292,7 @@ VALUES ('INSTITUTE_UUID', 'AUTH_USER_UUID', 'admin', 'active')
 ON CONFLICT DO NOTHING;
 ```
 
-After signing in again, the admin opens **Admin → Overview** and follows the setup checklist: semester term, subjects, sections, subject allocations, faculty, faculty assignments and students. Every step links to its form. Further admins and faculty roles are granted from **Admin → Access & assignments**; the SQL step is never needed again.
+After signing in again, the admin opens **Admin → Overview** and follows the setup checklist: semester term, subjects, class groups, subject allocations, faculty, faculty assignments and students. Every step links to its form. Further admins and faculty roles are granted from **Admin → Access**. Use the SQL step once per institute to bootstrap its first admin.
 
 Admins can create a login when adding someone, or later with **Create login** next to anyone in the faculty or student directory who has none; the account uses the record's own official email and is linked and given its role automatically. Creating login accounts from the Admin tab needs `SUPABASE_SERVICE_ROLE_KEY` in `services/api/.env`. Without it, admins can still create faculty and student records. The operator must provision sign-in accounts separately. An authenticated student with a matching official record can claim that identity. Public signup is deferred.
 
@@ -311,6 +312,8 @@ The configured Mac can run services without Docker. Use six terminals from the r
 The native environments are separate: root ML, `services/api/.venv`, and `services/worker/.venv`. Do not merge their lockfiles or environments.
 
 ## 7. Android device
+
+This section is for running a development build against your local API. To install a signed build for the hosted service, follow the [user guide](USER_GUIDE.md).
 
 Enable Developer options and USB debugging, connect a data-capable cable, unlock the phone and accept its authorization prompt.
 
@@ -455,7 +458,7 @@ Reconnect USB, unlock the phone and rerun the platform `android-connect` helper.
 
 ### Login works but subjects say access unavailable
 
-Use the correct role account. The API derives roles from approved memberships and profiles; opening the Teacher app cannot grant faculty access. An admin grants roles in **Admin → Access & assignments** and assigns faculty to subjects there.
+Use the correct role account. The API derives roles from approved memberships and profiles; opening the Teacher app cannot grant faculty access. An admin grants roles in **Admin → Access** and assigns faculty to subjects there.
 
 ### The Admin tab is missing
 

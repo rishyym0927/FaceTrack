@@ -1,6 +1,6 @@
 # FaceTrack
 
-FaceTrack is a human-reviewed, face-assisted attendance system with separate Student and Teacher (faculty) Flutter apps. Students join their subjects and enrol a face template with consent. Faculty create sessions, upload short classroom videos, review recognition suggestions, publish attendance and download CSV/PDF reports. Admins set up semester terms, subjects, sections, faculty and students.
+FaceTrack is a human-reviewed, face-assisted attendance system with separate Student and Teacher (faculty) Flutter apps. Students join their subjects and enrol a face template with consent. Faculty create sessions, upload short classroom videos, review recognition suggestions, publish attendance and download CSV/PDF reports. Admins set up semester terms, subjects, class groups, faculty and students.
 
 The [Azure demo](docs/DEPLOY_AZURE.md) and local development use:
 
@@ -15,7 +15,9 @@ After a processed scan, Teacher review starts with draft Present for corroborate
 
 ## Start here
 
-Use the [complete installation guide](docs/INSTALLATION.md). It covers macOS, Windows and Linux, first-time Supabase provisioning, private configuration, Android, testing and troubleshooting.
+To use the hosted website or install a signed Android APK, start with the [user guide](docs/USER_GUIDE.md). It covers sign-in, enrolment, classroom scans, attendance and reports.
+
+To run the repository yourself, use the [complete installation guide](docs/INSTALLATION.md). It covers macOS, Windows and Linux, first-time Supabase provisioning, private configuration, Android, testing and troubleshooting.
 
 Quick start for an already provisioned checkout:
 
@@ -37,7 +39,7 @@ Private configuration and approved model files are deliberately excluded from Gi
 The [Student web app](https://facetrack.centralindia.cloudapp.azure.com/student/) and [Teacher web app](https://facetrack.centralindia.cloudapp.azure.com/teacher/) require approved demo accounts. See [PROGRESS.md](PROGRESS.md) for the deployed revision and verification.
 
 - Database: migration head `0008_admin`, 37 business tables with forced row-level security
-- Student and Teacher apps (web and Android) use the institute's terms: Subject, Section, Semester term, Faculty
+- Student and Teacher apps are available on Android and web. Admin class groups use a term, branch and semester.
 - Faculty home shows an attendance dashboard: overall, semester-wise and subject-wise figures, a distribution chart, a needs-attention list and a CSV report
 - Admins get a guided Administration tab: setup checklist, statistics, directories, and access management
 - Verified with real people: consented face enrolment and template activation; one classroom session reviewed and published; student history; timetable import; CSV/PDF downloads
@@ -65,6 +67,7 @@ Do not claim >95% accuracy, a two-second end-to-end response, liveness detection
 
 ## Documentation
 
+- [User guide](docs/USER_GUIDE.md): install the signed Android apps or use the hosted websites
 - [Installation](docs/INSTALLATION.md): canonical setup and configuration for macOS, Windows and Linux
 - [Client setup](docs/CLIENT_SETUP.md): first install for a nontechnical user, with a terminal-enabled assistant
 - [Upgrade an existing install](docs/UPGRADE_EXISTING_INSTALL.md): bring an older install up to date with full ML
@@ -73,6 +76,6 @@ Do not claim >95% accuracy, a two-second end-to-end response, liveness detection
 - [Progress](PROGRESS.md) and [roadmap](ROADMAP.md): verified state, blockers and milestone gates
 - [ML quickstart](docs/ML_TEAM_QUICKSTART.md), [ML model and evaluation](docs/ML_SPIKE.md), [accuracy plan](docs/ML_ACCURACY_AND_ATTENDANCE_PLAN.md)
 - [Model test console](docs/MODEL_TEST_CONSOLE.md) and [tester steps](docs/CLIENT_MODEL_TEST_STEPS.md): volunteer evaluation without logins
-- [Project overview](docs/CLIENT_PROJECT_DOCUMENT.md) and [cost and reliability](docs/COST_AND_RELIABILITY.md): client briefing and dated planning estimates
+- [Project overview](docs/CLIENT_PROJECT_DOCUMENT.md), [cost and reliability](docs/COST_AND_RELIABILITY.md), and [100-student Azure pilot budget](docs/IGDTUW_PILOT_BUDGET.md): briefing and planning estimates
 
 Never commit credentials, tokens, face recordings, embeddings, templates, ONNX files or participant-level results.

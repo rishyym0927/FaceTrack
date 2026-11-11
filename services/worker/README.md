@@ -52,6 +52,8 @@ Timetable jobs parse the exact bounded UTF-8 CSV and the API validates academic 
 
 Temporary files use private managed directories and are removed on completion/failure. Abandoned owned directories are reconciled at startup/periodically. Storage cleanup runs on agent startup and every minute while awake, removing decided/expired recordings and reconciling late uploads through signed-grant expiry. A sleeping/offline development computer delays cleanup. The agent emits a sanitized backlog warning; investigate rather than claim a continuous retention guarantee.
 
+If a final report stays queued, check that the institute's active worker credential includes the `report` capability and that the agent is polling. See [Azure report troubleshooting](../../docs/DEPLOY_AZURE.md#reports-stay-queued).
+
 ## Verification
 
 From `services/worker`:

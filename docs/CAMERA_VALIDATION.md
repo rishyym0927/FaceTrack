@@ -17,7 +17,7 @@ Run this check on a physical phone with the signed release APK before distributi
 
 1. Install the signed APK while the camera is idle. Sign in with an approved test account and open **Enrolment** with the phone upright. Check that the front camera image and guide are upright and aligned.
 2. Tap **Start guided recording** without moving the phone. Check that the image stays upright through the transition and while recording. Center your face in good light, verify the guide turns green, and follow the prompts to check that pose progress responds.
-3. Review local playback for upright video, then discard the test clip. If timed fallback appears while a face is in view, check the device logs before passing this release check.
+3. Finish the pose prompts early and let the camera stop automatically. Check that it keeps recording for at least 12 seconds and stops by about 25 seconds. Review upright local playback. On a disposable test enrolment with the participant's consent, upload the clip and confirm processing advances to faculty review without a `CLIP_TOO_SHORT` error. Discard the clip if the test covers playback only. If timed fallback appears while a face is in view, check the device logs before passing this release check.
 
 ### Sideways preview when recording starts
 
@@ -57,7 +57,7 @@ Use a signed release APK and a consenting test session on a physical phone after
 
 ## Continuous scan acceptance
 
-Use a disposable class session and consenting test accounts. Repeat on Android and Chrome and record the device, browser, build commit, and result in the [project checkpoint](../PROGRESS.md).
+Use a disposable class session and at least two consenting test students with approved face enrolments. Open the session after both enrolments are approved so the frozen roster is eligible for capture. Repeat on Android and Chrome and record the device, browser, build commit, and result in the [project checkpoint](../PROGRESS.md).
 
 1. In Student enrolment, verify the guide is upright in portrait and landscape and reacts to a visible face. Start recording and confirm the server challenge begins independently of the earlier preview.
 2. In Teacher, open **Scan classroom** and verify rear camera preference, the framing overlay while panning slowly, and that stale boxes clear within about one second. Verify that green boxes appear after a stable hold. Record preview stutter, upload delay and time to recognition suggestions.

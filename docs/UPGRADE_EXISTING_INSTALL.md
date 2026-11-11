@@ -39,9 +39,9 @@ It assumes the client uses **Claude Code** (or another Claude session with termi
 5. **Tell her no migration is needed.** The hosted database is already at `0008_admin`. The client must not run Alembic, `tools.seed`, `tools.provision_*` or `tools.configure_*`.
 6. **Agree who runs a backend during your demonstration** (see the caveat below).
 
-## Caveat: two backends on one hosted project
+## Coordinate worker ownership
 
-Her backend and Rishi's backend both claim processing jobs from the same hosted database. Database leases keep this correct: only one worker holds a job at a time, and an expired lease holder cannot commit. However, the job may be processed on either computer, and timing becomes harder to predict. **While Rishi is demonstrating, run only one backend.** The client should stop hers (Windows `.\scripts\windows\stop-demo.ps1`, macOS `make down`) unless Rishi asks otherwise.
+When a local copy shares the hosted database, coordinate with the operator before starting a worker for the same institute. Keep one worker and agent pair per institute queue. The hosted websites and signed Android APKs already use the Azure API. See [worker ownership](DEPLOY_AZURE.md#worker-ownership).
 
 ## Steps
 

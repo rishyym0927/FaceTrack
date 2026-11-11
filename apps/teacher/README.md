@@ -2,6 +2,8 @@
 
 The Teacher app runs on Android and the web. Faculty manage assigned subjects, approve join requests, review face enrolment, take attendance, publish results and download private reports. The API checks active memberships and assignments. Accounts with an active admin membership also see **Admin**.
 
+See the [user guide](../../docs/USER_GUIDE.md) for hosted sign-in and Android installation.
+
 ## Run locally
 
 Follow the [installation guide](../../docs/INSTALLATION.md) to start the API and prepare the public Flutter configuration. From `apps/teacher` on macOS or Linux:
@@ -25,7 +27,7 @@ For local Android use, run `../../scripts/android-connect` after connecting or r
 
 ## Capture and publish
 
-1. Open the session to freeze its approved roster. Select **Scan classroom**, then **Start scan** with only consenting participants in view. The scanner captures short segments with audio off. Green boxes indicate good framing. Recognition suggestions appear after processing.
+1. Open the session to freeze its approved roster. Scanning requires at least two roster members with compatible, approved face enrolments. Select **Scan classroom**, then **Start scan** with only consenting participants in view. The scanner captures short segments with audio off. Green boxes indicate good framing. Recognition suggestions appear after processing.
 2. Select **Stop scan** to release the camera and finish any uploads. Retry an interrupted upload from the recovery screen. If the reservation has expired, discard the unsent segment and record again while the session is open or continue to manual review.
 3. Select **Go to review**. A usable capture defaults matched students to **Present** and other approved roster members to **Absent**, including those outside the footage. Without usable footage, select a mark for each student manually.
 4. Review or change the marks, then select **Publish attendance**. Published results are immutable. A later correction requires a reason and creates another revision.
@@ -36,6 +38,8 @@ Use the [Teacher signed Android check](../../docs/CAMERA_VALIDATION.md#teacher-a
 
 Use **Overview** for the setup checklist and institute statistics. **Academic setup** manages terms, subjects, class groups and allocations. **People** manages faculty, students and their logins. **Access** assigns faculty and manages roles. Select **Take the tour** to see the guided walkthrough.
 
+New class groups require a term, branch and semester. Faculty records use full name and official email. A password is needed only when creating a login.
+
 ## Preserved local camera spike
 
 Product sign-in is the default entry point. The separate prototype saves local recordings and sidecars.
@@ -44,5 +48,3 @@ Product sign-in is the default entry point. The separate prototype saves local r
 ../../scripts/flutter run -d chrome -t lib/main_spike.dart --web-hostname localhost --web-port 5302
 ../../scripts/flutter build web -t lib/main_spike.dart --output build/spike
 ```
-
-New class groups require a term, branch and semester. Faculty records use full name and official email. A password is needed only when creating a login.

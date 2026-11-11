@@ -1,6 +1,6 @@
 # ML model, provenance and held-out evaluation
 
-Run shell commands below from the repository root unless a section says otherwise. This guide covers the frozen model's provenance and permission gate, the research CLI (`scripts/spike`) and the held-out evaluation protocol, as run on the verified Mac; Windows users should use `docs/WINDOWS_SETUP.md` to run the product and translate `.venv/bin/python` to `.venv\Scripts\python` only for authorized local ML experiments. The active product architecture is in ../MASTER_DESIGN.md.
+Run shell commands below from the repository root unless a section says otherwise. This guide covers the frozen model's provenance and permission gate, the research CLI (`scripts/spike`) and the held-out evaluation protocol, as run on the verified Mac; Windows users should use `docs/WINDOWS_SETUP.md` to run the product and translate `.venv/bin/python` to `.venv\Scripts\python` only for authorized local ML experiments. The active product architecture is in the [master design](../MASTER_DESIGN.md).
 
 ## Installed environment
 

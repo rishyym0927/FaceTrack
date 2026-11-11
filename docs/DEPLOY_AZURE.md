@@ -18,12 +18,14 @@ FaceTrack runs online on a single Azure virtual machine. Data stays in the hoste
 - Private files copied over SSH: `services/api/.env`, `services/worker/.env`, `.local/spike/models/buffalo_sc/` and `.local/spike/profiles/frozen-phase1b-v1.json`. On the server, `MIGRATION_DATABASE_URL` is removed from the API `.env` (the runtime never uses the owner credential) and `CORS_ORIGINS` includes the public origin.
 - Caddy blocks `/internal/*` (the agent reaches the API on the private Docker network) and the OpenAPI docs pages.
 
-## One backend only
+## Worker ownership
 
-The VM's agent claims processing jobs from the shared hosted database. Run **either** the VM worker/agent **or** a local one, never both. Local apps and the local API can keep running: jobs they create are processed by the VM.
+A worker credential is scoped to one institute and a set of job types. The VM processes jobs for the institutes with active Azure workers. Keep one worker and agent pair per institute queue. Local apps and the local API can stay running against the shared database while the Azure worker processes their jobs.
 
-- Move processing back to a Mac: `ssh … 'cd /opt/facetrack && docker compose stop worker agent'`, then start the local worker and agent.
-- Move it to the VM again: stop the local worker and agent, then `docker compose up -d worker agent` on the VM.
+- Move the default demo queue back to a Mac: `ssh … 'cd /opt/facetrack && docker compose stop worker agent'`, then start the local worker and agent.
+- Move the default demo queue to the VM again: stop the local worker and agent, then `docker compose up -d worker agent` on the VM.
+
+The IGDTUW-labelled student project uses a separate Azure agent and worker on the same VM, with Redis database 4 and separate private scratch storage. The active credential permits enrolment, classroom recognition and reports. The two containers are `facetrack-project-enrolment-agent` and `facetrack-project-enrolment-worker`. Their private configuration is held outside the deployment checkout. After an image update, refresh this pair separately and verify that it can claim jobs. Keep the base Compose pair for its own institute.
 
 ## Updating
 
@@ -56,20 +58,20 @@ The readiness response should be `{"status":"ready"}`. Verify authenticated sign
 
 ## Phone apps (release build)
 
-Release APKs are signed with the key in `.local/release/signing/` (`facetrack-release.jks` and `key.properties`, both git-ignored). **Back up both files somewhere private**: an app signed with a different key cannot update an installed one. From a clean worktree of `origin/main`:
+Release APKs are signed with the key in `.local/release/signing/` (`facetrack-release.jks` and `key.properties`, both git-ignored). **Back up both files somewhere private**: an app signed with a different key cannot update an installed one. Use a clean checkout of `origin/main` with the private signing files and production Flutter configuration prepared for that checkout. From the repository root:
 
 ```sh
 export FACETRACK_KEY_PROPERTIES="$PWD/.local/release/signing/key.properties"
 for app in student teacher; do
   (
     cd "apps/$app" || exit 1
-    ../../scripts/flutter build apk --release --target-platform android-arm64 \
+    ../../scripts/flutter build apk --release --target-platform android-arm64 --split-per-abi \
       --dart-define-from-file=../../.local/flutter/production.json
   ) || exit 1
 done
 ```
 
-Each app writes `build/app/outputs/flutter-apk/app-release.apk` inside its directory. Verify both APK signatures using Android SDK Build Tools’ `apksigner verify`. An existing debug build uses a different signing key. Finish pending uploads before uninstalling it to install the release build.
+Each app writes `build/app/outputs/flutter-apk/app-arm64-v8a-release.apk` inside its directory. Verify both APK signatures using Android SDK Build Tools’ `apksigner verify`. An existing debug build uses a different signing key. Finish pending uploads before uninstalling it to install the release build.
 
 Before distributing an APK that changes camera capture, Flutter or CameraX, ML Kit, or Android packaging, run the signed Android camera check for [Student](CAMERA_VALIDATION.md#student-android-signed-release-check) or [Teacher](CAMERA_VALIDATION.md#teacher-android-signed-release-check), as affected. Earlier releases passed Flutter tests but lost ML Kit initialization under R8 and rotated the preview only when native recording started. A debug build cannot cover the release optimizer.
 
@@ -87,6 +89,17 @@ docker compose logs --tail 100 api worker agent
 - SSH refused after the operator's IP changes: `az network nsg rule update -g facetrack-rg --nsg-name facetrack-vmNSG -n default-allow-ssh --source-address-prefixes <new-ip>/32`.
 - The worker credential is time-limited. An expired or rejected credential pauses processing while uploads wait in the queue. Contact the operator for credential replacement. After updating the private worker configuration, recreate the worker and agent with `docker compose up -d --force-recreate worker agent` and check the agent logs.
 - "Enrolment agent waiting for local API/broker" means the agent cannot reach the API or Redis (network or startup), not a credential problem.
+
+### Reports stay queued
+
+Refresh the session first. On Azure, check the project agent and worker:
+
+```sh
+docker logs --tail 50 facetrack-project-enrolment-agent
+docker logs --tail 50 facetrack-project-enrolment-worker
+```
+
+From the operator's authorized database console, verify an active, unexpired worker credential for the correct institute. Check that its permitted job types include `report` and that `last_seen_at` is recent. Check the report job and report record for `succeeded` and `ready`. After restoring the correct worker permission, let existing jobs run before requesting another report. See the [worker guide](../services/worker/README.md) for processing and credential details.
 
 ## Limits to state honestly
 

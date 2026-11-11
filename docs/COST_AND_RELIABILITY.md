@@ -2,7 +2,7 @@
 
 Prepared 25 October 2026. The summary in `CLIENT_PROJECT_DOCUMENT.md` §4 is drawn from this document. Architecture authority remains `MASTER_DESIGN.md`.
 
-This document is a dated planning estimate. Current executable setup and verified status live in [`INSTALLATION.md`](INSTALLATION.md) and [`PROGRESS.md`](../PROGRESS.md).
+This document compares historical planning scenarios. See the [100-student Azure pilot budget](IGDTUW_PILOT_BUDGET.md) for the current deployment estimate. Current executable setup and verified status live in [`INSTALLATION.md`](INSTALLATION.md) and [`PROGRESS.md`](../PROGRESS.md).
 
 **Read this first.** Prices below were read from provider pages on 25 October 2026 unless marked *derived* (calculated from a verified price) or *estimate* (my assumption, not a quote). Availability and recognition figures are **planning targets, not measurements and not SLAs**. FaceTrack has no institute-scale benchmark yet.
 
@@ -47,7 +47,7 @@ Cost drivers, in order:
 
 Monthly USD with INR in brackets (₹94.95/$). Totals are infrastructure only.
 
-### S0 — Current demo (Mac + free Supabase)
+### S0 — Local demo estimate (Mac + free Supabase)
 - **Cost:** $0.
 - **Availability:** whenever the Mac is awake and the phone is on USB. Not a service.
 - **Recognition:** same model and thresholds as every other scenario.
@@ -148,7 +148,7 @@ A GPU does not improve accuracy by itself. It only makes sense for continuous ro
 
 ## Sources
 
-- Supabase pricing: https://supabase.com/pricing.md
+- Supabase pricing: https://supabase.com/pricing
 - Hetzner 2026 price changes and availability: https://agentdeals.dev/hetzner-pricing-2026 and https://privatedevops.com/news/hetzner-june-2026-cloud-price-increase-what-to-do
 - AWS t4g.small Mumbai price: https://sparecores.com/server/aws/t4g.small
 - Runpod hourly GPU prices: https://www.runpod.io/pricing ; billing rules: https://docs.runpod.io/serverless/pricing
