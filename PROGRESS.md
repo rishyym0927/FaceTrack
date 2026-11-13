@@ -5,8 +5,8 @@
 ## iPhone TestFlight preparation
 
 - Generated separate Student and Teacher iPhone projects with camera permission strings, distinct app IDs, existing FaceTrack icons and iOS 15.5 deployment targets for the installed ML Kit dependency. Added AVFoundation BGRA frame handling for live guidance and documented [build, signing and TestFlight steps](docs/IOS_TESTFLIGHT.md).
-- Flutter analysis passed for both apps and capture. Student 21, Teacher 84 and capture 21 local tests passed. Xcode project and plist syntax and Podfile syntax checked. Native compilation and on-device acceptance remain pending.
-- Next: finish installing full Xcode and its iOS SDK, install CocoaPods, select the Apple Developer Program team, build both archives, verify on a physical iPhone, and submit for external TestFlight review.
+- Flutter analysis passed for both apps and capture. Student 21, Teacher 84 and capture 21 local tests passed. Xcode project and plist syntax and Podfile syntax checked. Both unsigned arm64 release builds compiled with Xcode 27.2 and CocoaPods 1.17.0. Verified bundle IDs and iOS 15.5 minimum in the built apps. On-device acceptance remains pending.
+- Next: confirm Apple Developer Program team access, configure signing, create both App Store Connect records, and upload signed archives. Use a consenting tester’s iPhone for physical camera acceptance. This Mac has no valid signing identity and no connected iPhone.
 
 ## Performance rollout, first stages
 
