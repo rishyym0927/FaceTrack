@@ -1,6 +1,11 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 11 November 2026 (Asia/Kolkata)
+**Reviewed:** 13 November 2026 (Asia/Kolkata)
+
+## Teacher approved roster filter — 13 November
+
+- Deployed API revision `138d30f` to Azure. The existing active-roster query now requires current subject membership, faculty-approved face enrolment, active consent and compatible stored templates. Unfiltered roster and session attendance are independent of the display filter.
+- All 63 API tests passed against local PostgreSQL. Authenticated production pagination returned exactly the 10 eligible ADSA students across four pages, matching a read-only database check. The unfiltered roster returned 25. Both web entry points and API readiness passed. Azure retained the prior API files under the private release staging directory for rollback. Client screen rendering was not independently exercised in this release.
 
 ## User and repository documentation — 11 November
 
