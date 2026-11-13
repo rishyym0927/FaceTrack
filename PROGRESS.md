@@ -2,12 +2,18 @@
 
 **Reviewed:** 13 November 2026 (Asia/Kolkata)
 
+## iPhone TestFlight preparation
+
+- Generated separate Student and Teacher iPhone projects with camera permission strings, distinct app IDs, existing FaceTrack icons and iOS 15.5 deployment targets for the installed ML Kit dependency. Added AVFoundation BGRA frame handling for live guidance and documented [build, signing and TestFlight steps](docs/IOS_TESTFLIGHT.md).
+- Flutter analysis passed for both apps and capture. Student 21, Teacher 84 and capture 21 local tests passed. Xcode project and plist syntax and Podfile syntax checked. Native compilation and on-device acceptance remain pending.
+- Next: finish installing full Xcode and its iOS SDK, install CocoaPods, select the Apple Developer Program team, build both archives, verify on a physical iPhone, and submit for external TestFlight review.
+
 ## Performance rollout, first stages
 
 - Azure API `521224b` adds checkout timings to request logs, combines restricted-role probes, batches capture eligibility, recognition input and manual marks, aggregates per-offering attendance in SQL, and serves a compact authorized Teacher work summary. Both Azure web apps use `fa58708`, which uses the summary for Teacher notifications and the home attention card, queues a forced notification refresh behind an older request, and shows Student attendance before supporting details with on-demand older pages. The prior API sources were retained in the private Azure release directory.
 - A read-only Mac comparison using six hosted subjects replayed the old API request pattern with two concurrent subject reads. It used 25 requests, 6,245 decoded response bytes and 14.89 seconds in one run. The new summary used one request, 2,833 decoded bytes and a 1.00-second median over three samples. This measures API data retrieval on the same deployment, not complete app startup or browser transfer bytes. Azure confirmed timing logs and readiness. 65 API, 84 Teacher, 21 Student, 72 shared Flutter and 9 browser scanner tests passed. Frozen ML receipt passed 16/16.
 - Azure revision `065d635` adds one published-attendance dashboard request per page of up to 25 subjects, includes final report delivery state in the report list when requested, and skips roster reads when an idle session's version is unchanged. Pending recognition still refreshes full details and draft choices stay in the app. Existing API calls retain their original response shapes. API readiness, both web release assets, and base worker and agent health passed after deployment. Local checks passed for 65 API, 84 Teacher, 21 Student, nine browser scanner tests, Flutter analysis for both apps, and the 16-file freeze receipt.
-- Remaining: benchmark page and workflow latency on matched Chrome and signed Android staging fixtures. Report revision polling, browser capture/upload overlap, recognition completion batching, and evidence-based index and worker tuning are open. No physical Android or iPhone capture acceptance was run for this release. Native iOS runners are absent. The hosted capture flows require WebM recording, which Safari added in iOS 18.4.
+- Remaining: benchmark page and workflow latency on matched Chrome and signed Android staging fixtures. Report revision polling, browser capture/upload overlap, recognition completion batching, and evidence-based index and worker tuning are open. No physical Android or iPhone capture acceptance was run for this release. That web release did not include a native iOS build. The hosted capture flows require WebM recording, which Safari added in iOS 18.4.
 
 ## Attendance eligibility and loading — 13 November
 
@@ -305,7 +311,7 @@ The root suite's expected failure records the frozen baseline's degenerate-landm
 - Do not regenerate the existing worker token on routine startup; it is scoped and time-limited.
 - Never commit credentials, tokens, recordings, embeddings, templates, ONNX files or participant-level results.
 - Raw-media cleanup and job reconciliation require a running agent. Inspect backlog after restart.
-- Public signup/recovery, iOS/native desktop, production inference capacity, backups/restore acceptance, model deployment rights and institute-scale load testing remain later work.
+- Public signup/recovery, native desktop, production inference capacity, backups/restore acceptance, model deployment rights and institute-scale load testing remain later work.
 
 ## Frozen prototype evidence
 

@@ -31,6 +31,7 @@ class LiveCameraPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final mirror =
+        (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) &&
         camera.description.lensDirection == CameraLensDirection.front;
     final overlay = LayoutBuilder(
       builder: (context, constraints) {

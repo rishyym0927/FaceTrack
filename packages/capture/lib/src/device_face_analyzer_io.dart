@@ -1,6 +1,7 @@
 import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:google_mlkit_face_detection/google_mlkit_face_detection.dart';
 
@@ -30,24 +31,37 @@ class _MlKitAnalyzer implements PoseFrameAnalyzer {
 
   @override
   Future<PoseObservation?> analyze(CameraImage image) async {
-    // CameraX can label a requested NV21 stream as YUV_420_888 while still
-    // returning its converted, single NV21 plane. Validate the plane layout
-    // before passing it to ML Kit instead of discarding every such frame.
-    if ((image.format.group != ImageFormatGroup.nv21 &&
-            image.format.group != ImageFormatGroup.yuv420) ||
-        image.planes.length != 1 ||
-        image.planes.first.bytes.length < image.width * image.height * 3 ~/ 2) {
-      return null;
-    }
-    final rotation = _rotation();
-    if (rotation == null) return null;
+    if (image.planes.length != 1) return null;
     final plane = image.planes.first;
+    final isIos = defaultTargetPlatform == TargetPlatform.iOS;
+    final InputImageRotation? rotation;
+    final InputImageFormat format;
+    if (isIos) {
+      // AVFoundation applies orientation to its video output before streaming.
+      if (image.format.group != ImageFormatGroup.bgra8888 ||
+          plane.bytesPerRow < image.width * 4 ||
+          plane.bytes.length < plane.bytesPerRow * image.height) {
+        return null;
+      }
+      format = InputImageFormat.bgra8888;
+      rotation = InputImageRotation.rotation0deg;
+    } else {
+      // CameraX can label its converted single NV21 plane as YUV_420_888.
+      if ((image.format.group != ImageFormatGroup.nv21 &&
+              image.format.group != ImageFormatGroup.yuv420) ||
+          plane.bytes.length < image.width * image.height * 3 ~/ 2) {
+        return null;
+      }
+      format = InputImageFormat.nv21;
+      rotation = _rotation();
+    }
+    if (rotation == null) return null;
     final input = InputImage.fromBytes(
       bytes: plane.bytes,
       metadata: InputImageMetadata(
         size: Size(image.width.toDouble(), image.height.toDouble()),
         rotation: rotation,
-        format: InputImageFormat.nv21,
+        format: format,
         bytesPerRow: plane.bytesPerRow,
       ),
     );
@@ -98,18 +112,29 @@ class _MlKitAnalyzer implements PoseFrameAnalyzer {
     final lumaLength = math.min(image.width * image.height, lumaBytes.length);
     var sum = 0, count = 0;
     for (var i = 0; i < lumaLength; i += 97) {
-      sum += lumaBytes[i];
+      if (isIos) {
+        final pixel =
+            (i ~/ image.width) * plane.bytesPerRow + (i % image.width) * 4;
+        // Approximate luma from the BGRA channels.
+        sum +=
+            (29 * lumaBytes[pixel] +
+                150 * lumaBytes[pixel + 1] +
+                77 * lumaBytes[pixel + 2]) >>
+            8;
+      } else {
+        sum += lumaBytes[i];
+      }
       count++;
     }
     return PoseObservation(
       timestamp: now,
       faceCount: 1,
       bounds: rect,
-      // ML Kit reports angles in image coordinates. The front-camera preview
-      // is mirrored for the student, so invert yaw to match the prompts.
+      // The iOS front-camera frames are already mirrored by AVFoundation.
       yaw: face.headEulerAngleY == null
           ? null
-          : camera.description.lensDirection == CameraLensDirection.front
+          : !isIos &&
+                camera.description.lensDirection == CameraLensDirection.front
           ? -face.headEulerAngleY!
           : face.headEulerAngleY,
       pitch: face.headEulerAngleX,

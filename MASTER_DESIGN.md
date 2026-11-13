@@ -6,6 +6,8 @@
 
 The agreed technology stack is unchanged. This revision removes repeated explanations, extensive alternative analyses, speculative infrastructure, and optional product features from the implementation path. This is the only active design document; the superseded unfinished draft was removed at the user's request. Read `AGENTS.md` for project instructions and `PROGRESS.md` for the current development checkpoint.
 
+The iPhone beta extends the existing Student and Teacher Flutter products. It uses separate app IDs and the existing hosted HTTPS API, attendance and consent flows. TestFlight distribution requires signed builds and physical iPhone verification of both capture workflows.
+
 ## Contents
 
 1. [Scope and decisions](#1-scope-and-decisions)

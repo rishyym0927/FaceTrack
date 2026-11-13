@@ -645,7 +645,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   int webPreviewTurns = 0;
   final decisions = <String, String>{};
   final camera = GuidedCamera(
-    analyzerFactory: !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+    analyzerFactory:
+        !kIsWeb &&
+            (defaultTargetPlatform == TargetPlatform.android ||
+                defaultTargetPlatform == TargetPlatform.iOS)
         ? (controller) => createDeviceFaceAnalyzer(controller, classroom: true)
         : null,
   );

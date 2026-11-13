@@ -207,7 +207,9 @@ class GuidedCamera extends ChangeNotifier {
         fps: enrollmentGuidance ? 24 : null,
         videoBitrate: enrollmentGuidance ? 4000000 : null,
         imageFormatGroup: analyzerFactory != null && !kIsWeb
-            ? ImageFormatGroup.nv21
+            ? (defaultTargetPlatform == TargetPlatform.iOS
+                  ? ImageFormatGroup.bgra8888
+                  : ImageFormatGroup.nv21)
             : null,
       );
       await next.initialize();
