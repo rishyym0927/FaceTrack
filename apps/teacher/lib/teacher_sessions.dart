@@ -2194,7 +2194,7 @@ class CaptureQuality {
 const _retakeTips =
     'Record again closer (0.5–1 m from each face), with light on faces and no window behind them, holding each face steady for 3–4 seconds.';
 
-/// Null until processing has produced frame counts.
+/// Show guidance only when the sampled frames indicate a capture problem.
 CaptureQuality? captureQuality(Json capture) {
   final quality = capture['quality_json'];
   final counts = quality is Map ? quality['counts'] : null;
@@ -2206,20 +2206,17 @@ CaptureQuality? captureQuality(Json capture) {
   final usable = (faces - rejected).clamp(0, faces);
   if (faces == 0) {
     return CaptureQuality(
-      'No faces were found in the $sampled frames checked. Point the camera at students\' faces. $_retakeTips',
+      'No faces were detected in the frames checked. Point the camera at students\' faces. $_retakeTips',
       poor: true,
     );
   }
   if (usable * 2 < faces) {
     return CaptureQuality(
-      'Only $usable of $faces detected faces were clear enough. Review the remaining students manually. $_retakeTips',
+      'The camera did not get a clear view of enough faces. Check the attendance marks and record another clip if needed. $_retakeTips',
       poor: true,
     );
   }
-  return CaptureQuality(
-    '$usable of $faces faces found were clear enough to use.',
-    poor: false,
-  );
+  return null;
 }
 
 class CaptureQualityNote extends StatelessWidget {

@@ -15,23 +15,23 @@ Map<String, dynamic> capture(int sampled, int faces, int rejects) => {
 };
 
 void main() {
-  test('Explains the real poor capture: 1 of 12 faces usable', () {
+  test('A poor capture gives retake guidance without a detection count', () {
     final q = captureQuality(capture(12, 12, 11))!;
     expect(q.poor, isTrue);
-    expect(q.text, startsWith('Only 1 of 12 detected faces were clear enough'));
+    expect(q.text, startsWith('The camera did not get a clear view'));
+    expect(q.text, isNot(contains('1 of 12')));
     expect(q.text, contains('0.5–1 m'));
   });
 
   test('No faces found asks to point the camera at faces', () {
     final q = captureQuality(capture(12, 0, 0))!;
     expect(q.poor, isTrue);
-    expect(q.text, startsWith('No faces were found in the 12 frames checked'));
+    expect(q.text, startsWith('No faces were detected in the frames checked'));
   });
 
-  test('A good capture is reported without retake tips', () {
-    final q = captureQuality(capture(12, 30, 4))!;
-    expect(q.poor, isFalse);
-    expect(q.text, '26 of 30 faces found were clear enough to use.');
+  test('A good capture has no frame-quality banner', () {
+    expect(captureQuality(capture(12, 11, 0)), isNull);
+    expect(captureQuality(capture(12, 30, 4)), isNull);
   });
 
   test('Nothing is shown before processing has counts', () {
@@ -70,7 +70,10 @@ void main() {
         );
         expect(find.text('The recording was not uploaded'), findsOneWidget);
         expect(find.textContaining('Your recording is kept'), findsOneWidget);
-        expect(find.textContaining('Only 1 of 12'), findsOneWidget);
+        expect(
+          find.textContaining('The camera did not get a clear view'),
+          findsOneWidget,
+        );
         expect(tester.takeException(), isNull);
       },
     );
