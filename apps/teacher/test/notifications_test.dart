@@ -48,6 +48,8 @@ void main() {
       'session:s4:open',
     ]);
     expect(notices.first.title, '2 join requests · Data Structures');
+    expect(notices.first.route, '/classes/o1?tab=students');
+    expect(notices[1].route, '/classes/o1?tab=face-reviews');
     expect(notices[2].route, '/sessions/s1');
     expect(notices[3].body, contains('manually'));
     expect(notices.last.tone, NoticeTone.warning);

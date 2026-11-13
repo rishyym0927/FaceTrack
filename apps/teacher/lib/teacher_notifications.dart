@@ -93,7 +93,7 @@ Iterable<AppNotice> subjectNotices(SubjectWork w, {DateTime? now}) sync* {
           'Students are waiting for you to approve or decline their enrolment.',
       tone: NoticeTone.action,
       icon: Icons.person_add_alt,
-      route: route,
+      route: '$route?tab=students',
       ongoing: true,
     );
   }
@@ -105,7 +105,7 @@ Iterable<AppNotice> subjectNotices(SubjectWork w, {DateTime? now}) sync* {
       body: 'Check each recording and approve or reject it so the student can be recognised.',
       tone: NoticeTone.action,
       icon: Icons.face_retouching_natural,
-      route: route,
+      route: '$route?tab=face-reviews',
       ongoing: true,
     );
   }
@@ -117,7 +117,7 @@ Iterable<AppNotice> subjectNotices(SubjectWork w, {DateTime? now}) sync* {
       body: 'Students asked you to recheck a published result.',
       tone: NoticeTone.action,
       icon: Icons.chat_bubble_outline,
-      route: route,
+      route: '$route?tab=queries',
       ongoing: true,
     );
   }

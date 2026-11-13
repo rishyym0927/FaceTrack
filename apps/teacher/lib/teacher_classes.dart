@@ -244,6 +244,16 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   late final PagedController<Enrollment> requests, students, pendingFaces;
   late final PagedController<BiometricAttempt> faces;
   int tab = 3;
+  static const _tabNames = <String, int>{
+    'sessions': 3,
+    'students': 1,
+    'face-reviews': 2,
+    'queries': 4,
+    'overview': 5,
+  };
+
+  int get _routeTab =>
+      _tabNames[GoRouterState.of(context).uri.queryParameters['tab']] ?? 3;
   bool loadingCode = false;
 
   /// Pending work per tab, shown as counts on the tab chips.
@@ -345,6 +355,22 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     );
     _loadWork();
     watchLifecycle();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final selected = _routeTab;
+      if (selected != tab) _selectTab(selected, updateRoute: false);
+    });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final selected = _routeTab;
+    if (selected != tab) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && selected != tab) _selectTab(selected, updateRoute: false);
+      });
+    }
   }
 
   Future<void> refresh() async {
@@ -368,10 +394,18 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     }
   }
 
-  void _selectTab(int next) {
+  void _selectTab(int next, {bool updateRoute = true}) {
     if (next == tab) return;
     setState(() => tab = next);
     _loadSelectedTab();
+    if (updateRoute) {
+      final name = _tabNames.entries.firstWhere((entry) => entry.value == next).key;
+      final current = GoRouterState.of(context).uri;
+      context.push(current.replace(queryParameters: {
+        ...current.queryParameters,
+        'tab': name,
+      }).toString());
+    }
   }
 
   @override
@@ -693,6 +727,8 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
           if (pending.isEmpty) {
             return requests.loading
                 ? const SizedBox.shrink()
+                : requests.error != null
+                ? ErrorView(requests.error!, retry: requests.retry)
                 : const _InlineNote(
                     icon: Icons.check_circle_outline,
                     text: 'No join requests are waiting. Share the join code so students can request to join.',
@@ -884,6 +920,7 @@ class _SubjectTabs extends StatelessWidget {
                   button: true,
                   selected: id == selected,
                   label: count > 0 ? '$label, $count waiting' : label,
+                  onTap: () => onSelect(id),
                   child: ExcludeSemantics(
                     child: Material(
                       color: Colors.transparent,

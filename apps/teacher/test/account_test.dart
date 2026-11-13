@@ -21,44 +21,44 @@ void main() {
         addTearDown(() => tester.runAsync(h.dispose));
         h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
           if (r.path == '/v1/me') return jsonResponse(h.account);
-          if (r.path == '/v1/offerings') {
+          if (r.path == '/v1/teacher/attendance-dashboard') {
             return jsonResponse({
               'items': [
                 {
-                  'id': 'a',
-                  'title': 'Data Structures',
-                  'course_code': 'CS401',
-                  'term_code': '2026-ODD',
-                  'branch': 'CSE',
-                  'semester': 5,
-                  'section': 'A',
-                  'version': 1,
-                  'status': 'active',
+                  'offering': {
+                    'id': 'a',
+                    'title': 'Data Structures',
+                    'course_code': 'CS401',
+                    'term_code': '2026-ODD',
+                    'branch': 'CSE',
+                    'semester': 5,
+                    'section': 'A',
+                    'version': 1,
+                    'status': 'active',
+                  },
+                  'summary': {
+                    'sessions_conducted': 4,
+                    'policy_version': 'session-v1',
+                    'students': [
+                      {
+                        'student_id': '1',
+                        'official_name': 'Asha',
+                        'enrollment_number': '1',
+                        'present': 2,
+                        'late': 1,
+                        'absent': 1,
+                        'unassessed': 0,
+                        'excused': 1,
+                        'conducted': 5,
+                        'attended': 3,
+                        'assessed': 4,
+                        'percentage': 75.0,
+                      },
+                    ],
+                  },
                 },
               ],
               'next_cursor': null,
-            });
-          }
-          if (r.path == '/v1/offerings/a/attendance-summary') {
-            return jsonResponse({
-              'sessions_conducted': 4,
-              'policy_version': 'session-v1',
-              'students': [
-                {
-                  'student_id': '1',
-                  'official_name': 'Asha',
-                  'enrollment_number': '1',
-                  'present': 2,
-                  'late': 1,
-                  'absent': 1,
-                  'unassessed': 0,
-                  'excused': 1,
-                  'conducted': 5,
-                  'attended': 3,
-                  'assessed': 4,
-                  'percentage': 75.0,
-                },
-              ],
             });
           }
           return jsonResponse({'items': [], 'next_cursor': null});

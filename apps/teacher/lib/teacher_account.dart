@@ -29,18 +29,24 @@ class _TeacherAccountStatsState extends ConsumerState<TeacherAccountStats> {
     final api = ref.read(servicesProvider).api;
     final institute = ref.read(authProvider).institute!;
     try {
-      final offerings = <Offering>[];
+      final stats = <SubjectStats>[];
       String? cursor;
       var pages = 0;
       do {
-        final page = await api.offerings(institute, cursor: cursor);
-        offerings.addAll(page.items);
-        cursor = page.nextCursor;
+        final page = await api.send(
+          'GET',
+          '/v1/teacher/attendance-dashboard',
+          institute: institute,
+          query: {'cursor': ?cursor},
+        );
+        for (final item in (page['items'] as List).cast<Json>()) {
+          stats.add(SubjectStats(
+            Offering.fromJson(item['offering'] as Json),
+            summary: item['summary'] as Json,
+          ));
+        }
+        cursor = page['next_cursor'] as String?;
       } while (cursor != null && ++pages < 10);
-      final stats = await pooled(
-        offerings,
-        (o) => fetchSubjectStats(api, institute, o),
-      );
       if (mounted) setState(() => subjects = stats);
     } catch (_) {
       if (mounted) setState(() => failed = true);
