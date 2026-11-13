@@ -658,6 +658,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   late final SessionExitGuard exitGuard;
   final reserve = Mutation(), complete = Mutation();
   Timer? poll;
+  bool foreground = true;
   AppLifecycleListener? lifecycle;
   int loadGeneration = 0;
   @override
@@ -668,10 +669,19 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     exitGuard = ref.read(sessionExitGuardProvider)..enter(widget.id);
     camera.addListener(changed);
     lifecycle = AppLifecycleListener(
+      onHide: () {
+        foreground = false;
+        poll?.cancel();
+      },
       onPause: () {
+        foreground = false;
+        poll?.cancel();
         if (!scanActive) unawaited(camera.interrupt());
       },
-      onResume: load,
+      onResume: () {
+        foreground = true;
+        unawaited(load(keepDecisions: true));
+      },
     );
     load();
   }
@@ -770,11 +780,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
 
   void _schedulePoll({bool failed = false}) {
     poll?.cancel();
-    if (!mounted) return;
+    if (!mounted || !foreground) return;
     if (data?['session']?['status'] == 'open' || processingPending) {
       poll = Timer(
         Duration(seconds: failed ? 15 : 5),
-        () => load(keepDecisions: processingPending),
+        () => load(keepDecisions: true, conditional: true),
       );
     }
   }
@@ -784,20 +794,32 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   Future<void> load({
     bool discardChanges = false,
     bool keepDecisions = false,
+    bool conditional = false,
   }) async {
     if (decisions.isNotEmpty && !busy && !discardChanges && !keepDecisions) {
       _schedulePoll();
       return;
     }
-    final kept = keepDecisions ? Map.of(decisions) : const <String, String>{};
     final current = ++loadGeneration;
     try {
       final result = await services.api.send(
         'GET',
         '/v1/sessions/${widget.id}/attendance',
         institute: institute,
+        query: {
+          if (conditional && data?['session']?['version'] is int) ...{
+            'known_version': data!['session']['version'],
+            'known_processing': processingPending,
+          },
+        },
       );
       if (!mounted || current != loadGeneration) return;
+      if (result['unchanged'] == true) {
+        if (error != null) setState(() => error = null);
+        _schedulePoll();
+        return;
+      }
+      final kept = keepDecisions ? Map.of(decisions) : const <String, String>{};
       if (offering == null) {
         _loadOffering(result['session']['offering_id'] as String);
       }

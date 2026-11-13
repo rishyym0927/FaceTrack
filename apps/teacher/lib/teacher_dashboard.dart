@@ -1,5 +1,4 @@
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
@@ -145,8 +144,7 @@ List<SemesterGroup> groupBySemester(List<SubjectStats> all) {
 
 /// The faculty's attendance dashboard: overall figures, semester-wise and
 /// subject-wise statistics, a distribution chart and an attention list. It is
-/// computed on the client from each subject's published attendance summary, so
-/// it only ever reflects faculty-published results.
+/// based on the published attendance summaries returned by the faculty API.
 class TeacherDashboard extends StatefulWidget {
   const TeacherDashboard({super.key, required this.api, required this.institute, this.refreshTick = 0});
   final ApiClient api;
@@ -159,11 +157,11 @@ class TeacherDashboard extends StatefulWidget {
 enum _Sort { lowest, name, semester }
 
 class _TeacherDashboardState extends State<TeacherDashboard> {
-  static const _concurrency = 4, _maxPages = 10;
+  static const _maxPages = 10;
   List<SubjectStats> _subjects = [];
   AppFailure? _error;
   bool _loading = true;
-  int _done = 0, _total = 0;
+  bool _hasMore = false;
   String? _group; // null = all semesters
   _Sort _sort = _Sort.lowest;
   bool _attentionOnly = false;
@@ -178,7 +176,14 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   @override
   void didUpdateWidget(covariant TeacherDashboard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.refreshTick != widget.refreshTick) ApiClient.freshReads(_load);
+    if (oldWidget.institute != widget.institute || oldWidget.api != widget.api) {
+      _subjects = [];
+      _group = null;
+      _hasMore = false;
+      _load();
+    } else if (oldWidget.refreshTick != widget.refreshTick) {
+      ApiClient.freshReads(_load);
+    }
   }
   @override
   void dispose() {
@@ -191,44 +196,47 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     setState(() {
       _loading = true;
       _error = null;
-      _done = 0;
-      _total = 0;
     });
+    final results = <SubjectStats>[];
     try {
-      final offerings = <Offering>[];
       String? cursor;
       var pages = 0;
       do {
-        final page = await widget.api.offerings(widget.institute, cursor: cursor);
-        offerings.addAll(page.items);
-        cursor = page.nextCursor;
-      } while (cursor != null && ++pages < _maxPages);
-      if (!mounted || generation != _generation) return;
-      final results = List<SubjectStats?>.filled(offerings.length, null);
-      setState(() => _total = offerings.length);
-      var next = 0;
-      Future<void> worker() async {
-        while (true) {
-          final i = next++;
-          if (i >= offerings.length || generation != _generation) return;
-          results[i] = await fetchSubjectStats(widget.api, widget.institute, offerings[i]);
-          if (mounted && generation == _generation) setState(() => _done++);
+        final page = await widget.api.send(
+          'GET',
+          '/v1/teacher/attendance-dashboard',
+          institute: widget.institute,
+          query: {'cursor': ?cursor},
+        );
+        if (!mounted || generation != _generation) return;
+        for (final item in (page['items'] as List).cast<Json>()) {
+          results.add(SubjectStats(
+            Offering.fromJson(item['offering'] as Json),
+            summary: item['summary'] as Json,
+          ));
         }
-      }
-
-      await Future.wait([
-        for (var w = 0; w < math.min(_concurrency, offerings.length); w++) worker(),
-      ]);
-      if (!mounted || generation != _generation) return;
+        cursor = page['next_cursor'] as String?;
+      } while (cursor != null && ++pages < _maxPages);
       setState(() {
-        _subjects = [for (final r in results) ?r];
+        _subjects = results;
+        _hasMore = cursor != null;
         if (_group != null && !_subjects.any((s) => _key(s) == _group)) _group = null;
       });
     } catch (e) {
       if (mounted && generation == _generation) {
-        setState(() => _error = e is AppFailure
-            ? e
-            : const AppFailure('Could not load the dashboard. Retry.'));
+        setState(() {
+          if (e is AppFailure && const {401, 403, 404}.contains(e.status)) {
+            _subjects = [];
+            _group = null;
+            _hasMore = false;
+          } else if (_subjects.isEmpty && results.isNotEmpty) {
+            _subjects = results;
+            _hasMore = true;
+          }
+          _error = e is AppFailure
+              ? e
+              : const AppFailure('Could not load the dashboard. Retry.');
+        });
       }
     } finally {
       if (mounted && generation == _generation) setState(() => _loading = false);
@@ -312,9 +320,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             children: [
               const CircularProgressIndicator(),
               const SizedBox(height: 12),
-              Text(_total == 0
-                  ? 'Loading your attendance overview…'
-                  : 'Loading subject $_done of $_total…'),
+              const Text('Loading your attendance overview…'),
             ],
           ),
         ),
@@ -359,6 +365,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             '${_group == null ? '' : ' · ${groups.firstWhere((g) => g.key == _group).label}'}.',
             style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
+          if (_error != null) ErrorView(_error!, retry: _load),
+          if (_hasMore) const Text('Totals cover only the subjects loaded.'),
           if (groups.length > 1) ...[
             const SizedBox(height: 14),
             Wrap(

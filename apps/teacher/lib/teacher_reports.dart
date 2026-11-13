@@ -104,6 +104,7 @@ class _TeacherReportsState extends State<TeacherReports> {
         'GET',
         '/v1/sessions/${widget.sessionId}/reports',
         institute: widget.institute,
+        query: const {'include_deliveries': true},
       );
       final items = (list['items'] as List).cast<Json>();
       if (!mounted || current != generation) return;
@@ -111,11 +112,13 @@ class _TeacherReportsState extends State<TeacherReports> {
       final finals = items.where((r) => r['kind'] == 'final').toList();
       final metadata = await Future.wait(
         finals.map(
-          (r) => widget.api.send(
-            'GET',
-            '/v1/reports/${r['id']}',
-            institute: widget.institute,
-          ),
+          (r) => r.containsKey('deliveries')
+              ? Future.value(r)
+              : widget.api.send(
+                  'GET',
+                  '/v1/reports/${r['id']}',
+                  institute: widget.institute,
+                ),
         ),
       );
       if (!mounted || current != generation) return;

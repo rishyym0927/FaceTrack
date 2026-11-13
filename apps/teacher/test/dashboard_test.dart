@@ -74,26 +74,20 @@ void main() {
     addTearDown(() => tester.runAsync(h.dispose));
     h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
       if (r.path == '/v1/me') return jsonResponse(h.account);
-      if (r.path == '/v1/offerings') {
+      if (r.path == '/v1/teacher/attendance-dashboard') {
         return jsonResponse({
           'items': [
-            _offering('a', 'BCS 201', 'Design and Analysis of Algorithm', 3),
-            _offering('b', 'BCS 301', 'Theory of Computation', 5),
-            _offering('c', 'BIT 205', 'Software Engineering', 3),
+            {
+              'offering': _offering('a', 'BCS 201', 'Design and Analysis of Algorithm', 3),
+              'summary': _summary([_student('1', 'Asha', 9, 1), _student('2', 'Bina', 5, 5)], 10),
+            },
+            {
+              'offering': _offering('b', 'BCS 301', 'Theory of Computation', 5),
+              'summary': _summary([_student('3', 'Chitra', 10, 0)], 10),
+            },
           ],
           'next_cursor': null,
         });
-      }
-      if (r.path == '/v1/offerings/a/attendance-summary') {
-        return jsonResponse(_summary([_student('1', 'Asha', 9, 1), _student('2', 'Bina', 5, 5)], 10));
-      }
-      if (r.path == '/v1/offerings/b/attendance-summary') {
-        return jsonResponse(_summary([_student('3', 'Chitra', 10, 0)], 10));
-      }
-      if (r.path == '/v1/offerings/c/attendance-summary') {
-        return jsonResponse({
-          'error': {'code': 'INTERNAL', 'message': 'Unavailable.', 'request_id': 'r', 'retryable': false},
-        }, 500);
       }
       return jsonResponse({});
     });
@@ -112,8 +106,6 @@ void main() {
     expect(find.text('Attendance overview'), findsOneWidget);
     expect(find.text('Design and Analysis of Algorithm'), findsOneWidget);
     expect(find.text('Theory of Computation'), findsOneWidget);
-    // One subject failed: reported, and left out of the totals.
-    expect(find.textContaining('1 subject could not be loaded'), findsOneWidget);
     // 24 attended of 30 assessed across the two loaded subjects.
     expect(find.text('80.0%'), findsWidgets);
     expect(find.text('Bina'), findsOneWidget); // below 75% -> needs attention
@@ -133,19 +125,18 @@ void main() {
       addTearDown(() => tester.runAsync(h.dispose));
       h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
         if (r.path == '/v1/me') return jsonResponse(h.account);
-        if (r.path == '/v1/offerings') {
-          return jsonResponse({
-            'items': [
-              _offering('a', 'BCS 201', 'Design and Analysis of Algorithm', 3),
-              _offering('b', 'BCS 301', 'Theory of Computation', 5),
-            ],
-            'next_cursor': null,
-          });
-        }
-        return jsonResponse(_summary([
-          _student('1', 'Asha Venkataraman-Krishnamurthy', 9, 1),
-          _student('2', 'Bina', 5, 5),
-        ], 10));
+        return jsonResponse({
+          'items': [
+            {
+              'offering': _offering('a', 'BCS 201', 'Design and Analysis of Algorithm', 3),
+              'summary': _summary([
+                _student('1', 'Asha Venkataraman-Krishnamurthy', 9, 1),
+                _student('2', 'Bina', 5, 5),
+              ], 10),
+            },
+          ],
+          'next_cursor': null,
+        });
       });
       tester.view.physicalSize = Size(width, 2600);
       tester.view.devicePixelRatio = 1;

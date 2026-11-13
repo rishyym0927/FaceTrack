@@ -142,8 +142,8 @@ async def academics(conn, actor, institute, kind, cursor, limit):
     return page(rows, limit)
 
 
-async def offering_list(conn, actor, institute, cursor, limit):
-    permissions = await roles(conn, actor, institute)
+async def offering_list(conn, actor, institute, cursor, limit, *, faculty_only=False):
+    permissions = await (staff if faculty_only else roles)(conn, actor, institute)
     await check_cursor(
         conn,
         cursor,
@@ -173,7 +173,7 @@ async def offering_list(conn, actor, institute, cursor, limit):
             "a": actor,
             "admin": "admin" in permissions,
             "faculty": "teacher" in permissions,
-            "student": "student" in permissions,
+            "student": not faculty_only and "student" in permissions,
             "cursor": cursor,
             "limit": limit + 1,
         },

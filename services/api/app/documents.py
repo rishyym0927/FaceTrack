@@ -959,19 +959,37 @@ def install(app, engine, settings, principal, storage, auth):
         return r
 
     @app.get("/v1/sessions/{identifier}/reports")
-    async def report_list(identifier: UUID, user: User, institute_id: Institute):
+    async def report_list(
+        identifier: UUID, user: User, institute_id: Institute, include_deliveries: bool = False
+    ):
         async with transaction(engine, user.user_id, institute_id) as c:
             await session(c, user.user_id, institute_id, identifier)
-            return {
-                "items": [
-                    dict(x)
-                    for x in await many(
+            items = [
+                dict(row)
+                for row in await many(
+                    c,
+                    """SELECT id,kind,source_version,status,created_at,expires_at FROM app.reports
+                    WHERE institute_id=:i AND session_id=:id ORDER BY created_at DESC,id DESC LIMIT 100""",
+                    {"i": institute_id, "id": identifier},
+                )
+            ]
+            if include_deliveries:
+                finals = {row["id"]: row for row in items if row["kind"] == "final"}
+                if finals:
+                    for row in finals.values():
+                        row["deliveries"] = []
+                        row["email_configured"] = bool(
+                            settings.resend_api_key.get_secret_value() and settings.resend_from
+                        )
+                    for delivery in await many(
                         c,
-                        "SELECT id,kind,source_version,status,created_at,expires_at FROM app.reports WHERE institute_id=:i AND session_id=:id ORDER BY created_at DESC LIMIT 100",
-                        {"i": institute_id, "id": identifier},
-                    )
-                ]
-            }
+                        """SELECT report_id,id,status,error_code,sent_at FROM app.deliveries
+                        WHERE institute_id=:i AND report_id=ANY(CAST(:ids AS uuid[]))""",
+                        {"i": institute_id, "ids": list(finals)},
+                    ):
+                        detail = dict(delivery)
+                        finals[detail.pop("report_id")]["deliveries"].append(detail)
+            return {"items": items}
 
     @app.get("/v1/reports/{identifier}")
     async def report_status(identifier: UUID, user: User, institute_id: Institute):

@@ -86,6 +86,20 @@ async def test_report_job_snapshot_private_artifacts_and_retry(bio):
         f"/v1/reports/{rid}/deliveries", headers=b.headers("teacher", key="email")
     )
     assert email.status_code == 503 and email.json()["error"]["code"] == "EMAIL_NOT_CONFIGURED"
+    listing = f"/v1/sessions/{s['id']}/reports"
+    with connect(b.urls["owner"]) as c:
+        c.execute("UPDATE app.reports SET kind='final' WHERE id=%s", (rid,))
+    extended = await b.client.get(
+        listing, headers=b.headers("teacher"), params={"include_deliveries": True}
+    )
+    assert extended.status_code == 200, extended.text
+    item = extended.json()["items"][0]
+    detail = (await b.client.get(f"/v1/reports/{rid}", headers=b.headers("teacher"))).json()
+    assert item["deliveries"] == detail["deliveries"] == []
+    assert item["email_configured"] == detail["email_configured"] is False
+    legacy = (await b.client.get(listing, headers=b.headers("teacher"))).json()["items"][0]
+    assert "deliveries" not in legacy
+
 
 
 async def test_failed_report_retry_requires_authorized_teacher_and_preserves_snapshot(bio):

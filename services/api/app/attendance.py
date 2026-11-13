@@ -11,6 +11,7 @@ from pydantic import Field, field_validator, model_validator
 from sqlalchemy import text
 
 from . import biometrics as bio
+from . import services
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import Strict
@@ -607,13 +608,24 @@ def install(app, engine, settings, principal, storage):
             return result
 
     @app.get("/v1/sessions/{identifier}/attendance")
-    async def records(identifier: UUID, user: User, institute_id: Institute):
+    async def records(
+        identifier: UUID,
+        user: User,
+        institute_id: Institute,
+        known_version: Annotated[int | None, Query(ge=1)] = None,
+        known_processing: bool | None = None,
+    ):
         async with transaction(engine, user.user_id, institute_id) as c:
             s = await session(c, user.user_id, institute_id, identifier)
+            pending = await recognition_pending(c, institute_id, identifier)
+            # While recognition is active, multiple clips may update marks and
+            # capture state. Refresh the details until the queue has settled.
+            if not pending and known_processing is False and known_version == s["version"]:
+                return {"unchanged": True}
             return {
                 "session": dict(s),
                 "items": await attendance(c, institute_id, identifier),
-                "processing_pending": await recognition_pending(c, institute_id, identifier),
+                "processing_pending": pending,
             }
 
     @app.put("/v1/sessions/{identifier}/attendance-review")
@@ -807,27 +819,19 @@ def install(app, engine, settings, principal, storage):
                 },
             }
 
-    @app.get("/v1/offerings/{offering_id}/attendance-summary")
-    async def offering_attendance_summary(
-        offering_id: UUID,
-        user: User,
-        institute_id: Institute,
-    ):
-        """Cumulative, per-student attendance across the offering's finalized
-        sessions. Read-only aggregation over the authoritative published
-        snapshots, so it updates automatically after each finalize/correction."""
-        async with transaction(engine, user.user_id, institute_id) as c:
-            await teacher_access(c, user.user_id, institute_id, offering_id)
-            summary = await one(
-                c,
-                """WITH published AS (
-                    SELECT p.snapshot_json,s.starts_at,s.id
+    async def published_summaries(c, institute_id, ids):
+        if not ids:
+            return {}
+        summaries = await many(
+            c,
+            """WITH published AS (
+                    SELECT p.snapshot_json,s.starts_at,s.id,s.offering_id
                     FROM app.publications p JOIN app.sessions s
                       ON (s.institute_id,s.id)=(p.institute_id,p.session_id)
-                    WHERE p.institute_id=:i AND s.offering_id=:o AND s.status='finalized'
+                    WHERE p.institute_id=:i AND s.offering_id=ANY(CAST(:ids AS uuid[])) AND s.status='finalized'
                       AND p.revision=s.attendance_revision
                 ), marks AS (
-                    SELECT rec.student_id,
+                    SELECT p.offering_id,rec.student_id,
                       (array_agg(rec.official_name ORDER BY p.starts_at,p.id))[1] AS official_name,
                       (array_agg(rec.enrollment_number ORDER BY p.starts_at,p.id))[1] AS enrollment_number,
                       count(*) FILTER (WHERE rec.status='present') AS present,
@@ -838,17 +842,24 @@ def install(app, engine, settings, principal, storage):
                       count(*) AS conducted
                     FROM published p CROSS JOIN LATERAL jsonb_to_recordset(p.snapshot_json->'records')
                       AS rec(student_id text,official_name text,enrollment_number text,status text)
-                    GROUP BY rec.student_id
+                    GROUP BY p.offering_id,rec.student_id
                 )
-                SELECT (SELECT count(*) FROM published) AS sessions_conducted,
-                       coalesce((SELECT jsonb_agg(to_jsonb(marks)) FROM marks),'[]') AS students""",
-                {"i": institute_id, "o": offering_id},
-            )
-            result = []
+                SELECT selected.offering_id, coalesce(sessions.conducted,0) AS sessions_conducted,
+                   coalesce(students.records,'[]') AS students
+            FROM unnest(CAST(:ids AS uuid[])) AS selected(offering_id)
+            LEFT JOIN (SELECT offering_id,count(*) AS conducted FROM published GROUP BY offering_id)
+              sessions USING(offering_id)
+            LEFT JOIN (SELECT offering_id,jsonb_agg(to_jsonb(marks)-'offering_id') AS records
+                       FROM marks GROUP BY offering_id) students USING(offering_id)""",
+            {"i": institute_id, "ids": ids},
+        )
+        result = {}
+        for summary in summaries:
+            students = []
             for acc in summary["students"]:
                 attended = acc["present"] + acc["late"]
                 assessed = attended + acc["absent"]
-                result.append(
+                students.append(
                     {
                         **acc,
                         "attended": attended,
@@ -856,12 +867,41 @@ def install(app, engine, settings, principal, storage):
                         "percentage": round(100 * attended / assessed, 1) if assessed else None,
                     }
                 )
-            result.sort(key=lambda x: (x["enrollment_number"] or "", x["student_id"]))
-            return {
+            students.sort(key=lambda x: (x["enrollment_number"] or "", x["student_id"]))
+            offering_id = summary["offering_id"]
+            result[offering_id] = {
                 "offering_id": str(offering_id),
                 "sessions_conducted": summary["sessions_conducted"],
-                "students": result,
+                "students": students,
                 "policy_version": "session-v1",
+            }
+        return result
+
+    @app.get("/v1/offerings/{offering_id}/attendance-summary")
+    async def offering_attendance_summary(offering_id: UUID, user: User, institute_id: Institute):
+        async with transaction(engine, user.user_id, institute_id) as c:
+            await teacher_access(c, user.user_id, institute_id, offering_id)
+            return (await published_summaries(c, institute_id, [offering_id]))[offering_id]
+
+    @app.get("/v1/teacher/attendance-dashboard")
+    async def teacher_attendance_dashboard(
+        user: User,
+        institute_id: Institute,
+        cursor: UUID | None = None,
+        limit: Annotated[int, Query(ge=1, le=100)] = 25,
+    ):
+        async with transaction(engine, user.user_id, institute_id) as c:
+            offerings = await services.offering_list(
+                c, user.user_id, institute_id, cursor, limit, faculty_only=True
+            )
+            summaries = await published_summaries(
+                c, institute_id, [o["id"] for o in offerings["items"]]
+            )
+            return {
+                "items": [
+                    {"offering": o, "summary": summaries[o["id"]]} for o in offerings["items"]
+                ],
+                "next_cursor": offerings["next_cursor"],
             }
 
     @app.post("/v1/me/attendance/{publication_id}/disputes", status_code=201)

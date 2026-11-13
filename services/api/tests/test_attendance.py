@@ -195,6 +195,24 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
     row = data["students"][0]
     assert row["present"] == 1 and row["attended"] == 1 and row["assessed"] == 1
     assert row["percentage"] == 100.0 and row["conducted"] == 1
+    review = f"/v1/sessions/{sid}/attendance"
+    full = (await b.client.get(review, headers=b.headers("teacher"))).json()
+    params = {"known_version": full["session"]["version"], "known_processing": False}
+    unchanged = await b.client.get(review, headers=b.headers("teacher"), params=params)
+    assert unchanged.json() == {"unchanged": True}
+    refreshed = await b.client.get(
+        review, headers=b.headers("teacher"), params={**params, "known_processing": True}
+    )
+    assert refreshed.json() == full
+    dashboard = "/v1/teacher/attendance-dashboard"
+    batch = await b.client.get(dashboard, headers=b.headers("teacher"), params={"limit": 1})
+    assert batch.status_code == 200, batch.text
+    assert [item["summary"] for item in batch.json()["items"]] == [data]
+    assert batch.json()["next_cursor"] is None
+    unassigned = await b.client.get(dashboard, headers=b.headers("unassigned"))
+    assert unassigned.status_code == 200 and unassigned.json()["items"] == []
+    denied = await b.client.get(dashboard, headers=b.headers("student1"))
+    assert denied.status_code == 403, denied.text
     # Only the assigned teacher (or an admin) may see the cumulative view.
     for label in ("student1", "unassigned", "other_teacher"):
         denied = await b.client.get(
@@ -214,6 +232,8 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
         },
     )
     assert corr.status_code == 200, corr.text
+    changed = await b.client.get(review, headers=b.headers("teacher"), params=params)
+    assert changed.json()["items"][0]["status"] == "absent"
     after = (
         await b.client.get(
             f"/v1/offerings/{offering}/attendance-summary", headers=b.headers("teacher")
