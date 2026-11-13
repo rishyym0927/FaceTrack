@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
+from .biometrics import CURRENT_RECOGNITION_PROFILE
 from .db import many, one
 from .errors import APIError
 from .security import (
@@ -413,9 +414,26 @@ async def roster(conn, actor, institute, offering, cursor, limit, status=None):
         WHERE institute_id=:i AND offering_id=:o AND id=CAST(:cur AS uuid)""",
         {"i": institute, "o": offering},
     )
+    face_filter = ""
+    if status == "active":
+        face_filter = f"""AND e.effective_from<=now()
+          AND (e.effective_until IS NULL OR e.effective_until>now())
+          AND app.biometric_student_active(s.id)
+          AND EXISTS (
+            SELECT 1 FROM app.template_sets t
+            JOIN ({CURRENT_RECOGNITION_PROFILE}) p
+              ON p.model=t.model_release_id AND p.profile=t.recognition_profile_id
+            JOIN app.enrollment_attempts a ON (a.institute_id,a.id)=(t.institute_id,t.attempt_id)
+            JOIN app.consents c ON (c.institute_id,c.id)=(a.institute_id,a.consent_id)
+            WHERE t.institute_id=e.institute_id AND t.student_id=e.student_id
+              AND t.status='active' AND a.status='active' AND a.reviewed_by IS NOT NULL
+              AND c.withdrawn_at IS NULL
+              AND (SELECT count(*) FROM app.face_templates f
+                   WHERE (f.institute_id,f.template_set_id)=(t.institute_id,t.id)) BETWEEN 3 AND 5
+          )"""
     rows = await many(
         conn,
-        """SELECT e.id,e.offering_id,e.student_id,e.status,e.version,
+        f"""SELECT e.id,e.offering_id,e.student_id,e.status,e.version,
         s.enrollment_number,s.official_name FROM app.course_enrollments e
         JOIN app.students s ON s.institute_id=e.institute_id AND s.id=e.student_id
         WHERE e.institute_id=:i AND e.offering_id=:o AND (CAST(:cursor AS uuid) IS NULL
@@ -423,6 +441,7 @@ async def roster(conn, actor, institute, offering, cursor, limit, status=None):
             JOIN app.students s2 ON s2.institute_id=e2.institute_id AND s2.id=e2.student_id
             WHERE e2.institute_id=:i AND e2.id=CAST(:cursor AS uuid)))
         AND (CAST(:status AS text) IS NULL OR e.status=:status)
+        {face_filter}
         ORDER BY s.enrollment_number,e.id LIMIT :limit""",
         {"i": institute, "o": offering, "cursor": cursor, "limit": limit + 1, "status": status},
     )

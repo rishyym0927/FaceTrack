@@ -184,6 +184,18 @@ async def test_idempotence_and_one_unfinished(bio):
 
 async def test_encryption_review_and_withdrawal(bio):
     b = bio
+    roster = f"/v1/offerings/{b.ids['offering']}/roster"
+
+    async def active_roster():
+        result = await b.client.get(
+            roster, params={"status": "active", "limit": 1}, headers=b.headers()
+        )
+        assert result.status_code == 200, result.text
+        assert result.json()["next_cursor"] is None
+        return result.json()["items"]
+
+    assert await active_roster() == []
+    assert len((await b.client.get(roster, headers=b.headers())).json()["items"]) == 1
     a, c, j, body = await process(b)
     url = f"/internal/v1/jobs/{j}/complete"
     assert (await b.client.post(url, headers=b.wh, json=body)).status_code == 200
@@ -193,6 +205,9 @@ async def test_encryption_review_and_withdrawal(bio):
         await b.client.get("/v1/me/biometric-enrollment", headers=b.headers("student1"))
     ).json()
     assert state["attempt"]["status"] == "review_required" and not state["active_sets"]
+    assert await active_roster() == []
+    review_url = f"/v1/offerings/{b.ids['offering']}/biometric-enrollments"
+    assert (await b.client.get(review_url, headers=b.headers())).json()["items"][0]["id"] == a["id"]
     assert "vector" not in json.dumps(state) and "ciphertext" not in json.dumps(state)
     for label in ("student2", "unassigned", "other_teacher"):
         assert (
@@ -211,11 +226,34 @@ async def test_encryption_review_and_withdrawal(bio):
         json={"identity_confirmed": True, "poses_confirmed": True},
     )
     assert r.status_code == 200, r.text
+    assert [item["student_id"] for item in await active_roster()] == [
+        str(b.ids["student1_profile"])
+    ]
     with connect(b.urls["owner"]) as conn:
-        assert conn.execute("SELECT count(*) FROM app.face_templates").fetchone()[0] == 3
+        newer_profile = conn.execute(
+            """INSERT INTO app.recognition_profiles
+            (institute_id,model_release_id,settings_json,settings_hash)
+            SELECT institute_id,model_release_id,'{}',%s FROM app.recognition_profiles
+            RETURNING id""",
+            ("c" * 64,),
+        ).fetchone()[0]
+    assert await active_roster() == []
+    with connect(b.urls["owner"]) as conn:
+        conn.execute("DELETE FROM app.recognition_profiles WHERE id=%s", (newer_profile,))
+        removed = conn.execute(
+            "DELETE FROM app.face_templates WHERE ordinal=2 RETURNING *"
+        ).fetchone()
+    assert await active_roster() == []
+    with connect(b.urls["owner"]) as conn:
+        conn.execute(
+            "INSERT INTO app.face_templates VALUES (" + ",".join(["%s"] * len(removed)) + ")",
+            removed,
+        )
+    assert len(await active_roster()) == 1
     assert (
         await b.client.delete("/v1/consents/" + c, headers=b.headers("student1"))
     ).status_code == 200
+    assert await active_roster() == []
     with connect(b.urls["owner"]) as conn:
         assert conn.execute("SELECT count(*) FROM app.face_templates").fetchone()[0] == 0
         assert (

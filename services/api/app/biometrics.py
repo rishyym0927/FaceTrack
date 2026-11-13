@@ -25,6 +25,11 @@ NOTICE = (
 NOTICE_HASH = hashlib.sha256(NOTICE.encode()).hexdigest()
 UNFINISHED = ("awaiting_upload", "queued", "processing", "review_required")
 ATTEMPT_FIELDS = "a.id,a.student_id,a.asset_id,a.status,a.version,a.pose_order,a.quality_json,a.reason,a.created_at,m.expires_at,m.reservation_expires_at"
+CURRENT_RECOGNITION_PROFILE = """SELECT m.id AS model,p.id AS profile
+    FROM app.model_releases m JOIN app.recognition_profiles p
+      ON p.institute_id=m.institute_id AND p.model_release_id=m.id
+    WHERE m.institute_id=:i AND m.status='enabled' AND p.status='enabled'
+    ORDER BY p.created_at DESC,p.id DESC LIMIT 1"""
 
 
 def now():

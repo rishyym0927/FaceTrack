@@ -217,8 +217,7 @@ async def open_session(conn, actor, institute, identifier, version, key, req):
         )
     config = await one(
         conn,
-        """SELECT m.id AS model,p.id AS profile FROM app.model_releases m JOIN app.recognition_profiles p ON p.institute_id=m.institute_id AND p.model_release_id=m.id
-    WHERE m.institute_id=:i AND m.status='enabled' AND p.status='enabled' ORDER BY p.created_at DESC LIMIT 1""",
+        bio.CURRENT_RECOGNITION_PROFILE,
         {"i": institute},
     )
     if not config:
