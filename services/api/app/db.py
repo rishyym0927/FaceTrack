@@ -1,10 +1,14 @@
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
+from time import perf_counter
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from .errors import APIError
+
+pool_wait_ms: ContextVar[list[float] | None] = ContextVar("pool_wait_ms", default=None)
 
 
 def make_engine(url: str):
@@ -30,22 +34,22 @@ async def context(conn, actor: UUID, institute: UUID | None = None, email: str =
 
 @asynccontextmanager
 async def transaction(engine, actor: UUID, institute: UUID | None = None, email: str = ""):
+    started = perf_counter()
     async with engine.connect() as conn:
+        if (samples := pool_wait_ms.get()) is not None:
+            samples.append((perf_counter() - started) * 1000)
         tx = await conn.begin()
         try:
             permission = await one(
                 conn,
-                """SELECT NOT rolsuper AND NOT rolbypassrls
-                AND NOT rolcreaterole AND NOT rolcreatedb AS restricted FROM pg_roles
-                WHERE rolname=current_user""",
+                """SELECT NOT r.rolsuper AND NOT r.rolbypassrls
+                AND NOT r.rolcreaterole AND NOT r.rolcreatedb
+                AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AS restricted
+                FROM pg_roles r CROSS JOIN pg_class c
+                JOIN pg_namespace n ON n.oid=c.relnamespace
+                WHERE r.rolname=current_user AND n.nspname='app' AND c.relname='offerings'""",
             )
-            owner = await one(
-                conn,
-                """SELECT pg_has_role(current_user,c.relowner,'MEMBER') AS owns
-                FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-                WHERE n.nspname='app' AND c.relname='offerings'""",
-            )
-            if not permission or not permission["restricted"] or not owner or owner["owns"]:
+            if not permission or not permission["restricted"]:
                 raise APIError(
                     503, "UNSAFE_DATABASE_ROLE", "Restricted database configuration is required."
                 )

@@ -154,6 +154,18 @@ async def report_labels(conn, institute, s):
     }
 
 
+FROZEN_ELIGIBILITY_JOINS = """
+    JOIN app.template_sets t ON (t.institute_id,t.id,t.student_id)
+        =(r.institute_id,r.template_set_id,r.student_id)
+    JOIN app.enrollment_attempts a ON (a.institute_id,a.id)=(t.institute_id,t.attempt_id)
+    JOIN app.consents c ON (c.institute_id,c.id)=(a.institute_id,a.consent_id)
+    JOIN app.students s ON (s.institute_id,s.id)=(r.institute_id,r.student_id)
+"""
+FROZEN_ELIGIBILITY = """r.recognition_eligible AND t.status='active'
+    AND c.withdrawn_at IS NULL AND s.template_epoch=r.template_epoch
+    AND app.biometric_student_active(s.id)"""
+
+
 async def eligible(conn, institute, student, set_id, epoch):
     return await one(
         conn,
@@ -280,21 +292,25 @@ async def open_session(conn, actor, institute, identifier, version, key, req):
 
 
 async def apply_decisions(conn, actor, institute, identifier, decisions):
-    for d in decisions:
-        row = await one(
-            conn,
-            "UPDATE app.attendance_records SET status=:s,source='teacher',manual_lock=true,reason=:r,modified_by=:a,version=version+1 WHERE institute_id=:i AND session_id=:id AND student_id=:student RETURNING student_id",
-            {
-                "s": d.status,
-                "r": d.reason,
-                "a": actor,
-                "i": institute,
-                "id": identifier,
-                "student": d.student_id,
-            },
-        )
-        if not row:
-            raise APIError(422, "NOT_ON_ROSTER", "A student is not on this session roster.")
+    if not decisions:
+        return
+    rows = await many(
+        conn,
+        """UPDATE app.attendance_records m
+        SET status=d.status,source='teacher',manual_lock=true,reason=d.reason,
+            modified_by=:a,version=m.version+1
+        FROM jsonb_to_recordset(CAST(:decisions AS jsonb)) AS d(student_id uuid,status text,reason text)
+        WHERE m.institute_id=:i AND m.session_id=:id AND m.student_id=d.student_id
+        RETURNING m.student_id""",
+        {
+            "a": actor,
+            "i": institute,
+            "id": identifier,
+            "decisions": json.dumps([d.model_dump(mode="json") for d in decisions]),
+        },
+    )
+    if len(rows) != len(decisions):
+        raise APIError(422, "NOT_ON_ROSTER", "A student is not on this session roster.")
 
 
 async def can_publish(conn, actor, institute, offering):
@@ -802,40 +818,34 @@ def install(app, engine, settings, principal, storage):
         snapshots, so it updates automatically after each finalize/correction."""
         async with transaction(engine, user.user_id, institute_id) as c:
             await teacher_access(c, user.user_id, institute_id, offering_id)
-            rows = await many(
+            summary = await one(
                 c,
-                """SELECT p.snapshot_json FROM app.publications p
-                JOIN app.sessions s ON s.institute_id=p.institute_id AND s.id=p.session_id
-                WHERE p.institute_id=:i AND s.offering_id=:o AND s.status='finalized'
-                AND p.revision=s.attendance_revision
-                ORDER BY s.starts_at""",
-                {"i": institute_id, "o": str(offering_id)},
+                """WITH published AS (
+                    SELECT p.snapshot_json,s.starts_at,s.id
+                    FROM app.publications p JOIN app.sessions s
+                      ON (s.institute_id,s.id)=(p.institute_id,p.session_id)
+                    WHERE p.institute_id=:i AND s.offering_id=:o AND s.status='finalized'
+                      AND p.revision=s.attendance_revision
+                ), marks AS (
+                    SELECT rec.student_id,
+                      (array_agg(rec.official_name ORDER BY p.starts_at,p.id))[1] AS official_name,
+                      (array_agg(rec.enrollment_number ORDER BY p.starts_at,p.id))[1] AS enrollment_number,
+                      count(*) FILTER (WHERE rec.status='present') AS present,
+                      count(*) FILTER (WHERE rec.status='late') AS late,
+                      count(*) FILTER (WHERE rec.status='absent') AS absent,
+                      count(*) FILTER (WHERE rec.status='unassessed') AS unassessed,
+                      count(*) FILTER (WHERE rec.status='excused') AS excused,
+                      count(*) AS conducted
+                    FROM published p CROSS JOIN LATERAL jsonb_to_recordset(p.snapshot_json->'records')
+                      AS rec(student_id text,official_name text,enrollment_number text,status text)
+                    GROUP BY rec.student_id
+                )
+                SELECT (SELECT count(*) FROM published) AS sessions_conducted,
+                       coalesce((SELECT jsonb_agg(to_jsonb(marks)) FROM marks),'[]') AS students""",
+                {"i": institute_id, "o": offering_id},
             )
-            sessions_conducted = len(rows)
-            students: dict[str, dict] = {}
-            for r in rows:
-                for rec in r["snapshot_json"]["records"]:
-                    sid = rec["student_id"]
-                    acc = students.setdefault(
-                        sid,
-                        {
-                            "student_id": sid,
-                            "official_name": rec.get("official_name"),
-                            "enrollment_number": rec.get("enrollment_number"),
-                            "present": 0,
-                            "late": 0,
-                            "absent": 0,
-                            "unassessed": 0,
-                            "excused": 0,
-                            "conducted": 0,
-                        },
-                    )
-                    acc["conducted"] += 1
-                    status = rec["status"]
-                    if status in ("present", "late", "absent", "unassessed", "excused"):
-                        acc[status] += 1
             result = []
-            for acc in students.values():
+            for acc in summary["students"]:
                 attended = acc["present"] + acc["late"]
                 assessed = attended + acc["absent"]
                 result.append(
@@ -849,7 +859,7 @@ def install(app, engine, settings, principal, storage):
             result.sort(key=lambda x: (x["enrollment_number"] or "", x["student_id"]))
             return {
                 "offering_id": str(offering_id),
-                "sessions_conducted": sessions_conducted,
+                "sessions_conducted": summary["sessions_conducted"],
                 "students": result,
                 "policy_version": "session-v1",
             }
@@ -1124,18 +1134,14 @@ def install(app, engine, settings, principal, storage):
                 <= min(bio.now() + timedelta(minutes=2), s["ends_at"] + timedelta(minutes=5))
             ):
                 raise APIError(422, "CAPTURE_TIME", "The recording time is outside this session.")
-            roster = await many(
+            available = await many(
                 c,
-                "SELECT * FROM app.session_roster WHERE institute_id=:i AND session_id=:s AND recognition_eligible ORDER BY student_id",
+                f"""SELECT r.student_id FROM app.session_roster r
+                    {FROZEN_ELIGIBILITY_JOINS}
+                    WHERE r.institute_id=:i AND r.session_id=:s AND {FROZEN_ELIGIBILITY}
+                    LIMIT 2""",
                 {"i": institute_id, "s": identifier},
             )
-            available = [
-                r
-                for r in roster
-                if await eligible(
-                    c, institute_id, r["student_id"], r["template_set_id"], r["template_epoch"]
-                )
-            ]
             if len(available) < 2:
                 raise APIError(
                     409,

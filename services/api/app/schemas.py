@@ -45,6 +45,24 @@ class Offering(Strict):
     version: int
 
 
+class SessionWork(Strict):
+    id: UUID
+    status: str
+    starts_at: datetime
+
+
+class OfferingWork(Offering):
+    join_requests: int
+    face_reviews: int
+    open_queries: int
+    sessions: list[SessionWork]
+
+
+class TeacherWorkSummary(Strict):
+    items: list[OfferingWork]
+    truncated: bool
+
+
 class Enrollment(Strict):
     id: UUID
     offering_id: UUID

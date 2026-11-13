@@ -2,6 +2,7 @@
 
 import json
 import math
+from itertools import groupby
 from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -9,7 +10,7 @@ from pydantic import Field, field_validator
 from sqlalchemy import text
 
 from . import biometrics as bio
-from .attendance import eligible
+from .attendance import FROZEN_ELIGIBILITY, FROZEN_ELIGIBILITY_JOINS
 from .biometric_types import Epoch, WorkerComplete
 from .db import many, one
 from .errors import APIError
@@ -111,26 +112,26 @@ async def input_data(conn, worker, job, settings):
         raise APIError(409, "JOB_INPUT_REVOKED", "Capture input is unavailable.")
     roster = await many(
         conn,
-        "SELECT * FROM app.session_roster WHERE institute_id=:i AND session_id=:s AND recognition_eligible ORDER BY student_id",
+        f"""SELECT r.student_id,r.template_set_id,r.template_epoch,
+                   f.ordinal,f.key_id,f.ciphertext,f.nonce
+            FROM app.session_roster r {FROZEN_ELIGIBILITY_JOINS}
+            JOIN app.face_templates f ON (f.institute_id,f.template_set_id)=(t.institute_id,t.id)
+            WHERE r.institute_id=:i AND r.session_id=:s AND {FROZEN_ELIGIBILITY}
+            ORDER BY r.student_id,f.ordinal""",
         {"i": i, "s": s["id"]},
     )
     people = []
-    for r in roster:
-        t = await eligible(conn, i, r["student_id"], r["template_set_id"], r["template_epoch"])
-        if not t:
-            continue
+    for _, group in groupby(roster, key=lambda row: row["student_id"]):
+        templates = list(group)
+        r = templates[0]
         vectors = []
-        for f in await many(
-            conn,
-            "SELECT * FROM app.face_templates WHERE institute_id=:i AND template_set_id=:t ORDER BY ordinal",
-            {"i": i, "t": t["id"]},
-        ):
+        for f in templates:
             key = settings.template_keys.get(f["key_id"])
             if not key:
                 raise APIError(
                     503, "TEMPLATE_KEY_UNAVAILABLE", "Template decryption is unavailable."
                 )
-            aad = f"{i}:{r['student_id']}:{t['id']}:{s['model_release_id']}:{f['ordinal']}".encode()
+            aad = f"{i}:{r['student_id']}:{r['template_set_id']}:{s['model_release_id']}:{f['ordinal']}".encode()
             vector = json.loads(
                 AESGCM(bytes.fromhex(key.get_secret_value())).decrypt(
                     bytes(f["nonce"]), bytes(f["ciphertext"]), aad
@@ -143,7 +144,7 @@ async def input_data(conn, worker, job, settings):
             people.append(
                 {
                     "student_id": str(r["student_id"]),
-                    "template_set_id": str(t["id"]),
+                    "template_set_id": str(r["template_set_id"]),
                     "template_epoch": r["template_epoch"],
                     "vectors": vectors,
                 }

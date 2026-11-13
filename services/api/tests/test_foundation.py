@@ -551,3 +551,19 @@ async def test_roster_status_filter_applies_before_pagination(backend):
         "items"
     ] == []
     assert (await b.client.get(url + "?status=invalid", headers=b.headers())).status_code == 422
+
+
+async def test_teacher_work_summary_is_scoped_and_counts_requests(backend):
+    b = backend
+    await b.claim()
+    code = await new_code(b)
+    await request(b, code["code"])
+    url = "/v1/teacher/work-summary"
+    result = await b.client.get(url, headers=b.headers())
+    assert result.status_code == 200, result.text
+    assert result.headers["cache-control"] == "no-store"
+    assert [(row["id"], row["join_requests"]) for row in result.json()["items"]] == [
+        (b.ids["offering"], 1)
+    ]
+    assert (await b.client.get(url, headers=b.headers("student1"))).status_code == 403
+    assert (await b.client.get(url, headers=b.headers("unassigned"))).json()["items"] == []

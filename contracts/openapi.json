@@ -1096,6 +1096,131 @@
         }
       }
     },
+    "/v1/teacher/work-summary": {
+      "get": {
+        "summary": "Teacher Work Summary",
+        "operationId": "teacher_work_summary_v1_teacher_work_summary_get",
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "X-Institute-ID",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid",
+              "title": "X-Institute-Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TeacherWorkSummary"
+                }
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unauthorized"
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Forbidden"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not Found"
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Conflict"
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Request Entity Too Large"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Unprocessable Entity"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Too Many Requests"
+          },
+          "500": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Internal Server Error"
+          },
+          "503": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Service Unavailable"
+          }
+        }
+      }
+    },
     "/v1/offerings/{offering_id}": {
       "get": {
         "summary": "Offering Detail",
@@ -12647,6 +12772,107 @@
         ],
         "title": "Offering"
       },
+      "OfferingWork": {
+        "properties": {
+          "course_code": {
+            "type": "string",
+            "title": "Course Code"
+          },
+          "term_code": {
+            "type": "string",
+            "title": "Term Code"
+          },
+          "branch": {
+            "type": "string",
+            "title": "Branch"
+          },
+          "semester": {
+            "type": "integer",
+            "title": "Semester"
+          },
+          "section": {
+            "type": "string",
+            "title": "Section"
+          },
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "course_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Course Id"
+          },
+          "term_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Term Id"
+          },
+          "class_group_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Class Group Id"
+          },
+          "title": {
+            "type": "string",
+            "title": "Title"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "roster_version": {
+            "type": "integer",
+            "title": "Roster Version"
+          },
+          "version": {
+            "type": "integer",
+            "title": "Version"
+          },
+          "join_requests": {
+            "type": "integer",
+            "title": "Join Requests"
+          },
+          "face_reviews": {
+            "type": "integer",
+            "title": "Face Reviews"
+          },
+          "open_queries": {
+            "type": "integer",
+            "title": "Open Queries"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/SessionWork"
+            },
+            "type": "array",
+            "title": "Sessions"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "course_code",
+          "term_code",
+          "branch",
+          "semester",
+          "section",
+          "id",
+          "course_id",
+          "term_id",
+          "class_group_id",
+          "title",
+          "status",
+          "roster_version",
+          "version",
+          "join_requests",
+          "face_reviews",
+          "open_queries",
+          "sessions"
+        ],
+        "title": "OfferingWork"
+      },
       "OwnEnrollment": {
         "properties": {
           "id": {
@@ -13181,6 +13407,32 @@
         ],
         "title": "SessionCreate"
       },
+      "SessionWork": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          },
+          "starts_at": {
+            "type": "string",
+            "format": "date-time",
+            "title": "Starts At"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "id",
+          "status",
+          "starts_at"
+        ],
+        "title": "SessionWork"
+      },
       "StudentProfile": {
         "properties": {
           "id": {
@@ -13306,6 +13558,28 @@
           "status"
         ],
         "title": "TeacherProfile"
+      },
+      "TeacherWorkSummary": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/OfferingWork"
+            },
+            "type": "array",
+            "title": "Items"
+          },
+          "truncated": {
+            "type": "boolean",
+            "title": "Truncated"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "items",
+          "truncated"
+        ],
+        "title": "TeacherWorkSummary"
       },
       "Template": {
         "properties": {

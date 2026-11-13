@@ -18,12 +18,12 @@ from . import schemas, services
 from .auth import Authenticator
 from .biometric_routes import install
 from .config import Settings
-from .db import make_engine, one, transaction
+from .db import make_engine, one, pool_wait_ms, transaction
 from .errors import APIError
 from .security import expected_version
 from .storage import Storage
 
-logger = logging.getLogger("facetrack.api")
+logger = logging.getLogger("uvicorn.error.facetrack")
 bearer = HTTPBearer(auto_error=False)
 Institute = Annotated[UUID, Header(alias="X-Institute-ID")]
 Key = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)]
@@ -100,6 +100,8 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
         request.state.request_id = str(uuid4())
         start = time.perf_counter()
 
+        waits: list[float] = []
+
         def log(response):
             route = request.scope.get("route")
             logger.info(
@@ -109,6 +111,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                         "route": getattr(route, "path", "unmatched"),
                         "status": response.status_code,
                         "duration_ms": round((time.perf_counter() - start) * 1000, 3),
+                        "db_checkout_ms": round(sum(waits), 3),
                     }
                 )
             )
@@ -125,7 +128,11 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 return log(finalize(request, response))
             data.append(chunk)
         request._body = b"".join(data)
-        return log(finalize(request, await call_next(request)))
+        token = pool_wait_ms.set(waits)
+        try:
+            return log(finalize(request, await call_next(request)))
+        finally:
+            pool_wait_ms.reset(token)
 
     @app.exception_handler(HTTPException)
     async def http_error(request, error):
@@ -281,6 +288,11 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
             return await services.create_offering(
                 conn, user.user_id, institute_id, body, key, request.state.request_id
             )
+
+    @app.get("/v1/teacher/work-summary", response_model=schemas.TeacherWorkSummary)
+    async def teacher_work_summary(user: User, institute_id: Institute):
+        async with transaction(engine, user.user_id, institute_id) as conn:
+            return await services.work_summary(conn, user.user_id, institute_id)
 
     @app.get("/v1/offerings/{offering_id}", response_model=schemas.Offering)
     async def offering_detail(offering_id: UUID, user: User, institute_id: Institute):

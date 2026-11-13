@@ -181,6 +181,41 @@ async def offering_list(conn, actor, institute, cursor, limit):
     return page(rows, limit)
 
 
+async def work_summary(conn, actor, institute):
+    permissions = await staff(conn, actor, institute)
+    rows = await many(
+        conn,
+        f"""SELECT {OFFERING_FIELDS},
+            (SELECT count(*) FROM app.course_enrollments e
+             WHERE (e.institute_id,e.offering_id)=(o.institute_id,o.id)
+               AND e.status='requested') AS join_requests,
+            (SELECT count(*) FROM app.enrollment_attempts a
+             JOIN app.course_enrollments e USING(institute_id,student_id)
+             WHERE (e.institute_id,e.offering_id)=(o.institute_id,o.id)
+               AND a.status='review_required' AND e.status='active'
+               AND e.effective_from<=now() AND (e.effective_until IS NULL OR e.effective_until>now()))
+              AS face_reviews,
+            (SELECT count(*) FROM app.attendance_disputes d
+             JOIN app.sessions s ON (s.institute_id,s.id)=(d.institute_id,d.session_id)
+             WHERE (s.institute_id,s.offering_id)=(o.institute_id,o.id) AND d.status='open') AS open_queries,
+            (SELECT coalesce(jsonb_agg(to_jsonb(action) ORDER BY action.starts_at DESC,action.id),'[]')
+             FROM (SELECT s.id,s.status,s.starts_at FROM app.sessions s
+                   WHERE (s.institute_id,s.offering_id)=(o.institute_id,o.id)
+                     AND (s.status IN ('closed','review_required','no_data')
+                       OR (s.status='open' AND s.starts_at<=now()-interval '3 hours'))
+                   ORDER BY s.starts_at DESC,s.id LIMIT 150) action) AS sessions
+        FROM app.offerings o {OFFERING_JOINS}
+        WHERE o.institute_id=:i AND (:admin OR EXISTS (
+          SELECT 1 FROM app.offering_teachers ot
+          JOIN app.teachers t ON (t.institute_id,t.id)=(ot.institute_id,ot.teacher_id)
+          WHERE (ot.institute_id,ot.offering_id)=(o.institute_id,o.id)
+            AND ot.status='active' AND t.auth_user_id=:a AND t.status='approved'))
+        ORDER BY c.code,g.section,o.id LIMIT 101""",
+        {"i": institute, "a": actor, "admin": "admin" in permissions},
+    )
+    return {"items": [dict(row) for row in rows[:100]], "truncated": len(rows) > 100}
+
+
 async def offering_detail(conn, actor, institute, offering):
     permissions = await roles(conn, actor, institute)
     if {"teacher", "admin"} & permissions:
