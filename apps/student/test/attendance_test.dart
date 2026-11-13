@@ -186,4 +186,49 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('Subject filter includes older-only enrolments after refresh', (tester) async {
+    final h = (await tester.runAsync(() => harness()))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/me/enrollments') {
+        return jsonResponse({
+          'items': [
+            {
+              'id': 'enrol-dm', 'offering_id': 'dm', 'student_id': 's1',
+              'status': 'active', 'version': 1,
+              'offering': {
+                'id': 'dm', 'title': 'Older subject', 'course_code': 'DM',
+                'term_code': '2026-ODD', 'branch': 'CSE', 'semester': 1,
+                'section': 'ALL', 'version': 1, 'status': 'active',
+              },
+            },
+          ],
+          'next_cursor': null,
+        });
+      }
+      if (r.path == '/v1/me/attendance') {
+        return jsonResponse({
+          'items': [rows.first], 'next_cursor': 'older-page', 'summary': {},
+        });
+      }
+      return jsonResponse({'items': [], 'next_cursor': null});
+    });
+    await tester.pumpWidget(ProviderScope(
+      overrides: [servicesProvider.overrideWithValue(h.services)],
+      child: ProductApp(classesBuilder: (_) => const StudentAttendance()),
+    ));
+    await tester.pumpAndSettle();
+    final dropdown = find.byType(DropdownButtonFormField<String?>);
+    await tester.tap(dropdown);
+    await tester.pumpAndSettle();
+    expect(find.text('Older subject'), findsWidgets);
+    await tester.tap(find.text('Older subject').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Refresh'));
+    await tester.pumpAndSettle();
+    expect(find.text('Older subject'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

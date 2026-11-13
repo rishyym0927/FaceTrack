@@ -10,6 +10,8 @@ import 'files_stub.dart'
     if (dart.library.io) 'files_io.dart'
     if (dart.library.js_interop) 'files_web.dart'
     as files;
+import 'pending_store_stub.dart'
+    if (dart.library.js_interop) 'pending_store_web.dart' as browserStore;
 
 class PendingClip {
   PendingClip({
@@ -87,7 +89,11 @@ class PendingClips {
   }
 
   static Future<PendingClip?> _read() async {
-    if (kIsWeb) return memory;
+    if (kIsWeb) {
+      final raw = await browserStore.read();
+      if (raw == null) return memory;
+      return PendingClip.fromJson(Map<String, dynamic>.from(jsonDecode(raw)));
+    }
     final raw = (await SharedPreferences.getInstance()).getString(key);
     if (raw == null) return null;
     try {
@@ -99,18 +105,25 @@ class PendingClips {
 
   static Future<void> _save(PendingClip clip) async {
     memory = clip;
-    if (!kIsWeb)
+    if (kIsWeb) {
+      await browserStore.save(jsonEncode(clip.toJson()), clip.path);
+    } else {
       await (await SharedPreferences.getInstance()).setString(
         key,
         jsonEncode(clip.toJson()),
       );
+    }
   }
 
   static Future<void> _clear() async {
     final old = await _read();
     if (old != null) await files.remove(old.path);
     memory = null;
-    if (!kIsWeb) await (await SharedPreferences.getInstance()).remove(key);
+    if (kIsWeb) {
+      await browserStore.clear();
+    } else {
+      await (await SharedPreferences.getInstance()).remove(key);
+    }
   }
 
   static Future<PendingClip?> read() => _exclusive(_read);

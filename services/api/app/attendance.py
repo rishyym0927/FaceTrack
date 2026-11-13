@@ -765,15 +765,19 @@ def install(app, engine, settings, principal, storage):
                     p.snapshot_json->>'starts_at' AS starts_at,
                     mark->>'status' AS status,mark->>'reason' AS reason,
                     mark->>'assessment_code' AS assessment_code,
-                    COALESCE(mark->'evidence_summary','{}'::jsonb) AS evidence_summary
+                    '{}'::jsonb AS evidence_summary
                     FROM app.session_roster r
                     JOIN app.sessions s ON s.institute_id=r.institute_id AND s.id=r.session_id
                     JOIN app.publications p ON p.institute_id=s.institute_id AND p.session_id=s.id
                         AND p.revision=s.attendance_revision
-                    CROSS JOIN LATERAL jsonb_array_elements(p.snapshot_json->'records') AS mark
+                    CROSS JOIN LATERAL jsonb_path_query_first(
+                        p.snapshot_json,
+                        '$.records[*] ? (@.student_id == $student)'::jsonpath,
+                        jsonb_build_object('student', CAST(r.student_id AS text))
+                    ) AS mark
                     WHERE r.institute_id=:i AND r.student_id=:student
                     AND (CAST(:o AS uuid) IS NULL OR s.offering_id=CAST(:o AS uuid))
-                    AND mark->>'student_id'=CAST(CAST(:student AS uuid) AS text)
+                    AND mark IS NOT NULL
                 ), totals AS (
                     SELECT count(*) FILTER (WHERE status IN ('present','late')) AS attended,
                     count(*) FILTER (WHERE status IN ('present','late','absent')) AS assessed,

@@ -174,10 +174,11 @@
       };
       const loadDetector = async () => {
         try {
-          const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs');
-          const files = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm');
+          const asset = path => new URL(`vendor/mediapipe/${path}`, document.baseURI).href;
+          const vision = await import(asset('vision_bundle.mjs'));
+          const files = await vision.FilesetResolver.forVisionTasks(asset('wasm'));
           const loaded = await vision.FaceDetector.createFromOptions(files, {
-            baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/1/blaze_face_short_range.tflite' },
+            baseOptions: { modelAssetPath: asset('blaze_face_short_range.tflite') },
             runningMode: 'VIDEO', minDetectionConfidence: .5,
           });
           if (cancelled || detectorClosed) loaded.close(); else detector = loaded;

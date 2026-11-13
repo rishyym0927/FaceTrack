@@ -23,11 +23,25 @@ String? terminalClassroomUploadMessage(Object error) {
 /// At most two complete segments are retained, including the active upload.
 /// Camera capture pauses under backpressure; it never grows an unbounded queue.
 class ClassroomScan extends ChangeNotifier {
-  ClassroomScan(this.camera, this.upload) {
+  ClassroomScan(this.camera, this.upload, {
+    Future<XFile> Function(XFile)? retain,
+    Future<void> Function(XFile)? remove,
+    List<XFile> recovered = const [],
+  }) : retain = retain ?? _unchanged,
+       remove = remove ?? _removeOwned {
     camera.addListener(_cameraChanged);
+    if (recovered.isNotEmpty) {
+      _queue.addAll(recovered);
+      ended = true;
+      error = 'Unsent recording recovered. Retry upload or discard it.';
+    }
   }
   final GuidedCamera camera;
   final Future<void> Function(XFile) upload;
+  final Future<XFile> Function(XFile) retain;
+  final Future<void> Function(XFile) remove;
+  static Future<XFile> _unchanged(XFile file) async => file;
+  static Future<void> _removeOwned(XFile file) => removeOwnedClip(file.path);
   final List<XFile> _queue = [];
   bool scanning = false, sending = false, collecting = false, closed = false;
   bool ended = false, releasing = false;
@@ -100,9 +114,21 @@ class ClassroomScan extends ChangeNotifier {
   Future<void> _collect() async {
     collecting = true;
     final file = camera.takeClip();
-    if (file != null) _queue.add(file);
+    if (file != null) {
+      try {
+        final saved = await retain(file);
+        _queue.add(saved);
+        if (saved.path != file.path) await removeOwnedClip(file.path);
+      } catch (_) {
+        _queue.add(file);
+        error = 'Could not save this recording for recovery. Keep this page open and retry upload.';
+        scanning = false;
+        ended = true;
+      }
+    }
     collecting = false;
     _emit();
+    if (ended) await _finishCamera();
     unawaited(_send());
     await _next();
   }
@@ -188,6 +214,7 @@ class ClassroomScan extends ChangeNotifier {
 
   Future<void> _remove(XFile file) async {
     try {
+      await remove(file);
       await removeOwnedClip(file.path);
     } catch (_) {
       // The OS can still evict an app-owned cache file.
@@ -198,9 +225,7 @@ class ClassroomScan extends ChangeNotifier {
   void dispose() {
     closed = true;
     camera.removeListener(_cameraChanged);
-    for (final file in _queue) {
-      unawaited(_remove(file));
-    }
+    // Pending clips belong to the recovery store until confirmed or discarded.
     _queue.clear();
     super.dispose();
   }
@@ -228,9 +253,11 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
   void initState() {
     super.initState();
     lifecycle = AppLifecycleListener(onPause: () => unawaited(scan.stop()));
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => scan.camera.initialize(),
-    );
+    if (!scan.ended) {
+      WidgetsBinding.instance.addPostFrameCallback(
+        (_) => scan.camera.initialize(),
+      );
+    }
     unawaited(_refresh());
     poll = Timer.periodic(const Duration(seconds: 5), (_) => _refresh());
   }

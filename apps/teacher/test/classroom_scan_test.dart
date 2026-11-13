@@ -140,7 +140,7 @@ void main() {
     expect(scan.pending, 0);
   });
 
-  test('Disposal releases a clip while its upload is still pending', () async {
+  test('Disposal keeps an unsent clip for recovery', () async {
     final folder = await Directory.systemTemp.createTemp('scan-test-');
     cache = folder.path;
     addTearDown(() async {
@@ -156,10 +156,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(scan.pending, 1);
     scan.dispose();
-    for (var i = 0; i < 50 && await clip.exists(); i++) {
-      await Future<void>.delayed(const Duration(milliseconds: 10));
-    }
-    expect(await clip.exists(), false);
+    expect(await clip.exists(), true);
     upload.complete();
     await Future<void>.delayed(Duration.zero);
     expect(scan.submitted, 0);

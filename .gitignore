@@ -12,6 +12,7 @@ build/
 dist/
 .dart_tool/
 .flutter-plugins*
+packages/capture/android/app/
 .gradle/
 .kotlin/
 .idea/

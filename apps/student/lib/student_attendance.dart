@@ -178,10 +178,6 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         disputes = [];
         titles.clear();
         failed.clear();
-        if (subject != null &&
-            !records.any((r) => r['offering_id'] == subject)) {
-          subject = null;
-        }
         loading = false;
       });
       await Future.wait([subjects(), disputeRows()]);
@@ -352,7 +348,11 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
   }
 
   Widget _filters(BuildContext context) {
-    final subjects = {for (final r in records) r['offering_id'] as String};
+    final subjects = <String>{
+      ...titles.keys,
+      for (final r in records) r['offering_id'] as String,
+      ?subject,
+    };
     return Panel(
       padding: 14,
       child: Wrap(

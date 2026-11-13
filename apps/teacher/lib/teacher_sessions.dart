@@ -12,6 +12,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 
 import 'attendance_table.dart';
 import 'classroom_scan.dart';
+import 'classroom_pending.dart';
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
 
@@ -642,6 +643,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   AppFailure? captureError;
   bool busy = false, scanActive = false;
   final scanUploads = <String, _ScanUpload>{};
+  ClassroomPending? scanStore;
   int webPreviewTurns = 0;
   final decisions = <String, String>{};
   final camera = GuidedCamera(
@@ -1012,6 +1014,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             'expected_bytes': bytes,
           },
         );
+        await scanStore?.update(file.path, state.toJson());
       } on AppFailure catch (e) {
         if (e.code != 'CAPTURE_LIMIT' || attempt >= 23) rethrow;
         report?.call('Waiting for an upload slot…');
@@ -1063,9 +1066,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           progress: (value) => report?.call('Uploading recording…', value),
           checkpoint: (url) async {
             state.resumeUrl = url;
+            await scanStore?.update(file.path, state.toJson());
           },
         );
         state.uploaded = true;
+        await scanStore?.update(file.path, state.toJson());
       }
       await commit();
     }
@@ -1105,9 +1110,27 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           onStarted: () {},
         );
       } else {
+        final owner = services.client.auth.currentUser?.id;
+        if (owner == null) throw const AppFailure('Sign in again before scanning.');
+        final store = ClassroomPending(owner, institute, widget.id);
+        scanStore = store;
+        final recovered = await store.load();
+        for (final entry in recovered) {
+          scanUploads[entry['path'] as String] = _ScanUpload.fromJson(
+            (entry['upload'] as Map).cast<String, dynamic>(),
+          );
+        }
         scan = ClassroomScan(
           camera,
           (file) => uploadScanSegment(file, report: scan!.reportUpload),
+          retain: (file) async {
+            final state = _ScanUpload();
+            final saved = await store.retain(file, state.toJson());
+            scanUploads[saved.path] = state;
+            return saved;
+          },
+          remove: (file) => store.remove(file.path),
+          recovered: [for (final entry in recovered) XFile(entry['path'] as String)],
         );
         if (!mounted) return;
         await Navigator.of(context, rootNavigator: true).push<void>(
@@ -1131,6 +1154,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     } finally {
       scan?.dispose();
       scanUploads.clear();
+      scanStore = null;
       if (mounted) await camera.interrupt();
       if (mounted) {
         setState(() => scanActive = false);
@@ -2310,9 +2334,27 @@ String captureStatusLabel(String status) => switch (status) {
 };
 
 class _ScanUpload {
-  final recordedAt = DateTime.now().toUtc();
+  _ScanUpload({DateTime? at}) : recordedAt = at ?? DateTime.now().toUtc();
+  final DateTime recordedAt;
   final reserve = Mutation(), complete = Mutation();
   Json? capture;
   String? resumeUrl;
   bool uploaded = false;
+  Json toJson() => {
+    'recorded_at': recordedAt.toIso8601String(),
+    'reserve_key': reserve.key,
+    'complete_key': complete.key,
+    'capture': capture,
+    'resume_url': resumeUrl,
+    'uploaded': uploaded,
+  };
+  factory _ScanUpload.fromJson(Json data) {
+    final state = _ScanUpload(at: DateTime.parse(data['recorded_at'] as String));
+    state.reserve.key = data['reserve_key'] as String;
+    state.complete.key = data['complete_key'] as String;
+    state.capture = (data['capture'] as Map?)?.cast<String, dynamic>();
+    state.resumeUrl = data['resume_url'] as String?;
+    state.uploaded = data['uploaded'] == true;
+    return state;
+  }
 }

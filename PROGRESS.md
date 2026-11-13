@@ -2,6 +2,13 @@
 
 **Reviewed:** 13 November 2026 (Asia/Kolkata)
 
+## Pending-media recovery and attendance response — 13 November 2026
+
+- Implemented Student web IndexedDB recovery for one private pending enrolment clip and upload checkpoint; Teacher Android now retains queued classroom segments and idempotent upload state per account/institute/session for retry after route or process interruption. Logout, explicit discard, success and 24-hour expiry clean up pending media. The original retention time survives checkpoint updates.
+- Both web capture flows now use pinned same-origin MediaPipe runtime and model assets with provenance and licence files. Chrome initialized both models with external hosts blocked; a browser reload recovered and cleared a Student test clip. Student attendance subjects now include enrolled subjects outside the loaded history page; Student history omits biometric similarity and uses per-student JSON extraction without a schema migration.
+- Local checks: 65 API, 56 worker, 72 shared, 22 Student, 85 Teacher and 21 capture tests passed; Flutter analysis and API/worker Ruff clean; nine Teacher browser scanner tests passed. Both web and signed arm64 Android builds completed during implementation. A synthetic local 5,000-session × 25-mark JSON extraction check took 17.744 ms with array expansion and 16.519 ms with the selected path query; this is not an end-to-end or production latency claim.
+- Deployment and signed-device camera acceptance remain to be recorded below. Do not treat APK compilation or model initialization as a physical camera validation.
+
 ## Frontend modernization, first verified stage — 13 November 2026
 
 - Implemented shared Notifications navigation and labelled session restoration, Teacher subject-tab deep links and retryable join-request failure, batched Teacher Account statistics, and Student subject join/history and web camera focus/guidance improvements in commits `3be26df`, `e0f2216`, and `0647bfc`.

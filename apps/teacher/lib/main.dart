@@ -3,6 +3,7 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'teacher_account.dart';
 import 'teacher_admin.dart';
 import 'teacher_classes.dart';
+import 'classroom_pending.dart';
 import 'teacher_notifications.dart';
 import 'teacher_sessions.dart';
 
@@ -14,4 +15,7 @@ void main() => launchProduct(
   adminBuilder: (_) => const TeacherAdmin(),
   accountStatsBuilder: (_) => const TeacherAccountStats(),
   notificationsLoader: teacherNotifications,
+  configure: (services) async {
+    services.clearPrivateMedia = ClassroomPending.clearAll;
+  },
 );

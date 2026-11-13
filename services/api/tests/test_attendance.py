@@ -87,6 +87,18 @@ async def test_session_roster_manual_publication_correction_history(bio):
     own = await b.client.get("/v1/me/attendance", headers=b.headers("student1"))
     assert own.status_code == 200, own.text
     assert own.json()["summary"]["percentage"] == 100 and len(own.json()["items"]) == 1
+    # Legacy immutable snapshots may contain recognition scores. They stay
+    # available to authorized review, but must not enter the Student response.
+    with connect(b.urls["owner"]) as c:
+        c.execute(
+            """UPDATE app.publications SET snapshot_json = jsonb_set(
+                snapshot_json, '{records,0,evidence_summary}',
+                '{"median_similarity":0.9,"hits":2}'::jsonb)
+            WHERE session_id=%s AND revision=1""",
+            (sid,),
+        )
+    own = await b.client.get("/v1/me/attendance", headers=b.headers("student1"))
+    assert own.json()["items"][0]["evidence_summary"] == {}
     other = await b.client.get("/v1/me/attendance", headers=b.headers("student2"))
     assert other.json()["items"] == [] and other.json()["summary"]["percentage"] is None
     current = (await b.client.get(f"/v1/sessions/{sid}", headers=b.headers("teacher"))).json()

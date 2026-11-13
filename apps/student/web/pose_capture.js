@@ -163,10 +163,11 @@ window.FaceTrackCapture = {
 
     let waitingForGuide = true, guideTimeout;
     const loadGuide = async () => {
-      const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs');
-      const files = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm');
+      const asset = path => new URL(`vendor/mediapipe/${path}`, document.baseURI).href;
+      const vision = await import(asset('vision_bundle.mjs'));
+      const files = await vision.FilesetResolver.forVisionTasks(asset('wasm'));
       const detector = await vision.FaceLandmarker.createFromOptions(files, {
-        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' },
+        baseOptions: { modelAssetPath: asset('face_landmarker.task') },
         runningMode: 'VIDEO', numFaces: 2, outputFacialTransformationMatrixes: true,
       });
       if (!waitingForGuide || stopped) { detector.close(); return null; }
