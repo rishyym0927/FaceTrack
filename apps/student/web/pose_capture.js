@@ -8,10 +8,15 @@ window.FaceTrackCapture = {
     const earliestStopMs = 12000;
     const maximumMs = 25000;
     const root = document.createElement('div');
+    const previousFocus = document.activeElement;
+    root.setAttribute('role', 'dialog');
+    root.setAttribute('aria-modal', 'true');
+    root.setAttribute('aria-labelledby', 'face-capture-title');
     root.style.cssText = 'position:fixed;inset:0;z-index:10000;background:#f3f7f5;font-family:system-ui,sans-serif;color:#17392f;overflow:auto';
     const card = document.createElement('div');
     card.style.cssText = 'box-sizing:border-box;min-height:100%;max-width:1000px;margin:auto;display:flex;flex-direction:column;justify-content:center;padding:16px max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))';
     const title = document.createElement('h2');
+    title.id = 'face-capture-title';
     title.textContent = 'Record your face';
     title.style.cssText = 'font-size:22px;margin:0 0 12px';
     const stage = document.createElement('div');
@@ -32,7 +37,6 @@ window.FaceTrackCapture = {
     prompt.style.cssText = 'font-size:22px;font-weight:650;margin:6px 0 2px';
     prompt.textContent = 'Allow camera access';
     const hint = document.createElement('div');
-    hint.setAttribute('aria-live', 'polite');
     hint.style.cssText = 'color:#48645a';
     const circles = document.createElement('div');
     circles.style.cssText = 'display:flex;gap:9px;margin:4px 0;flex-wrap:wrap';
@@ -54,6 +58,21 @@ window.FaceTrackCapture = {
     card.append(title, stage, rotateButton, prompt, hint, circles, status, cameraSelect, startButton, stopButton);
     root.append(card);
     document.body.append(root);
+    const background = [...document.body.children].filter(element => element !== root)
+      .map(element => [element, element.inert]);
+    background.forEach(([element]) => { element.inert = true; });
+    const handleKeydown = event => {
+      if (event.key === 'Escape') { event.preventDefault(); stop(true); return; }
+      if (event.key !== 'Tab') return;
+      const controls = [...root.querySelectorAll('button:not([disabled]),select:not([disabled])')]
+        .filter(element => !element.hidden && element.getClientRects().length);
+      if (!controls.length) return;
+      const first = controls[0], last = controls[controls.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    };
+    root.addEventListener('keydown', handleKeydown);
+    stopButton.focus();
 
     let stream, recorder, landmarker, interval, started, recordedMs = 0, resolveStopped, resolveStart;
     let latest = { allCaptured: false, completed: [], current: order[0], hint: '' };
@@ -83,18 +102,29 @@ window.FaceTrackCapture = {
     };
     const chunks = [];
     const stoppedPromise = new Promise(resolve => { resolveStopped = resolve; });
+    const poseChips = order.map(pose => {
+      const item = document.createElement('span');
+      item.dataset.pose = pose;
+      return item;
+    });
+    circles.append(...poseChips);
     const render = () => {
-      prompt.textContent = latest.current ? `Look ${latest.current}` : 'All directions captured';
-      hint.textContent = latest.allCaptured
+      const nextPrompt = latest.current ? `Look ${latest.current}` : 'All directions captured';
+      if (prompt.textContent !== nextPrompt) prompt.textContent = nextPrompt;
+      const nextHint = latest.allCaptured
         ? 'Keep facing the camera until recording stops automatically.'
         : latest.hint || 'Keep only your face in the guide';
-      circles.replaceChildren(...order.map(pose => {
-        const item = document.createElement('span');
+      if (hint.textContent !== nextHint) hint.textContent = nextHint;
+      poseChips.forEach((item, index) => {
+        const pose = order[index];
         const done = latest.completed.includes(pose);
-        item.textContent = `${done ? '✓ ' : '○ '}${pose}`;
-        item.style.cssText = `border-radius:20px;padding:7px 10px;font-size:13px;background:${done ? '#d4f3e5' : '#edf2ef'};color:#17392f`;
-        return item;
-      }));
+        const state = done ? 'done' : 'pending';
+        if (item.dataset.state !== state) {
+          item.dataset.state = state;
+          item.textContent = `${done ? '✓ ' : '○ '}${pose}`;
+          item.style.cssText = `border-radius:20px;padding:7px 10px;font-size:13px;background:${done ? '#d4f3e5' : '#edf2ef'};color:#17392f`;
+        }
+      });
       oval.style.borderColor = latest.hint === 'Hold still…' || latest.allCaptured ? '#52df9d' : '#e9f7f0';
       const scale = Math.min(frame.clientWidth / video.videoWidth, frame.clientHeight / video.videoHeight);
       if (Number.isFinite(scale) && scale > 0) {
@@ -131,6 +161,19 @@ window.FaceTrackCapture = {
     window.FaceTrackCapture._stop = stop;
     stopButton.onclick = () => stop(true);
 
+    let waitingForGuide = true, guideTimeout;
+    const loadGuide = async () => {
+      const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs');
+      const files = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm');
+      const detector = await vision.FaceLandmarker.createFromOptions(files, {
+        baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' },
+        runningMode: 'VIDEO', numFaces: 2, outputFacialTransformationMatrixes: true,
+      });
+      if (!waitingForGuide || stopped) { detector.close(); return null; }
+      return detector;
+    };
+    let guidePromise, preloadedGuide;
+
     try {
       stream = await navigator.mediaDevices.getUserMedia({
         video: { facingMode: 'user', width: { ideal: 1280 }, height: { ideal: 720 } },
@@ -141,6 +184,10 @@ window.FaceTrackCapture = {
       updateMirror();
       await video.play();
       fitStage();
+      guidePromise = loadGuide().then(detector => {
+        preloadedGuide = detector;
+        return detector;
+      }).catch(() => null);
       window.addEventListener('resize', fitStage);
       const devices = (await navigator.mediaDevices.enumerateDevices())
         .filter(device => device.kind === 'videoinput' && device.deviceId);
@@ -184,20 +231,9 @@ window.FaceTrackCapture = {
       cameraSelect.disabled = true;
       startButton.remove();
       prompt.textContent = 'Preparing face guide…';
-      let waitingForGuide = true, guideTimeout;
-      const loadGuide = async () => {
-        const vision = await import('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/vision_bundle.mjs');
-        const files = await vision.FilesetResolver.forVisionTasks('https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.35/wasm');
-        const detector = await vision.FaceLandmarker.createFromOptions(files, {
-          baseOptions: { modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task' },
-          runningMode: 'VIDEO', numFaces: 2, outputFacialTransformationMatrixes: true,
-        });
-        if (!waitingForGuide || stopped) { detector.close(); return null; }
-        return detector;
-      };
       try {
         landmarker = await Promise.race([
-          loadGuide().catch(() => null),
+          guidePromise,
           stoppedPromise.then(() => null),
           new Promise(resolve => { guideTimeout = setTimeout(() => resolve(null), 8000); }),
         ]);
@@ -279,13 +315,17 @@ window.FaceTrackCapture = {
       if (cancelled || blob.size === 0 || recordedMs < earliestStopMs) return null;
       return URL.createObjectURL(blob);
     } finally {
+      waitingForGuide = false;
+      clearTimeout(guideTimeout);
       if (window.FaceTrackCapture._stop === stop) window.FaceTrackCapture._stop = null;
       clearInterval(interval);
       stream?.getTracks().forEach(track => track.stop());
-      landmarker?.close();
+      (landmarker || preloadedGuide)?.close();
       resize.disconnect();
       window.removeEventListener('resize', fitStage);
       root.remove();
+      background.forEach(([element, wasInert]) => { element.inert = wasInert; });
+      if (previousFocus?.isConnected) previousFocus.focus();
     }
   },
 };

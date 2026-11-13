@@ -30,6 +30,7 @@ void main() {
       });
       h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
         if (r.path == '/v1/me') return jsonResponse(h.account);
+        if (r.path == '/v1/offerings/class') return jsonResponse({}, 404);
         if (r.path == '/v1/me/attendance-disputes') {
           return jsonResponse({'items': [], 'next_cursor': null});
         }

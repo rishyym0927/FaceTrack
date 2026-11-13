@@ -41,7 +41,7 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
 
   Future<void> join() async {
     final code = TextEditingController();
-    await showDialog<bool>(
+    final submitted = await showDialog<bool>(
       context: context,
       builder: (_) => ActionDialog(
         title: 'Join a subject',
@@ -78,7 +78,7 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
       ),
     );
     code.dispose();
-    if (mounted) await controller.load();
+    if (mounted && submitted == true) await controller.load();
   }
 
   @override

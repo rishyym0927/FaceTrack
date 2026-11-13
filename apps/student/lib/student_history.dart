@@ -16,6 +16,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
   late final String institute;
   late final PagedController<Json> controller;
   Json? summary;
+  Offering? subject;
   Map<String, Json> disputes = {};
   bool disputesReady = false, disputeLoadFailed = false;
   int disputeGeneration = 0;
@@ -50,12 +51,22 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         rethrow;
       }
     });
+    loadSubject();
     refresh();
     watchLifecycle();
   }
 
   @override
   void refreshOnResume() => refresh();
+
+  Future<void> loadSubject() async {
+    try {
+      final loaded = await api.offering(institute, widget.offering);
+      if (mounted) setState(() => subject = loaded);
+    } catch (_) {
+      // Published attendance remains available if the subject label fails.
+    }
+  }
 
   Future<void> refresh() async {
     await Future.wait([controller.load(), loadDisputes()]);
@@ -65,7 +76,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
     if (!mounted) return;
     final generation = ++disputeGeneration;
     setState(() {
-      disputesReady = false;
+      disputesReady = disputes.isNotEmpty;
       disputeLoadFailed = false;
     });
     try {
@@ -217,7 +228,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         label: const Text('Your subjects'),
       ),
       PageHeader(
-        title: 'Your published attendance',
+        title: subject?.title ?? 'Your published attendance',
         action: OutlinedButton(
           onPressed: refresh,
           child: const Text('Refresh'),
