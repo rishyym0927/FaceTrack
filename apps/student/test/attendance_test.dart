@@ -167,8 +167,8 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(attendanceCalls, 5);
-      expect(find.textContaining('latest 5 published records'), findsOneWidget);
+      expect(attendanceCalls, 1);
+      expect(find.textContaining('latest 1 published records'), findsOneWidget);
       expect(find.text('Records'), findsOneWidget);
 
       failure = 503;
@@ -182,7 +182,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Access unavailable'), findsOneWidget);
       expect(find.text('Records'), findsNothing);
-      expect(find.textContaining('latest 5 published records'), findsNothing);
+      expect(find.textContaining('latest 1 published records'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );

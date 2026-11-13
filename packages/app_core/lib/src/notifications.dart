@@ -152,21 +152,36 @@ class NotificationCenter extends ChangeNotifier {
     final stale =
         loadedAt == null || DateTime.now().difference(loadedAt!) > maxAge;
     // Calls in the same frame (shell rebuilds, page open) share one load.
-    if (inFlight != null && _inFlightKey == key) return;
+    if (inFlight != null && _inFlightKey == key) {
+      if (force) _refreshAfterFlight = true;
+      return;
+    }
+    _refreshAfterFlight = false;
     if (key == _key && !stale && !force) return;
     late final Future<void> run;
-    run = Future.microtask(
-      () => reload(key, () => force
-          ? ApiClient.freshReads(() => loader(api, institute, auth))
-          : loader(api, institute, auth)),
-    ).whenComplete(() {
-      if (identical(inFlight, run)) inFlight = null;
-    });
+    run =
+        Future.microtask(
+          () => reload(
+            key,
+            () => force
+                ? ApiClient.freshReads(() => loader(api, institute, auth))
+                : loader(api, institute, auth),
+          ),
+        ).whenComplete(() {
+          if (!identical(inFlight, run)) return;
+          inFlight = null;
+          if (_refreshAfterFlight &&
+              auth.institute == institute &&
+              auth.account?.userId == user) {
+            ensureFresh(api, auth, force: true);
+          }
+        });
     inFlight = run;
     _inFlightKey = key;
   }
 
   String? _inFlightKey;
+  bool _refreshAfterFlight = false;
 
   /// The load in progress, if any; completes when the list is replaced.
   Future<void>? inFlight;

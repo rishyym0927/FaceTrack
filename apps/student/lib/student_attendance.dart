@@ -99,7 +99,8 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
   bool loading = true;
   Object? error;
   List<Json> records = [];
-  bool hasOlderRecords = false;
+  String? olderCursor;
+  bool loadingOlder = false;
   List<Json> disputes = [];
   final titles = <String, Offering>{};
   final failed = <String>[];
@@ -129,6 +130,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
     final generation = ++_generation;
     setState(() {
       loading = true;
+      loadingOlder = false;
       error = null;
     });
     final missing = <String>[];
@@ -162,34 +164,29 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
       }
     }
 
-    Future<(List<Json>, bool)> attendanceRows() async {
-      final rows = <Json>[];
-      String? cursor;
-      for (var pageNumber = 0; pageNumber < 5; pageNumber++) {
-        final page = await api.send(
-          'GET',
-          '/v1/me/attendance',
-          institute: institute,
-          query: {'limit': 200, 'cursor': ?cursor},
-        );
-        rows.addAll((page['items'] as List).cast<Json>());
-        cursor = page['next_cursor'] as String?;
-        if (cursor == null || !mounted || generation != _generation) break;
-      }
-      return (rows, cursor != null);
-    }
-
     try {
-      final results = await Future.wait([
-        attendanceRows(),
-        subjects(),
-        disputeRows(),
-      ]);
+      final page = await api.send(
+        'GET',
+        '/v1/me/attendance',
+        institute: institute,
+        query: {'limit': 200},
+      );
       if (!mounted || generation != _generation) return;
       setState(() {
-        final (loadedRecords, hasMore) = results[0] as (List<Json>, bool);
-        records = loadedRecords;
-        hasOlderRecords = hasMore;
+        records = (page['items'] as List).cast<Json>();
+        olderCursor = page['next_cursor'] as String?;
+        disputes = [];
+        titles.clear();
+        failed.clear();
+        if (subject != null &&
+            !records.any((r) => r['offering_id'] == subject)) {
+          subject = null;
+        }
+        loading = false;
+      });
+      await Future.wait([subjects(), disputeRows()]);
+      if (!mounted || generation != _generation) return;
+      setState(() {
         disputes = queries;
         titles
           ..clear()
@@ -197,11 +194,6 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         failed
           ..clear()
           ..addAll(missing);
-        if (subject != null &&
-            !records.any((r) => r['offering_id'] == subject)) {
-          subject = null;
-        }
-        loading = false;
       });
     } catch (e) {
       if (!mounted || generation != _generation) return;
@@ -209,7 +201,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         error = e;
         if (e is AppFailure && [401, 403, 404].contains(e.status)) {
           records = [];
-          hasOlderRecords = false;
+          olderCursor = null;
           disputes = [];
           titles.clear();
           failed.clear();
@@ -219,6 +211,43 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         }
         loading = false;
       });
+    }
+  }
+
+  Future<void> loadOlder() async {
+    final cursor = olderCursor;
+    if (cursor == null || loading || loadingOlder) return;
+    final generation = _generation;
+    setState(() => loadingOlder = true);
+    try {
+      final page = await api.send(
+        'GET',
+        '/v1/me/attendance',
+        institute: institute,
+        query: {'limit': 200, 'cursor': cursor},
+      );
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        final ids = records.map((row) => row['session_id']).toSet();
+        records = [
+          ...records,
+          ...(page['items'] as List).cast<Json>().where(
+            (row) => ids.add(row['session_id']),
+          ),
+        ];
+        olderCursor = page['next_cursor'] as String?;
+      });
+    } catch (failure) {
+      if (!mounted || generation != _generation) return;
+      if (failure is AppFailure && [401, 403, 404].contains(failure.status)) {
+        await load();
+      } else {
+        showMessage(context, 'Could not load older records. Try again.');
+      }
+    } finally {
+      if (mounted && generation == _generation) {
+        setState(() => loadingOlder = false);
+      }
     }
   }
 
@@ -293,16 +322,23 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
               style: TextStyle(color: Theme.of(context).colorScheme.error),
             ),
           ),
-        if (hasOlderRecords)
+        if (olderCursor != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
             child: Text(
-              'Records, filters and trends cover the latest ${records.length} published records. Open a subject to see its older records.',
+              'Records, filters and trends cover the latest ${records.length} published records. Load older records to extend this view.',
             ),
           ),
         _filters(context),
         const SizedBox(height: 16),
         _records(context, listed),
+        if (olderCursor != null)
+          OutlinedButton(
+            onPressed: loading || loadingOlder ? null : loadOlder,
+            child: Text(
+              loadingOlder ? 'Loading older records…' : 'Load older records',
+            ),
+          ),
         ExpansionTile(
           title: const Text('Attendance trends'),
           children: [

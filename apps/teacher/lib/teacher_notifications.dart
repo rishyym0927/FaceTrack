@@ -2,10 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
-/// Per-subject checks cost four requests each, so an admin who can see every
-/// subject only gets the first [subjectCap] checked; the panel says so.
-const subjectCap = 20;
-
 DateTime? _time(Object? v) => v is String ? DateTime.tryParse(v) : null;
 
 String _date(DateTime t) {
@@ -213,26 +209,28 @@ Future<NoticeBatch> teacherNotifications(
   AuthController auth,
 ) async {
   final c = NoticeCollector();
-  final offerings = <Offering>[];
+  var offeringCount = 0;
+  var truncated = false;
   await c.source('subjects', () async {
-    String? cursor;
-    var pages = 0;
-    do {
-      final page = await api.offerings(institute, cursor: cursor);
-      offerings.addAll(page.items);
-      cursor = page.nextCursor;
-    } while (cursor != null && ++pages < 10);
-    return const [];
+    final result = await api.send(
+      'GET',
+      '/v1/teacher/work-summary',
+      institute: institute,
+    );
+    final subjects = (result['items'] as List).cast<Json>();
+    offeringCount = subjects.length;
+    truncated = result['truncated'] == true;
+    return [
+      for (final subject in subjects)
+        ...subjectNotices(
+          SubjectWork(Offering.fromJson(subject))
+            ..joinRequests = subject['join_requests'] as int
+            ..faceReviews = subject['face_reviews'] as int
+            ..openQueries = subject['open_queries'] as int
+            ..sessions = (subject['sessions'] as List).cast<Json>(),
+        ),
+    ];
   });
-  final checked = offerings.take(subjectCap).toList();
-  final work = await pooled(checked, (o) => loadSubjectWork(api, institute, o));
-  for (final w in work) {
-    c.items.addAll(subjectNotices(w));
-    for (final f in w.failed) {
-      final label = '$f (${w.offering.courseCode})';
-      if (!c.failed.contains(label)) c.failed.add(label);
-    }
-  }
   if (isActiveAdmin(auth) && !c.failed.contains('subjects')) {
     await c.source('admin', () async {
       final teachers = await fetchAllPages(
@@ -247,15 +245,13 @@ Future<NoticeBatch> teacherNotifications(
         c.failed.add('student directory');
       }
       return adminNotices(
-        offerings: offerings.length,
+        offerings: offeringCount,
         teachers: teachers,
         students: students,
       );
     });
   }
   return c.done(
-    note: offerings.length > subjectCap
-        ? 'Checked the first $subjectCap of ${offerings.length} subjects. Open a subject to see all of its items.'
-        : null,
+    note: truncated ? 'Showing work for the first 100 subjects.' : null,
   );
 }
