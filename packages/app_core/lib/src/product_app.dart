@@ -217,7 +217,22 @@ class _ProductAppState extends ConsumerState<ProductApp> {
           path: '/loading',
           pageBuilder: (_, s) => fadeThroughPage(
             s,
-            const Scaffold(body: Center(child: CircularProgressIndicator())),
+            Scaffold(
+              body: Center(
+                child: Semantics(
+                  liveRegion: true,
+                  label: 'Restoring your account',
+                  child: const Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      CircularProgressIndicator(),
+                      SizedBox(height: 16),
+                      Text('Restoring your account…'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
         GoRoute(
@@ -465,8 +480,21 @@ class ProductShell extends StatelessWidget {
         const NavTab('/account', 'Account', Icons.person_outline, Icons.person),
       ];
       var index = tabs.indexWhere((t) => path == t.path);
-      if (index < 0)
-        index = 0; // subject/session detail routes fall under Subjects
+      if (index < 0 &&
+          (path.startsWith('/classes/') || path.startsWith('/sessions/'))) {
+        index = 0;
+      }
+      // Notifications has a dedicated destination so the active page is clear.
+      if (notifications != null) {
+        tabs.add(const NavTab(
+          '/notifications',
+          'Notifications',
+          Icons.notifications_outlined,
+          Icons.notifications,
+        ));
+        index = tabs.indexWhere((t) => path == t.path);
+      }
+      if (index < 0) index = 0;
       void navigate(int i) => context.go(tabs[i].path);
       return LayoutBuilder(
         builder: (context, c) {
@@ -476,6 +504,13 @@ class ProductShell extends StatelessWidget {
               MediaQuery.textScalerOf(context).scale(1) <= 1.3;
           return Scaffold(
             appBar: AppBar(
+              leading: path == '/notifications'
+                  ? IconButton(
+                      tooltip: 'Back to subjects',
+                      icon: const Icon(Icons.arrow_back),
+                      onPressed: () => context.go('/classes'),
+                    )
+                  : null,
               titleSpacing: wide ? 24 : 16,
               title: Row(
                 mainAxisSize: MainAxisSize.min,
@@ -572,7 +607,7 @@ class ProductShell extends StatelessWidget {
                   ),
               ],
             ),
-            bottomNavigationBar: wide
+            bottomNavigationBar: wide || c.maxHeight < 480
                 ? null
                 : NavigationBar(
                     selectedIndex: index,
@@ -589,7 +624,7 @@ class ProductShell extends StatelessWidget {
             body: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (wide)
+                if (wide || c.maxHeight < 480)
                   NavigationRail(
                     selectedIndex: index,
                     labelType: NavigationRailLabelType.all,
