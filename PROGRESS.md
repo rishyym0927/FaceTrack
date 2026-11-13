@@ -2,6 +2,12 @@
 
 **Reviewed:** 13 November 2026 (Asia/Kolkata)
 
+## Performance rollout, first stages
+
+- Azure API `521224b` adds checkout timings to request logs, combines restricted-role probes, batches capture eligibility, recognition input and manual marks, aggregates per-offering attendance in SQL, and serves a compact authorized Teacher work summary. Both Azure web apps use `fa58708`, which uses the summary for Teacher notifications and the home attention card, queues a forced notification refresh behind an older request, and shows Student attendance before supporting details with on-demand older pages. The prior API sources were retained in the private Azure release directory.
+- A read-only Mac comparison using six hosted subjects replayed the old API request pattern with two concurrent subject reads. It used 25 requests, 6,245 decoded response bytes and 14.89 seconds in one run. The new summary used one request, 2,833 decoded bytes and a 1.00-second median over three samples. This measures API data retrieval on the same deployment, not complete app startup or browser transfer bytes. Azure confirmed timing logs and readiness. 65 API, 84 Teacher, 21 Student, 72 shared Flutter and 9 browser scanner tests passed. Frozen ML receipt passed 16/16.
+- Remaining: establish a matched Chrome and signed-Android staging baseline with synthetic fixtures, complete dashboard aggregation and session/report revision polling, then tackle recognition completion batching and evidence-based indexes and polling. Browser camera overlap and preloading, end-to-end queue and worker telemetry, isolated inference experiments, and physical camera-to-publication acceptance are still open.
+
 ## Attendance eligibility and loading — 13 November
 
 - Deployed `022c020` to Azure for both web apps and the API. New sessions freeze only subject-approved students with compatible approved face enrolments. Older session snapshots and publications retain their original roster. Teacher Students now has separate approved and pending-face lists. Live ADSA responses returned 10 approved and 15 pending from 25 memberships, with `no-store`.
