@@ -2,6 +2,12 @@
 
 **Reviewed:** 13 November 2026 (Asia/Kolkata)
 
+## Frontend modernization, first verified stage — 13 November 2026
+
+- Implemented shared Notifications navigation and labelled session restoration, Teacher subject-tab deep links and retryable join-request failure, batched Teacher Account statistics, and Student subject join/history and web camera focus/guidance improvements in commits `3be26df`, `e0f2216`, and `0647bfc`.
+- Shared 72, Student 21, and Teacher 84 Flutter tests passed. Flutter analysis passed for shared, Student and Teacher. Nine browser scanner tests and Student browser script syntax passed. Both production web builds completed. Physical Android and iPhone camera checks remain pending. The earlier uncommitted Teacher capture-quality edits remain outside these commits.
+- Remaining approved plan work: independent error states throughout every list, attendance history and Admin lazy loading, notification query bounds, stage-by-stage responsive and screen-reader walkthroughs, and matched Chrome and Android performance baseline. The versioned consent/manual-attendance wording conflicts with current new-session eligibility and needs an explicit policy decision before revision.
+
 ## iPhone TestFlight preparation
 
 - Generated separate Student and Teacher iPhone projects with camera permission strings, distinct app IDs, existing FaceTrack icons and iOS 15.5 deployment targets for the installed ML Kit dependency. Added AVFoundation BGRA frame handling for live guidance and documented [build, signing and TestFlight steps](docs/IOS_TESTFLIGHT.md).
