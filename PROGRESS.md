@@ -2,6 +2,12 @@
 
 **Reviewed:** 13 November 2026 (Asia/Kolkata)
 
+## Attendance eligibility and loading — 13 November
+
+- Deployed `022c020` to Azure for both web apps and the API. New sessions freeze only subject-approved students with compatible approved face enrolments. Older session snapshots and publications retain their original roster. Teacher Students now has separate approved and pending-face lists. Live ADSA responses returned 10 approved and 15 pending from 25 memberships, with `no-store`.
+- Azure access-log sample showed approximately 9-second p95 on frequent faculty requests. Removed duplicate home subject-work fan-out, deferred unopened tab lists, replaced per-student session-open queries with a set-based insert, and removed completed-response caching for Student subject enrolments and Teacher attendance summaries. Three post-deploy ADSA calls took 1.27–1.60 seconds from the Mac; no matched page-load benchmark was run.
+- 64 API, 84 Teacher, 21 Student and 72 shared-core tests passed, with clean analysis and API lint. Physical Android walkthrough and production attendance publication were not exercised. The consent notice still references a manual-attendance fallback. Confirm and update the participant-facing wording before wider rollout.
+
 ## Teacher approved roster filter — 13 November
 
 - Deployed API revision `138d30f` to Azure. The existing active-roster query now requires current subject membership, faculty-approved face enrolment, active consent and compatible stored templates. Unfiltered roster and session attendance are independent of the display filter.
