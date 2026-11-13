@@ -30,6 +30,16 @@ CURRENT_RECOGNITION_PROFILE = """SELECT m.id AS model,p.id AS profile
       ON p.institute_id=m.institute_id AND p.model_release_id=m.id
     WHERE m.institute_id=:i AND m.status='enabled' AND p.status='enabled'
     ORDER BY p.created_at DESC,p.id DESC LIMIT 1"""
+# Both callers alias the current profile as p and the roster student as s.
+COMPATIBLE_FACE_SET = """SELECT t.id FROM app.template_sets t
+    JOIN app.enrollment_attempts a ON (a.institute_id,a.id)=(t.institute_id,t.attempt_id)
+    JOIN app.consents c ON (c.institute_id,c.id)=(a.institute_id,a.consent_id)
+    WHERE t.institute_id=s.institute_id AND t.student_id=s.id
+      AND t.model_release_id=p.model AND t.recognition_profile_id=p.profile
+      AND t.status='active' AND a.status='active' AND a.reviewed_by IS NOT NULL
+      AND c.withdrawn_at IS NULL
+      AND (SELECT count(*) FROM app.face_templates f
+           WHERE (f.institute_id,f.template_set_id)=(t.institute_id,t.id)) BETWEEN 3 AND 5"""
 
 
 def now():

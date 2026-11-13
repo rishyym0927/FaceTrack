@@ -224,53 +224,42 @@ async def open_session(conn, actor, institute, identifier, version, key, req):
         raise APIError(409, "MODEL_UNAVAILABLE", "No approved model/profile is configured.")
     people = await many(
         conn,
-        """SELECT s.* FROM app.course_enrollments e JOIN app.students s ON s.institute_id=e.institute_id AND s.id=e.student_id
-    WHERE e.institute_id=:i AND e.offering_id=:o AND e.status='active' AND e.effective_from<=now()
-    AND (e.effective_until IS NULL OR e.effective_until>now()) AND s.status='approved' ORDER BY s.id""",
-        {"i": institute, "o": s["offering_id"]},
+        f"""WITH eligible_roster AS (
+          INSERT INTO app.session_roster(
+            institute_id,session_id,student_id,name_snapshot,enrollment_number_snapshot,
+            template_set_id,template_epoch,recognition_eligible
+          )
+          SELECT e.institute_id,:session,s.id,s.official_name,s.enrollment_number,
+                 face.id,s.template_epoch,true
+          FROM app.course_enrollments e
+          JOIN app.students s ON (s.institute_id,s.id)=(e.institute_id,e.student_id)
+          CROSS JOIN (SELECT CAST(:model AS uuid) AS model,CAST(:profile AS uuid) AS profile) p
+          CROSS JOIN LATERAL ({bio.COMPATIBLE_FACE_SET}) face
+          WHERE e.institute_id=:i AND e.offering_id=:o AND e.status='active'
+            AND e.effective_from<=now() AND (e.effective_until IS NULL OR e.effective_until>now())
+            AND app.biometric_student_active(s.id)
+          RETURNING institute_id,session_id,student_id,template_set_id,template_epoch
+        ), marks AS (
+          INSERT INTO app.attendance_records(institute_id,session_id,student_id)
+          SELECT institute_id,session_id,student_id FROM eligible_roster
+        )
+        SELECT student_id,template_set_id,template_epoch FROM eligible_roster ORDER BY student_id""",
+        {"i": institute, "o": s["offering_id"], "session": identifier, **config},
     )
-    frozen = []
-    for person in people:
-        t = await one(
-            conn,
-            """SELECT id FROM app.template_sets WHERE institute_id=:i AND student_id=:s AND status='active' AND model_release_id=:m AND recognition_profile_id=:p""",
-            {"i": institute, "s": person["id"], "m": config["model"], "p": config["profile"]},
+    if not people:
+        raise APIError(
+            409,
+            "NO_ATTENDANCE_ELIGIBLE",
+            "Approve at least one student's face enrolment before opening attendance.",
         )
-        valid = bool(
-            t and await eligible(conn, institute, person["id"], t["id"], person["template_epoch"])
-        )
-        await conn.execute(
-            text("""INSERT INTO app.session_roster(institute_id,session_id,student_id,name_snapshot,enrollment_number_snapshot,template_set_id,template_epoch,recognition_eligible)
-        VALUES(:i,:id,:s,:name,:num,:t,:epoch,:ok)"""),
-            {
-                "i": institute,
-                "id": identifier,
-                "s": person["id"],
-                "name": person["official_name"],
-                "num": person["enrollment_number"],
-                "t": t["id"] if valid else None,
-                "epoch": person["template_epoch"],
-                "ok": valid,
-            },
-        )
-        await conn.execute(
-            text(
-                "INSERT INTO app.attendance_records(institute_id,session_id,student_id,assessment_code) VALUES(:i,:id,:s,:code)"
-            ),
-            {
-                "i": institute,
-                "id": identifier,
-                "s": person["id"],
-                "code": None if valid else "template_ineligible",
-            },
-        )
-        frozen.append(
-            {
-                "student": str(person["id"]),
-                "template": str(t["id"]) if valid else None,
-                "epoch": person["template_epoch"],
-            }
-        )
+    frozen = [
+        {
+            "student": str(person["student_id"]),
+            "template": str(person["template_set_id"]),
+            "epoch": person["template_epoch"],
+        }
+        for person in people
+    ]
     row = dict(
         await one(
             conn,

@@ -197,7 +197,7 @@ Every tenant table above has `version`; institutes has timestamps but no optimis
 
 Approved course enrolment is the source of offering access. Entering a code grants only a request and limited visibility of that offering's summary. It grants no roster visibility, biometric access or attendance eligibility. Students have no institute-wide course catalogue. Rejected/withdrawn students contact faculty; entering another code cannot reactivate them. Active enrolment's effective start is set on approval/reactivation. Frozen session rosters preserve historical membership when a current enrolment changes.
 
-The Teacher subject list requests the active roster filter. That view requires current subject approval and an active, faculty-approved face enrolment with consent and three to five templates for the current recognition profile. Pending face reviews use a separate endpoint. Session rosters and manual attendance continue to use subject membership.
+The Teacher subject list requests the active roster filter. That view requires current subject approval and an active, faculty-approved face enrolment with consent and three to five templates for the current recognition profile. Pending face reviews use a separate endpoint. New sessions freeze only students who meet both subject and face enrolment requirements. The pending-face roster filter lists subject-approved students without compatible active face enrolment. Existing session rosters and publications retain their historical membership.
 
 Codes use 12 random characters from a human-readable alphabet, displayed as three groups, and expire after seven days or term end, whichever comes first. Lookup ignores spaces/hyphens/case. Rotation and requests lock the offering and revalidate the code to avoid races. Teacher retrieval/replay rechecks current assignment; rotated/expired code replay returns conflict. Encryption associated data binds institute/offering/code ID. Keep old key versions until their remaining codes expire or are rotated. No code in logs, audit summaries or idempotency JSON.
 
@@ -250,7 +250,7 @@ Lock session before attendance mutation; lock student before template activation
 
 Branches: scheduled/open → cancelled; closed → no_data when no usable evidence/manual assessment exists; no_data → review_required after teacher action. Finalized corrections create revision N+1; they do not reopen the session or overwrite old publications.
 
-At open, freeze active course membership in `session_roster` and initialize attendance rows as unresolved. Later course or section changes cannot rewrite historical rosters. Already accepted processing can finish after close. Finalization requires settled recognition jobs.
+At open, freeze eligible course members with approved compatible face enrolment in `session_roster` and initialize attendance rows as unresolved. Later course or section changes cannot rewrite historical rosters. Already accepted processing can finish after close. Finalization requires settled recognition jobs.
 
 ### Enrolment
 

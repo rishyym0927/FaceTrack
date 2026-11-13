@@ -56,14 +56,13 @@ RoutesAdapter _adapter(Harness h) => RoutesAdapter((r) async {
     });
   }
   if (r.path == '/v1/offerings/o1/roster') {
-    final requested = r.queryParameters['status'] == 'requested';
+    final status = r.queryParameters['status'];
     return jsonResponse({
-      'items': requested
-          ? [_person('1', 'Asha Verma', 'requested')]
-          : [
-              _person('2', 'Bina Rao', 'active'),
-              _person('3', 'Chitra Das', 'active'),
-            ],
+      'items': switch (status) {
+        'requested' => [_person('1', 'Asha Verma', 'requested')],
+        'pending_face' => [_person('3', 'Chitra Das', 'active')],
+        _ => [_person('2', 'Bina Rao', 'active')],
+      },
       'next_cursor': null,
     });
   }
@@ -178,7 +177,10 @@ void main() {
         await tester.pumpAndSettle();
         expect(find.text('Waiting for approval · 1'), findsOneWidget);
         expect(find.text('Asha Verma'), findsOneWidget);
+        expect(find.text('Approved students'), findsOneWidget);
         expect(find.text('Bina Rao'), findsOneWidget);
+        expect(find.text('Pending face enrolment'), findsOneWidget);
+        expect(find.text('Chitra Das'), findsOneWidget);
         expect(find.text('Approve'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },

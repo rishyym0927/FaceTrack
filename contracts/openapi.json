@@ -1725,7 +1725,8 @@
                     "requested",
                     "active",
                     "rejected",
-                    "withdrawn"
+                    "withdrawn",
+                    "pending_face"
                   ],
                   "type": "string"
                 },

@@ -4,8 +4,7 @@ import base64
 from datetime import date, timedelta
 
 import pytest
-
-from test_attendance import open_session
+from test_attendance import approve_faces, open_session
 from test_biometrics import bio as bio
 
 from tools.seed import connect
@@ -21,6 +20,7 @@ async def allow_documents(b):
 async def test_report_job_snapshot_private_artifacts_and_retry(bio):
     b = bio
     await allow_documents(b)
+    await approve_faces(b, "student1")
     s = await open_session(b)
     close = await b.client.post(
         f"/v1/sessions/{s['id']}/close",
@@ -91,6 +91,7 @@ async def test_report_job_snapshot_private_artifacts_and_retry(bio):
 async def test_failed_report_retry_requires_authorized_teacher_and_preserves_snapshot(bio):
     b = bio
     await allow_documents(b)
+    await approve_faces(b, "student1")
     s = await open_session(b)
     close = await b.client.post(
         f"/v1/sessions/{s['id']}/close",
@@ -101,17 +102,25 @@ async def test_failed_report_retry_requires_authorized_teacher_and_preserves_sna
         await b.client.get(f"/v1/sessions/{s['id']}/reports", headers=b.headers("teacher"))
     ).json()["items"][0]
     with connect(b.urls["owner"]) as c:
-        before = c.execute("SELECT snapshot_hash FROM app.reports WHERE id=%s", (report["id"],)).fetchone()[0]
+        before = c.execute(
+            "SELECT snapshot_hash FROM app.reports WHERE id=%s", (report["id"],)
+        ).fetchone()[0]
         c.execute("UPDATE app.reports SET status='failed' WHERE id=%s", (report["id"],))
         c.execute("UPDATE app.jobs SET state='failed' WHERE report_id=%s", (report["id"],))
     path = f"/v1/reports/{report['id']}/retry"
-    assert (await b.client.post(path, headers=b.headers("student1", key="retry-bad"))).status_code in (403, 404)
+    assert (
+        await b.client.post(path, headers=b.headers("student1", key="retry-bad"))
+    ).status_code in (403, 404)
     r = await b.client.post(path, headers=b.headers("teacher", key="retry-good"))
     assert r.status_code == 202, r.text
     assert r.json()["state"] == "queued"
-    assert (await b.client.post(path, headers=b.headers("teacher", key="retry-good"))).json() == r.json()
+    assert (
+        await b.client.post(path, headers=b.headers("teacher", key="retry-good"))
+    ).json() == r.json()
     with connect(b.urls["owner"]) as c:
-        after = c.execute("SELECT snapshot_hash,status FROM app.reports WHERE id=%s", (report["id"],)).fetchone()
+        after = c.execute(
+            "SELECT snapshot_hash,status FROM app.reports WHERE id=%s", (report["id"],)
+        ).fetchone()
     assert after == (before, "queued")
 
 

@@ -26,25 +26,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   bool preparing = false;
   int dashboardTick = 0;
 
-  /// Pending work per subject id, for the chips on each subject card.
-  Map<String, SubjectWork> work = {};
-  int _workGeneration = 0;
-
-  /// Same cap as the notification bell: the first 20 subjects.
-  Future<void> _loadWork() async {
-    final generation = ++_workGeneration;
-    final subjects = controller.items.take(20).toList();
-    final results = await pooled(subjects, (o) async {
-      try {
-        return await loadSubjectWork(api, institute, o);
-      } catch (_) {
-        return null;
-      }
-    });
-    if (!mounted || generation != _workGeneration) return;
-    setState(() => work = {for (final w in results.nonNulls) w.offering.id: w});
-  }
-
   @override
   void initState() {
     super.initState();
@@ -53,7 +34,7 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
     controller = PagedController(
       (cursor) => api.offerings(institute, cursor: cursor),
     );
-    controller.load().then((_) => _loadWork());
+    controller.load();
     watchLifecycle();
   }
 
@@ -65,7 +46,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   Future<void> refreshAll() async {
     if (mounted) setState(() => dashboardTick++);
     await controller.load();
-    await _loadWork();
   }
 
   @override
@@ -230,9 +210,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
             subtitle: o.subtitle,
             note: o.termTitle,
             onTap: () => open(o.id),
-            extra: work[o.id] == null
-                ? null
-                : SubjectWorkChips(work: work[o.id]!),
           ),
         ),
         const SizedBox(height: 28),
@@ -264,7 +241,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   late final ApiClient api;
   late final String institute;
   late Future<Offering> record;
-  late final PagedController<Enrollment> requests, students;
+  late final PagedController<Enrollment> requests, students, pendingFaces;
   late final PagedController<BiometricAttempt> faces;
   int tab = 3;
   bool loadingCode = false;
@@ -317,7 +294,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
       1,
       'Students',
       Icons.groups_outlined,
-      'Approve join requests after confirming each student belongs here; approved students join the next session.',
+      'Approve subject requests and check who still needs face enrolment.',
     ),
     (
       2,
@@ -351,6 +328,10 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     students = PagedController(
       (cursor) => api.roster(institute, widget.id, 'active', cursor: cursor),
     );
+    pendingFaces = PagedController(
+      (cursor) =>
+          api.roster(institute, widget.id, 'pending_face', cursor: cursor),
+    );
     faces = PagedController(
       (cursor) async => PageData.fromJson(
         await api.send(
@@ -362,9 +343,6 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
         BiometricAttempt.fromJson,
       ),
     );
-    requests.load();
-    students.load();
-    faces.load();
     _loadWork();
     watchLifecycle();
   }
@@ -376,12 +354,24 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
       record = updated;
       sessionsVersion++;
     });
-    await Future.wait([
-      requests.load(),
-      students.load(),
-      faces.load(),
-      ApiClient.freshReads(_loadWork),
-    ]);
+    await Future.wait([_loadSelectedTab(), ApiClient.freshReads(_loadWork)]);
+  }
+
+  Future<void> _loadSelectedTab() async {
+    if (tab == 2) await faces.load();
+    if (tab == 1) {
+      await Future.wait([
+        requests.load(),
+        students.load(),
+        pendingFaces.load(),
+      ]);
+    }
+  }
+
+  void _selectTab(int next) {
+    if (next == tab) return;
+    setState(() => tab = next);
+    _loadSelectedTab();
   }
 
   @override
@@ -394,6 +384,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     unwatchLifecycle();
     requests.dispose();
     students.dispose();
+    pendingFaces.dispose();
     faces.dispose();
     super.dispose();
   }
@@ -627,13 +618,13 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             loaded: work != null,
             failed: work?.failed ?? const [],
             onRetry: () => ApiClient.freshReads(_loadWork),
-            onOpen: (t) => setState(() => tab = t),
+            onOpen: _selectTab,
           ),
           const SizedBox(height: 20),
           _SubjectTabs(
             tabs: [for (final t in _tabs) (t.$1, t.$2, t.$3, _count(t.$1))],
             selected: tab,
-            onSelect: (t) => setState(() => tab = t),
+            onSelect: _selectTab,
           ),
           const SizedBox(height: 12),
           Row(
@@ -741,13 +732,23 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
           );
         },
       ),
-      const SectionTitle('Enrolled students'),
+      const SectionTitle('Approved students'),
       PagedList(
         controller: students,
         emptyTitle: 'No approved students',
-        emptyMessage: 'Approve join requests to build your roster.',
+        emptyMessage:
+            'Students appear here after subject and face enrolment approval.',
         item: (Enrollment e) =>
             _PersonRow(enrollment: e, trailing: const StatusBadge('active')),
+      ),
+      const SectionTitle('Pending face enrolment'),
+      PagedList(
+        controller: pendingFaces,
+        emptyTitle: 'No students pending face enrolment',
+        emptyMessage:
+            'Everyone with subject approval has completed face enrolment.',
+        item: (entry) =>
+            _PersonRow(enrollment: entry, trailing: const SizedBox.shrink()),
       ),
     ],
   );

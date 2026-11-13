@@ -61,9 +61,7 @@ class ApiClient {
 
   bool _cacheable(String path) =>
       path == '/v1/offerings' ||
-      path == '/v1/me/enrollments' ||
-      RegExp(r'^/v1/academics/(courses|terms|class-groups)$').hasMatch(path) ||
-      RegExp(r'^/v1/offerings/[^/]+/attendance-summary$').hasMatch(path);
+      RegExp(r'^/v1/academics/(courses|terms|class-groups)$').hasMatch(path);
   String _readKey(String actor, String? institute, String path, Json? query) {
     Object? canonical(Object? value) {
       if (value is Map) {
@@ -255,6 +253,7 @@ class ApiClient {
         final status = e.response?.statusCode;
         final code = error is Map ? error['code'] as String? : null;
         final biometricMessage = switch (code) {
+          'NO_ATTENDANCE_ELIGIBLE' => 'Approve at least one student’s face enrolment before opening attendance.',
           'ENROLLMENT_NOT_READY' => 'Face enrolment is unavailable for this institute. Ask your project administrator to check the processing setup.',
           'INSUFFICIENT_TEMPLATES' => 'This session needs two students with approved face enrolments before it can accept recordings. Use manual review, or open a new session after both enrolments are approved.',
           'SESSION_STATE' => 'This session is no longer accepting recordings. Return to the session and check its status.',

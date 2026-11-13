@@ -4,7 +4,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
-from .biometrics import CURRENT_RECOGNITION_PROFILE
+from .biometrics import COMPATIBLE_FACE_SET, CURRENT_RECOGNITION_PROFILE
 from .db import many, one
 from .errors import APIError
 from .security import (
@@ -415,21 +415,14 @@ async def roster(conn, actor, institute, offering, cursor, limit, status=None):
         {"i": institute, "o": offering},
     )
     face_filter = ""
-    if status == "active":
+    if status in ("active", "pending_face"):
+        match = "EXISTS" if status == "active" else "NOT EXISTS"
         face_filter = f"""AND e.effective_from<=now()
           AND (e.effective_until IS NULL OR e.effective_until>now())
           AND app.biometric_student_active(s.id)
-          AND EXISTS (
-            SELECT 1 FROM app.template_sets t
-            JOIN ({CURRENT_RECOGNITION_PROFILE}) p
-              ON p.model=t.model_release_id AND p.profile=t.recognition_profile_id
-            JOIN app.enrollment_attempts a ON (a.institute_id,a.id)=(t.institute_id,t.attempt_id)
-            JOIN app.consents c ON (c.institute_id,c.id)=(a.institute_id,a.consent_id)
-            WHERE t.institute_id=e.institute_id AND t.student_id=e.student_id
-              AND t.status='active' AND a.status='active' AND a.reviewed_by IS NOT NULL
-              AND c.withdrawn_at IS NULL
-              AND (SELECT count(*) FROM app.face_templates f
-                   WHERE (f.institute_id,f.template_set_id)=(t.institute_id,t.id)) BETWEEN 3 AND 5
+          AND {match} (
+            SELECT 1 FROM ({CURRENT_RECOGNITION_PROFILE}) p
+            CROSS JOIN LATERAL ({COMPATIBLE_FACE_SET}) face
           )"""
     rows = await many(
         conn,
@@ -443,7 +436,13 @@ async def roster(conn, actor, institute, offering, cursor, limit, status=None):
         AND (CAST(:status AS text) IS NULL OR e.status=:status)
         {face_filter}
         ORDER BY s.enrollment_number,e.id LIMIT :limit""",
-        {"i": institute, "o": offering, "cursor": cursor, "limit": limit + 1, "status": status},
+        {
+            "i": institute,
+            "o": offering,
+            "cursor": cursor,
+            "limit": limit + 1,
+            "status": "active" if status == "pending_face" else status,
+        },
     )
     return page(rows, limit)
 

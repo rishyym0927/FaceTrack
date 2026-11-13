@@ -34,6 +34,7 @@ async def open_session(b):
 
 async def test_session_roster_manual_publication_correction_history(bio):
     b = bio
+    await approve_faces(b, "student1")
     s = await open_session(b)
     sid = s["id"]
     for label in ("student1", "unassigned", "other_teacher"):
@@ -117,6 +118,7 @@ async def test_correction_does_not_publish_nonbinary_legacy_rows(bio):
             VALUES (%s,%s,%s,'active')""",
             (b.ids["institute"], b.ids["offering"], b.ids["student2_profile"]),
         )
+    await approve_faces(b, "student1", "student2")
     opened = await open_session(b)
     sid = opened["id"]
     close = await b.client.post(
@@ -166,6 +168,7 @@ async def test_correction_does_not_publish_nonbinary_legacy_rows(bio):
 
 async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
     b = bio
+    await approve_faces(b, "student1")
     s = await open_session(b)
     sid = s["id"]
     close = await b.client.post(
@@ -234,8 +237,20 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
         assert refused.status_code == 422, refused.text
 
 
+async def test_open_session_requires_an_eligible_student(bio):
+    b = bio
+    session = await create(b)
+    r = await b.client.post(
+        f"/v1/sessions/{session['id']}/open", headers=b.headers(key="empty", version=1)
+    )
+    assert r.status_code == 409 and r.json()["error"]["code"] == "NO_ATTENDANCE_ELIGIBLE"
+    with connect(b.urls["owner"]) as c:
+        assert c.execute("SELECT count(*) FROM app.session_roster").fetchone()[0] == 0
+
+
 async def test_manual_capture_requires_two_active_templates(bio):
     b = bio
+    await approve_faces(b, "student1")
     s = await open_session(b)
     r = await b.client.post(
         f"/v1/sessions/{s['id']}/captures",
@@ -254,15 +269,20 @@ async def test_manual_capture_requires_two_active_templates(bio):
 
 
 async def recognition_ready(b):
-    from test_biometrics import process
-
     with connect(b.urls["owner"]) as c:
         c.execute(
             "INSERT INTO app.course_enrollments(institute_id,offering_id,student_id,status) VALUES(%s,%s,%s,'active')",
             (b.ids["institute"], b.ids["offering"], b.ids["student2_profile"]),
         )
         c.execute('UPDATE app.worker_identities SET allowed_kinds=\'["enrollment","recognition"]\'')
-    for label in ("student1", "student2"):
+    await approve_faces(b, "student1", "student2")
+    return await open_session(b)
+
+
+async def approve_faces(b, *labels):
+    from test_biometrics import process
+
+    for label in labels:
         original = b.headers
         b.headers = lambda who="teacher", **kw: original(label if who == "student1" else who, **kw)
         try:
@@ -278,7 +298,6 @@ async def recognition_ready(b):
             json={"identity_confirmed": True, "poses_confirmed": True},
         )
         assert r.status_code == 200, r.text
-    return await open_session(b)
 
 
 async def captured(b, s, key="capture"):
@@ -461,8 +480,7 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
     assert rows[known["student_id"]]["status"] == "proposed_present"
     assert rows[absent_id]["status"] == "proposed_absent"
     assert rows[absent_id]["assessment_code"] == "not_recognized"
-    assert rows[str(unseen)]["status"] == "proposed_absent"
-    assert rows[str(unseen)]["assessment_code"] == "template_ineligible"
+    assert str(unseen) not in rows
 
     _, later_job, later_epoch, later_data = await captured(b, s, key="limited-after-usable")
     limited = {
@@ -487,7 +505,6 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
     assert {r["student_id"]: r["status"] for r in attendance["items"]} == {
         known["student_id"]: "proposed_present",
         absent_id: "proposed_absent",
-        str(unseen): "proposed_absent",
     }
 
     closed = await b.client.post(
@@ -508,7 +525,6 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
             "decisions": [
                 {"student_id": known["student_id"], "status": "present"},
                 {"student_id": absent_id, "status": "absent"},
-                {"student_id": str(unseen), "status": "absent"},
             ]
         },
     )
@@ -603,6 +619,7 @@ async def test_limited_capture_never_proposes_absence(bio):
 
 async def test_session_list_is_newest_first_across_cursor_pages(bio):
     b = bio
+    await approve_faces(b, "student1")
     base = datetime.now(timezone.utc).replace(microsecond=0)
     created = []
     for n, days in enumerate((-3, -1, -5, -2)):
@@ -637,6 +654,7 @@ async def test_session_list_is_newest_first_across_cursor_pages(bio):
 
 async def test_own_attendance_is_newest_first_across_cursor_pages(bio):
     b = bio
+    await approve_faces(b, "student1")
     base = datetime.now(timezone.utc)
     published = []
     for n in range(3):
@@ -691,6 +709,7 @@ async def test_own_attendance_is_newest_first_across_cursor_pages(bio):
 
 async def test_own_attendance_paging_survives_correction_and_keeps_same_start_session_order(bio):
     b = bio
+    await approve_faces(b, "student1")
     base = datetime.now(timezone.utc)
     sids = []
     for n in range(3):

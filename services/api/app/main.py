@@ -331,7 +331,8 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
         institute_id: Institute,
         cursor: UUID | None = None,
         limit: Limit = 50,
-        status: Literal["requested", "active", "rejected", "withdrawn"] | None = None,
+        status: Literal["requested", "active", "rejected", "withdrawn", "pending_face"]
+        | None = None,
     ):
         async with transaction(engine, user.user_id, institute_id) as conn:
             return await services.roster(

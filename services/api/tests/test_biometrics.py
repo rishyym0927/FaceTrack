@@ -194,6 +194,12 @@ async def test_encryption_review_and_withdrawal(bio):
         assert result.json()["next_cursor"] is None
         return result.json()["items"]
 
+    async def pending_roster():
+        result = await b.client.get(roster, params={"status": "pending_face"}, headers=b.headers())
+        assert result.status_code == 200, result.text
+        return result.json()["items"]
+
+    assert len(await pending_roster()) == 1
     assert await active_roster() == []
     assert len((await b.client.get(roster, headers=b.headers())).json()["items"]) == 1
     a, c, j, body = await process(b)
@@ -229,6 +235,7 @@ async def test_encryption_review_and_withdrawal(bio):
     assert [item["student_id"] for item in await active_roster()] == [
         str(b.ids["student1_profile"])
     ]
+    assert await pending_roster() == []
     with connect(b.urls["owner"]) as conn:
         newer_profile = conn.execute(
             """INSERT INTO app.recognition_profiles
