@@ -75,7 +75,7 @@ These are planning assumptions, not measured institute facts. Verified developme
 | CPU worker for local and Azure demo profiles | Supports minimal cost while retaining the same processing interface; Runpod/GPU stays optional after measurement |
 | CSV timetable first | Deterministic import; PDF/OCR and ERP integration can feed the same normalized model later |
 
-Retain pandas/openpyxl, ReportLab, Resend and Docker. Sentry and GitHub Actions remain planned operational work and are not present in the repository. No React rewrite, MongoDB/Firebase Auth migration, Kubernetes or new message platform.
+Retain pandas/openpyxl, ReportLab, Resend and Docker. GitHub Actions checks now cover changed components and repository safety without production credentials or automatic deployment. Sentry and automated release remain planned operational work. No React rewrite, MongoDB/Firebase Auth migration, Kubernetes or new message platform.
 
 ## 2. High-level design
 
@@ -536,7 +536,7 @@ The current Azure demo runs FastAPI, Redis, the agent and a CPU worker on one VM
 5. Build student/teacher Android APKs and teacher web; test real camera/codec path and intended email recipient.
 6. Run the full demonstration script and restart/retry tests before presentation.
 
-`compose.yaml` is the canonical macOS/Linux/Windows local service stack. It runs API, Redis, one Celery solo worker and the outbound agent on a private network; only API port 8000 is bound to host loopback. `compose.windows.yaml` is a v2.20+ compatibility include. Flutter remains native so browser/Android camera tooling works. Container service names are allowed only behind `FACETRACK_CONTAINER_NETWORK=1`; arbitrary plaintext worker endpoints remain rejected. Private `.env`, `.local`, model and profile files are runtime mounts excluded from image layers and Git. Both Docker images and both Compose configurations were validated on 26 October 2026. CI, automated deployment and Sentry are still planned and must not be described as operational.
+`compose.yaml` is the canonical macOS/Linux/Windows local service stack. It runs API, Redis, one Celery solo worker and the outbound agent on a private network; only API port 8000 is bound to host loopback. `compose.windows.yaml` is a v2.20+ compatibility include. Flutter remains native so browser/Android camera tooling works. Container service names are allowed only behind `FACETRACK_CONTAINER_NETWORK=1`; arbitrary plaintext worker endpoints remain rejected. Private `.env`, `.local`, model and profile files are runtime mounts excluded from image layers and Git. Both Docker images and both Compose configurations were validated on 26 October 2026. GitHub Actions CI runs synthetic and guarded local checks; it does not deploy. Automated deployment and Sentry remain planned and must not be described as operational.
 
 ### Minimum operations
 

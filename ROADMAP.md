@@ -63,7 +63,7 @@ Check a milestone only after its required outcomes are verified. Implemented cod
 - [ ] Run a supervised multi-room classroom pilot and measure accuracy/coverage.
 - [ ] Benchmark queue delay, memory and throughput for 20 concurrent classes.
 - [ ] Add automatic timetable scheduling/reconciliation.
-- [ ] Configure backups, restore tests, monitoring/Sentry and CI/CD.
+- [ ] Configure backups, restore tests, monitoring/Sentry and CI/CD. Changed-component GitHub Actions checks are implemented; verify hosted runs and keep automated deployment open.
 - [ ] Add public registration and password recovery after institute policy approval.
 
 **Working rule:** real inference only for demonstrations; processing failure never becomes absence; teachers publish authoritative attendance; every accuracy, latency and capacity target requires measurement.

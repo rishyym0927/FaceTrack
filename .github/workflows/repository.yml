@@ -1,0 +1,35 @@
+name: Repository and deployment checks
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: repository-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  safety:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate GitHub workflows
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.7 .github/workflows/*.yml
+      - name: Reject tracked private material
+        run: python3 .github/scripts/check_tracked_files.py
+      - name: Check deployment scripts and rollback tests
+        run: |
+          sh -n deploy/azure/deploy.sh
+          python3 -m compileall -q deploy/azure
+          cd deploy/azure
+          python3 -m unittest -q test_activate_web
+      - name: Validate Compose configuration
+        run: |
+          docker compose -f compose.yaml config --quiet
+          docker compose -f compose.windows.yaml config --quiet

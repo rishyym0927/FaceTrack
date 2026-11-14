@@ -2,6 +2,11 @@
 
 **Reviewed:** 14 November 2026 (Asia/Kolkata)
 
+## GitHub Actions checks — 14 November 2026
+
+- Added changed-component CI for API with managed local PostgreSQL, worker/ML synthetic tests, Flutter analysis/tests and non-deployable web builds, plus browser scanner checks. A required aggregate gate allows path-skipped jobs while failing for any selected check that fails. Added always-on workflow lint, tracked-private-file, Compose, shell and web-release rollback checks, monthly grouped Action updates, and an optional manual Android debug compile job.
+- Workflows use read-only repository permissions, no production secrets, no signed APK distribution and no Azure deployment. See [CI guide](docs/CI.md). Actual GitHub-hosted runs and branch protection setup must be verified after push. The signed camera checks and private ML receipt remain separate release gates.
+
 ## Teacher Subjects notification cleanup — 14 November 2026
 
 - Removed the duplicate “Needs your attention” notification card from the Teacher Subjects list on web and Android. The persistent notification bell and Notifications page remain available, and subject-specific pending-work links remain in each subject detail. No API or notification behavior changed.

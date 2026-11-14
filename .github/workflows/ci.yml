@@ -1,0 +1,213 @@
+name: Changed-component CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      api: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.api }}
+      worker: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.worker }}
+      flutter: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.flutter }}
+      browser: ${{ github.event_name == 'workflow_dispatch' || steps.filter.outputs.browser }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dorny/paths-filter@15192bc058cc28a13dbf6cde61f19e18988b7af6 # v3
+        id: filter
+        if: github.event_name != 'workflow_dispatch'
+        with:
+          base: main
+          filters: |
+            api:
+              - '.github/workflows/ci.yml'
+              - 'services/api/**'
+              - 'contracts/**'
+              - 'docker/api.Dockerfile'
+              - 'compose*.yaml'
+            worker:
+              - '.github/workflows/ci.yml'
+              - 'services/worker/**'
+              - 'tests/**'
+              - 'experiments/ml_accuracy/**'
+              - 'scripts/check_ml_freeze.py'
+              - 'pyproject.toml'
+              - 'uv.lock'
+              - 'docker/worker.Dockerfile'
+            flutter:
+              - '.github/workflows/ci.yml'
+              - 'apps/student/**'
+              - 'apps/teacher/**'
+              - 'packages/**'
+              - 'scripts/flutter'
+            browser:
+              - '.github/workflows/ci.yml'
+              - 'apps/student/web/**'
+              - 'apps/teacher/web/**'
+              - 'apps/teacher/test_web/**'
+
+  api:
+    needs: changes
+    if: needs.changes.outputs.api == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: services/api/uv.lock
+      - name: Install PostgreSQL 16 tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y postgresql-16
+          echo /usr/lib/postgresql/16/bin >> "$GITHUB_PATH"
+      - name: Install locked API dependencies
+        run: uv sync --project services/api --locked --python 3.11
+      - name: Lint API
+        working-directory: services/api
+        run: .venv/bin/ruff check app migrations tools tests
+      - name: Test API with isolated local PostgreSQL
+        working-directory: services/api
+        run: |
+          set -eu
+          .venv/bin/python -m tools.local_db start
+          trap '.venv/bin/python -m tools.local_db stop' EXIT
+          .venv/bin/python -m pytest tests -q
+
+  ml-contracts:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: uv.lock
+      - run: uv sync --locked --python 3.11
+      - run: .venv/bin/ruff check services/worker/src/facetrack_ml tests scripts/check_ml_freeze.py
+      - run: .venv/bin/python -m pytest tests -q
+
+  worker:
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+          cache-dependency-glob: |
+            uv.lock
+            services/worker/uv.lock
+      - run: uv sync --project services/worker --locked --python 3.11
+      - name: Lint and test worker
+        working-directory: services/worker
+        run: |
+          .venv/bin/ruff check src tests
+          .venv/bin/python -m pytest tests -q
+
+  flutter:
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [packages/app_core, packages/capture, apps/student, apps/teacher]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Resolve locked packages
+        working-directory: ${{ matrix.package }}
+        run: ../../scripts/flutter pub get --enforce-lockfile
+      - name: Analyze
+        working-directory: ${{ matrix.package }}
+        run: ../../scripts/flutter analyze
+      - name: Test
+        working-directory: ${{ matrix.package }}
+        run: ../../scripts/flutter test
+
+  web-build:
+    needs: changes
+    if: needs.changes.outputs.flutter == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [student, teacher]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.7'
+          channel: stable
+          cache: true
+      - name: Build non-deployable web bundle
+        working-directory: apps/${{ matrix.app }}
+        run: |
+          ../../scripts/flutter pub get --enforce-lockfile
+          ../../scripts/flutter build web --release --base-href "/${{ matrix.app }}/"
+
+  browser:
+    needs: changes
+    if: needs.changes.outputs.browser == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check first-party JavaScript syntax
+        run: |
+          node --check apps/student/web/pose_capture.js
+          node --check apps/student/web/pending_capture.js
+          node --check apps/teacher/web/classroom_capture.js
+      - name: Test browser scanner
+        run: node --test apps/teacher/test_web/classroom_capture_test.cjs
+
+  ci-gate:
+    name: CI gate
+    needs: [changes, api, ml-contracts, worker, flutter, web-build, browser]
+    if: always()
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Require every selected check to pass
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          for result in $RESULTS; do
+            case "$result" in
+              success|skipped) ;;
+              *) echo "A selected check did not pass: $result"; exit 1 ;;
+            esac
+          done
