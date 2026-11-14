@@ -6,6 +6,7 @@
 
 - Added changed-component CI for API with managed local PostgreSQL, worker/ML synthetic tests, Flutter analysis/tests and non-deployable web builds, plus browser scanner checks. A required aggregate gate allows path-skipped jobs while failing for any selected check that fails. Added always-on workflow lint, tracked-private-file, Compose, shell and web-release rollback checks, monthly grouped Action updates, and an optional manual Android debug compile job.
 - Workflows use read-only repository permissions, no production secrets, no signed APK distribution and no Azure deployment. See [CI guide](docs/CI.md). Actual GitHub-hosted runs and branch protection setup must be verified after push. The signed camera checks and private ML receipt remain separate release gates.
+- First hosted run exposed missing `ffmpeg`/`ffprobe` on GitHub's Linux runner; added an explicit install step to the worker and ML jobs. Re-run hosted checks before calling CI verified.
 
 ## Teacher Subjects notification cleanup — 14 November 2026
 
