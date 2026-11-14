@@ -5,6 +5,8 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'teacher_dashboard.dart' show belowAttendanceThreshold;
+
 /// Cumulative semester attendance for one class: per-student totals and %,
 /// with search, a below-threshold filter, sort and CSV export. Read-only --
 /// it reflects the published sessions and refreshes after each finalize.
@@ -58,9 +60,16 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
       if (mounted) setState(() => _data = result);
     } catch (e) {
       if (mounted) {
-        setState(() => _error = e is AppFailure
-            ? e
-            : const AppFailure('Could not load the attendance overview. Retry.'));
+        setState(() {
+          if (e is AppFailure && const {401, 403, 404}.contains(e.status)) {
+            _data = null;
+          }
+          _error = e is AppFailure
+              ? e
+              : const AppFailure(
+                  'Could not load the attendance overview. Retry.',
+                );
+        });
       }
     } finally {
       if (mounted) setState(() => _loading = false);
@@ -72,8 +81,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     final q = _search.text.trim().toLowerCase();
     final list = all.where((s) {
       if (_belowOnly) {
-        final p = s['percentage'];
-        if (p == null || (p as num) >= 75) return false;
+        if (!belowAttendanceThreshold(s)) return false;
       }
       if (q.isEmpty) return true;
       return '${s['official_name']} ${s['enrollment_number']}'
@@ -84,7 +92,9 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
       final r = switch (_sortCol) {
         0 => '${a['official_name']}'.compareTo('${b['official_name']}'),
         2 => (a['attended'] as num).compareTo(b['attended'] as num),
-        3 => ((a['percentage'] as num?) ?? -1).compareTo((b['percentage'] as num?) ?? -1),
+        3 => ((a['percentage'] as num?) ?? -1).compareTo(
+          (b['percentage'] as num?) ?? -1,
+        ),
         _ => '${a['enrollment_number']}'.compareTo('${b['enrollment_number']}'),
       };
       return _asc ? r : -r;
@@ -113,14 +123,16 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
       'Name,Enrolment,Classes conducted,Present,Absent,Percentage',
     ];
     for (final s in _students) {
-      lines.add([
-        esc(s['official_name']),
-        esc(s['enrollment_number']),
-        esc(s['conducted']),
-        esc(s['attended']),
-        esc(s['absent']),
-        esc(s['percentage'] == null ? '' : '${s['percentage']}'),
-      ].join(','));
+      lines.add(
+        [
+          esc(s['official_name']),
+          esc(s['enrollment_number']),
+          esc(s['conducted']),
+          esc(s['attended']),
+          esc(s['absent']),
+          esc(s['percentage'] == null ? '' : '${s['percentage']}'),
+        ].join(','),
+      );
     }
     final bytes = utf8.encode('${lines.join('\n')}\n');
     await FilePicker.saveFile(
@@ -134,8 +146,14 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _data == null) {
-      return const Panel(child: Center(child: Padding(
-        padding: EdgeInsets.all(24), child: CircularProgressIndicator())));
+      return const Panel(
+        child: Center(
+          child: Padding(
+            padding: EdgeInsets.all(24),
+            child: CircularProgressIndicator(),
+          ),
+        ),
+      );
     }
     if (_error != null && _data == null) {
       return Panel(child: ErrorView(_error!, retry: _load));
@@ -145,11 +163,16 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     final all = (_data?['students'] as List?)?.cast<Json>() ?? const [];
     final pcts = <num>[
       for (final s in all)
-        if (s['percentage'] is num) s['percentage'] as num,
+        if ((s['assessed'] as num?) != null && (s['assessed'] as num) > 0)
+          100 * (s['attended'] as num) / (s['assessed'] as num),
     ];
-    final avg = pcts.isEmpty ? null : pcts.reduce((a, b) => a + b) / pcts.length;
-    final below = pcts.where((p) => p < 75).length;
-    final above = pcts.where((p) => p >= 75).length;
+    final avg = pcts.isEmpty
+        ? null
+        : pcts.reduce((a, b) => a + b) / pcts.length;
+    final below = all.where(belowAttendanceThreshold).length;
+    final above = all
+        .where((s) => s['percentage'] is num && !belowAttendanceThreshold(s))
+        .length;
     return Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -157,8 +180,10 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           Row(
             children: [
               Expanded(
-                child: Text('Semester attendance',
-                    style: Theme.of(context).textTheme.titleLarge),
+                child: Text(
+                  'Semester attendance',
+                  style: Theme.of(context).textTheme.titleLarge,
+                ),
               ),
               OutlinedButton.icon(
                 onPressed: _loading ? null : () => ApiClient.freshReads(_load),
@@ -170,8 +195,14 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           const SizedBox(height: 4),
           Text(
             '$conducted classes conducted · ${all.length} students',
-            style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
+          if (_error != null) ...[
+            const SizedBox(height: 12),
+            ErrorView(_error!, retry: () => ApiClient.freshReads(_load)),
+          ],
           if (all.isNotEmpty) ...[
             const SizedBox(height: 16),
             Reveal(
@@ -217,18 +248,26 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
               Reveal(
                 child: BarDistribution(
                   bars: [
-                    BarDatum('90–100%',
-                        pcts.where((p) => p >= 90).length,
-                        const Color(0xff176451)),
-                    BarDatum('75–89%',
-                        pcts.where((p) => p >= 75 && p < 90).length,
-                        const Color(0xff3f9e6b)),
-                    BarDatum('50–74%',
-                        pcts.where((p) => p >= 50 && p < 75).length,
-                        const Color(0xff9a6a00)),
-                    BarDatum('Below 50%',
-                        pcts.where((p) => p < 50).length,
-                        const Color(0xffa22f2f)),
+                    BarDatum(
+                      '90–100%',
+                      pcts.where((p) => p >= 90).length,
+                      const Color(0xff176451),
+                    ),
+                    BarDatum(
+                      '75–89%',
+                      pcts.where((p) => p >= 75 && p < 90).length,
+                      const Color(0xff3f9e6b),
+                    ),
+                    BarDatum(
+                      '50–74%',
+                      pcts.where((p) => p >= 50 && p < 75).length,
+                      const Color(0xff9a6a00),
+                    ),
+                    BarDatum(
+                      'Below 50%',
+                      pcts.where((p) => p < 50).length,
+                      const Color(0xffa22f2f),
+                    ),
                   ],
                 ),
               ),
@@ -298,28 +337,43 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   }
 
   Widget _headerRow() {
-    Widget h(String label, int? col, double w, {bool right = false}) => SizedBox(
+    Widget h(
+      String label,
+      int? col,
+      double w, {
+      bool right = false,
+    }) => SizedBox(
       width: w,
       child: Semantics(
         button: col != null,
-        label: col == null ? label : '$label, ${_sortCol == col ? (_asc ? 'sorted ascending' : 'sorted descending') : 'activate to sort'}',
+        label: col == null
+            ? label
+            : '$label, ${_sortCol == col ? (_asc ? 'sorted ascending' : 'sorted descending') : 'activate to sort'}',
         child: InkWell(
-        onTap: col == null ? null : () => _sort(col),
-        child: ExcludeSemantics(child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
-          child: Row(
-            mainAxisAlignment:
-                right ? MainAxisAlignment.end : MainAxisAlignment.start,
-            children: [
-              Flexible(
-                child: Text(label,
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
+          onTap: col == null ? null : () => _sort(col),
+          child: ExcludeSemantics(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+              child: Row(
+                mainAxisAlignment: right
+                    ? MainAxisAlignment.end
+                    : MainAxisAlignment.start,
+                children: [
+                  Flexible(
+                    child: Text(
+                      label,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                  ),
+                  if (col != null && _sortCol == col)
+                    Icon(
+                      _asc ? Icons.arrow_upward : Icons.arrow_downward,
+                      size: 14,
+                    ),
+                ],
               ),
-              if (col != null && _sortCol == col)
-                Icon(_asc ? Icons.arrow_upward : Icons.arrow_downward, size: 14),
-            ],
+            ),
           ),
-        )),
         ),
       ),
     );

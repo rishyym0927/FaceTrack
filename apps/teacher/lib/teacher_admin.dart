@@ -5,8 +5,6 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'teacher_dashboard.dart';
-
 part 'admin/admin_forms.dart';
 part 'admin/admin_tour.dart';
 part 'admin/admin_widgets.dart';
@@ -1033,10 +1031,6 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
           ],
         ),
       ),
-      if (offerings.isNotEmpty) ...[
-        const SizedBox(height: 20),
-        TeacherDashboard(api: api, institute: institute),
-      ],
     ];
   }
 

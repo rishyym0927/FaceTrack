@@ -834,27 +834,40 @@ def install(app, engine, settings, principal, storage):
                       ON (s.institute_id,s.id)=(p.institute_id,p.session_id)
                     WHERE p.institute_id=:i AND s.offering_id=ANY(CAST(:ids AS uuid[])) AND s.status='finalized'
                       AND p.revision=s.attendance_revision
-                ), marks AS (
-                    SELECT p.offering_id,rec.student_id,
-                      (array_agg(rec.official_name ORDER BY p.starts_at,p.id))[1] AS official_name,
-                      (array_agg(rec.enrollment_number ORDER BY p.starts_at,p.id))[1] AS enrollment_number,
-                      count(*) FILTER (WHERE rec.status='present') AS present,
-                      count(*) FILTER (WHERE rec.status='late') AS late,
-                      count(*) FILTER (WHERE rec.status='absent') AS absent,
-                      count(*) FILTER (WHERE rec.status='unassessed') AS unassessed,
-                      count(*) FILTER (WHERE rec.status='excused') AS excused,
-                      count(*) AS conducted
+                ), raw_marks AS (
+                    SELECT p.offering_id,p.starts_at,p.id,rec.student_id,
+                      rec.official_name,rec.enrollment_number,rec.status
                     FROM published p CROSS JOIN LATERAL jsonb_to_recordset(p.snapshot_json->'records')
                       AS rec(student_id text,official_name text,enrollment_number text,status text)
-                    GROUP BY p.offering_id,rec.student_id
+                ), marks AS (
+                    SELECT offering_id,student_id,
+                      (array_agg(official_name ORDER BY starts_at DESC,id DESC))[1] AS official_name,
+                      (array_agg(enrollment_number ORDER BY starts_at DESC,id DESC))[1] AS enrollment_number,
+                      count(*) FILTER (WHERE status='present') AS present,
+                      count(*) FILTER (WHERE status='late') AS late,
+                      count(*) FILTER (WHERE status='absent') AS absent,
+                      count(*) FILTER (WHERE status='unassessed') AS unassessed,
+                      count(*) FILTER (WHERE status='excused') AS excused,
+                      count(*) AS conducted
+                    FROM raw_marks GROUP BY offering_id,student_id
+                ), monthly AS (
+                    SELECT offering_id,to_char(date_trunc('month',starts_at AT TIME ZONE 'Asia/Kolkata'),'YYYY-MM') AS month,
+                      count(*) FILTER (WHERE status IN ('present','late')) AS attended,
+                      count(*) FILTER (WHERE status IN ('present','late','absent')) AS assessed
+                    FROM raw_marks GROUP BY offering_id,date_trunc('month',starts_at AT TIME ZONE 'Asia/Kolkata')
                 )
                 SELECT selected.offering_id, coalesce(sessions.conducted,0) AS sessions_conducted,
-                   coalesce(students.records,'[]') AS students
+                   coalesce(students.records,'[]') AS students,
+                   coalesce(trends.records,'[]') AS monthly
             FROM unnest(CAST(:ids AS uuid[])) AS selected(offering_id)
             LEFT JOIN (SELECT offering_id,count(*) AS conducted FROM published GROUP BY offering_id)
               sessions USING(offering_id)
             LEFT JOIN (SELECT offering_id,jsonb_agg(to_jsonb(marks)-'offering_id') AS records
-                       FROM marks GROUP BY offering_id) students USING(offering_id)""",
+                       FROM marks GROUP BY offering_id) students USING(offering_id)
+            LEFT JOIN (SELECT offering_id,jsonb_agg(
+                       jsonb_build_object('month',month,'attended',attended,'assessed',assessed)
+                       ORDER BY month) AS records
+                       FROM monthly GROUP BY offering_id) trends USING(offering_id)""",
             {"i": institute_id, "ids": ids},
         )
         result = {}
@@ -872,11 +885,21 @@ def install(app, engine, settings, principal, storage):
                     }
                 )
             students.sort(key=lambda x: (x["enrollment_number"] or "", x["student_id"]))
+            monthly = [
+                {
+                    **row,
+                    "percentage": round(100 * row["attended"] / row["assessed"], 1)
+                    if row["assessed"]
+                    else None,
+                }
+                for row in summary["monthly"]
+            ]
             offering_id = summary["offering_id"]
             result[offering_id] = {
                 "offering_id": str(offering_id),
                 "sessions_conducted": summary["sessions_conducted"],
                 "students": students,
+                "monthly": monthly,
                 "policy_version": "session-v1",
             }
         return result

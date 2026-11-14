@@ -2,57 +2,139 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 import 'package:facetrack_teacher/teacher_dashboard.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 import '../../../packages/app_core/test/harness.dart';
 
-Map<String, dynamic> _offering(String id, String code, String title, int sem) => {
-  'id': id,
-  'title': title,
-  'course_code': code,
-  'term_code': '2026-ODD',
-  'branch': 'CSE',
-  'semester': sem,
-  'section': 'CSE1',
-  'version': 1,
-  'status': 'active',
-};
-
-Map<String, dynamic> _student(String id, String name, int attended, int absent,
-        {int unassessed = 0}) =>
+Map<String, dynamic> _offering(String id, String code, String title, int sem) =>
     {
-      'student_id': id,
-      'official_name': name,
-      'enrollment_number': 'EN-$id',
-      'present': attended, 'late': 0, 'absent': absent,
-      'unassessed': unassessed, 'excused': 0,
-      'conducted': attended + absent + unassessed,
-      'attended': attended,
-      'assessed': attended + absent,
-      'percentage': attended + absent == 0
-          ? null
-          : double.parse((100 * attended / (attended + absent)).toStringAsFixed(1)),
+      'id': id,
+      'title': title,
+      'course_code': code,
+      'term_code': '2026-ODD',
+      'branch': 'CSE',
+      'semester': sem,
+      'section': 'CSE1',
+      'version': 1,
+      'status': 'active',
     };
 
-Map<String, dynamic> _summary(List<Map<String, dynamic>> students, int held) => {
-  'sessions_conducted': held,
-  'students': students,
-  'policy_version': 'session-v1',
+Map<String, dynamic> _student(
+  String id,
+  String name,
+  int attended,
+  int absent, {
+  int unassessed = 0,
+}) => {
+  'student_id': id,
+  'official_name': name,
+  'enrollment_number': 'EN-$id',
+  'present': attended,
+  'late': 0,
+  'absent': absent,
+  'unassessed': unassessed,
+  'excused': 0,
+  'conducted': attended + absent + unassessed,
+  'attended': attended,
+  'assessed': attended + absent,
+  'percentage': attended + absent == 0
+      ? null
+      : double.parse((100 * attended / (attended + absent)).toStringAsFixed(1)),
 };
 
+Map<String, dynamic> _summary(List<Map<String, dynamic>> students, int held) =>
+    {
+      'sessions_conducted': held,
+      'students': students,
+      'policy_version': 'session-v1',
+    };
+
 void main() {
+  testWidgets('Subjects does not load analytics until Attendance opens', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    var dashboardReads = 0;
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/teacher/attendance-dashboard') {
+        dashboardReads++;
+        return jsonResponse({'items': [], 'next_cursor': null});
+      }
+      return jsonResponse({'items': [], 'next_cursor': null});
+    });
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(ProviderScope(
+      overrides: [servicesProvider.overrideWithValue(h.services)],
+      child: ProductApp(
+        classesBuilder: (_) => const Center(child: Text('Subject list')),
+        attendanceBuilder: (_) => const TeacherAttendancePage(),
+      ),
+    ));
+    await tester.pumpAndSettle();
+    expect(find.text('Subject list'), findsOneWidget);
+    expect(dashboardReads, 0);
+    await tester.tap(find.text('Attendance').first);
+    await tester.pumpAndSettle();
+    expect(find.text('No published attendance yet'), findsOneWidget);
+    expect(dashboardReads, 1);
+    expect(tester.takeException(), isNull);
+  });
+
   test('totals weight by classes, never count unassessed as absence', () {
     final o = Offering.fromJson(_offering('a', 'BCS 201', 'DAA', 3));
-    final s = SubjectStats(o, summary: _summary([
-      _student('1', 'Asha', 8, 2),
-      _student('2', 'Bina', 2, 2, unassessed: 6),
-    ], 10));
+    final s = SubjectStats(
+      o,
+      summary: _summary([
+        _student('1', 'Asha', 8, 2),
+        _student('2', 'Bina', 2, 2, unassessed: 6),
+      ], 10),
+    );
     final t = DashboardTotals([s]);
     expect(t.attended, 10);
     expect(t.assessed, 14);
     expect(t.overall, closeTo(71.43, .01));
     expect(t.atRiskStudents, 1);
     expect(t.lowest.single.name, 'Bina');
+  });
+
+  test('below 75 uses exact counts even when display rounds to 75.0', () {
+    final data = _student('1', 'Asha', 1499, 501)..['percentage'] = 75.0;
+    expect(belowAttendanceThreshold(data), isTrue);
+    final stats = SubjectStats(
+      Offering.fromJson(_offering('a', 'BCS 201', 'DAA', 3)),
+      summary: _summary([data], 2000),
+    );
+    expect(stats.below, 1);
+    expect(DashboardTotals([stats]).atRiskStudents, 1);
+  });
+
+  test('monthly trend combines subjects with assessed-weighted totals', () {
+    SubjectStats subject(String id, int attended, int assessed) => SubjectStats(
+      Offering.fromJson(_offering(id, 'BCS 201', 'DAA', 3)),
+      summary: {
+        ..._summary([], 1),
+        'monthly': [
+          {
+            'month': '2026-11',
+            'attended': attended,
+            'assessed': assessed,
+            'percentage': 100 * attended / assessed,
+          },
+        ],
+      },
+    );
+    final trend = attendanceTrend([subject('a', 1, 2), subject('b', 8, 8)]);
+    expect(trend.single.attended, 9);
+    expect(trend.single.assessed, 10);
+    expect(trend.single.percentage, 90);
   });
 
   test('semesters group and label as the institute writes them', () {
@@ -66,8 +148,9 @@ void main() {
     expect(groups.first.subjects, hasLength(2));
   });
 
-  testWidgets('Dashboard shows overall, subject-wise and semester filtering',
-      (tester) async {
+  testWidgets('Dashboard shows overall, subject-wise and semester filtering', (
+    tester,
+  ) async {
     final h = (await tester.runAsync(
       () => harness(role: AppRole.teacher, profileRole: 'teacher'),
     ))!;
@@ -78,8 +161,16 @@ void main() {
         return jsonResponse({
           'items': [
             {
-              'offering': _offering('a', 'BCS 201', 'Design and Analysis of Algorithm', 3),
-              'summary': _summary([_student('1', 'Asha', 9, 1), _student('2', 'Bina', 5, 5)], 10),
+              'offering': _offering(
+                'a',
+                'BCS 201',
+                'Design and Analysis of Algorithm',
+                3,
+              ),
+              'summary': _summary([
+                _student('1', 'Asha', 9, 1),
+                _student('2', 'Bina', 5, 5),
+              ], 10),
             },
             {
               'offering': _offering('b', 'BCS 301', 'Theory of Computation', 5),
@@ -94,16 +185,18 @@ void main() {
     tester.view.physicalSize = const Size(1100, 2400);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        body: SingleChildScrollView(
-          child: TeacherDashboard(api: h.services.api, institute: institute),
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TeacherDashboard(api: h.services.api, institute: institute),
+          ),
         ),
       ),
-    ));
+    );
     await tester.pumpAndSettle();
 
-    expect(find.text('Attendance overview'), findsOneWidget);
+    expect(find.text('Overview'), findsOneWidget);
     expect(find.text('Design and Analysis of Algorithm'), findsOneWidget);
     expect(find.text('Theory of Computation'), findsOneWidget);
     // 24 attended of 30 assessed across the two loaded subjects.
@@ -118,7 +211,9 @@ void main() {
   });
 
   for (final width in [360.0, 768.0, 1440.0]) {
-    testWidgets('Dashboard stays usable at $width and 200% text', (tester) async {
+    testWidgets('Dashboard stays usable at $width and 200% text', (
+      tester,
+    ) async {
       final h = (await tester.runAsync(
         () => harness(role: AppRole.teacher, profileRole: 'teacher'),
       ))!;
@@ -128,7 +223,12 @@ void main() {
         return jsonResponse({
           'items': [
             {
-              'offering': _offering('a', 'BCS 201', 'Design and Analysis of Algorithm', 3),
+              'offering': _offering(
+                'a',
+                'BCS 201',
+                'Design and Analysis of Algorithm',
+                3,
+              ),
               'summary': _summary([
                 _student('1', 'Asha Venkataraman-Krishnamurthy', 9, 1),
                 _student('2', 'Bina', 5, 5),
@@ -141,18 +241,26 @@ void main() {
       tester.view.physicalSize = Size(width, 2600);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
-      await tester.pumpWidget(MaterialApp(
-        home: MediaQuery(
-          data: MediaQueryData(size: Size(width, 2600), textScaler: const TextScaler.linear(2)),
-          child: Scaffold(
-            body: SingleChildScrollView(
-              child: TeacherDashboard(api: h.services.api, institute: institute),
+      await tester.pumpWidget(
+        MaterialApp(
+          home: MediaQuery(
+            data: MediaQueryData(
+              size: Size(width, 2600),
+              textScaler: const TextScaler.linear(2),
+            ),
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: TeacherDashboard(
+                  api: h.services.api,
+                  institute: institute,
+                ),
+              ),
             ),
           ),
         ),
-      ));
+      );
       await tester.pumpAndSettle();
-      expect(find.text('Attendance overview'), findsOneWidget);
+      expect(find.text('Overview'), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }

@@ -6,12 +6,14 @@ import 'teacher_classes.dart';
 import 'classroom_pending.dart';
 import 'teacher_notifications.dart';
 import 'teacher_sessions.dart';
+import 'teacher_dashboard.dart';
 
 void main() => launchProduct(
   AppConfig.environment(AppRole.teacher),
   classesBuilder: (_) => const TeacherClasses(),
   sessionBuilder: (_, id) => TeacherSessionDetail(id: id),
   detailBuilder: (_, id) => TeacherClassDetail(id: id),
+  attendanceBuilder: (_) => const TeacherAttendancePage(),
   adminBuilder: (_) => const TeacherAdmin(),
   accountStatsBuilder: (_) => const TeacherAccountStats(),
   notificationsLoader: teacherNotifications,

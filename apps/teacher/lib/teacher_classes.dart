@@ -8,7 +8,6 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'attendance_overview.dart';
 import 'biometric_reviews.dart';
 import 'teacher_sessions.dart';
-import 'teacher_dashboard.dart';
 import 'teacher_disputes.dart';
 import 'teacher_notifications.dart';
 
@@ -24,7 +23,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   late final String institute;
   late final PagedController<Offering> controller;
   bool preparing = false;
-  int dashboardTick = 0;
 
   @override
   void initState() {
@@ -44,7 +42,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
   }
 
   Future<void> refreshAll() async {
-    if (mounted) setState(() => dashboardTick++);
     await controller.load();
   }
 
@@ -199,7 +196,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
             ],
           ),
         ),
-        const AttentionCard(hideWhenIdle: true),
         PagedList(
           controller: controller,
           emptyTitle: 'No assigned subjects',
@@ -211,18 +207,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
             note: o.termTitle,
             onTap: () => open(o.id),
           ),
-        ),
-        const SizedBox(height: 28),
-        ListenableBuilder(
-          listenable: controller,
-          builder: (context, _) =>
-              controller.loading && controller.items.isEmpty
-              ? const SizedBox.shrink()
-              : TeacherDashboard(
-                  refreshTick: dashboardTick,
-                  api: api,
-                  institute: institute,
-                ),
         ),
       ],
     );
@@ -368,7 +352,9 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     final selected = _routeTab;
     if (selected != tab) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && selected != tab) _selectTab(selected, updateRoute: false);
+        if (mounted && selected != tab) {
+          _selectTab(selected, updateRoute: false);
+        }
       });
     }
   }
@@ -399,12 +385,15 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     setState(() => tab = next);
     _loadSelectedTab();
     if (updateRoute) {
-      final name = _tabNames.entries.firstWhere((entry) => entry.value == next).key;
+      final name = _tabNames.entries
+          .firstWhere((entry) => entry.value == next)
+          .key;
       final current = GoRouterState.of(context).uri;
-      context.push(current.replace(queryParameters: {
-        ...current.queryParameters,
-        'tab': name,
-      }).toString());
+      context.push(
+        current
+            .replace(queryParameters: {...current.queryParameters, 'tab': name})
+            .toString(),
+      );
     }
   }
 

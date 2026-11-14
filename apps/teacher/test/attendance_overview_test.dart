@@ -48,6 +48,35 @@ Future<void> _pump(WidgetTester tester, h) async {
 }
 
 void main() {
+  testWidgets('Temporary failure retains attendance but access loss clears it', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    var status = 200;
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/offerings/class/attendance-summary') {
+        return status == 200
+            ? jsonResponse(_summary())
+            : jsonResponse({'code': 'ERROR', 'message': 'Unavailable'}, status);
+      }
+      return jsonResponse({});
+    });
+    await _pump(tester, h);
+    expect(find.text('Alice'), findsOneWidget);
+    status = 503;
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Refresh'));
+    await tester.pumpAndSettle();
+    expect(find.text('Alice'), findsOneWidget);
+    status = 403;
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Refresh'));
+    await tester.pumpAndSettle();
+    expect(find.text('Alice'), findsNothing);
+  });
+
   testWidgets('Shows per-student totals and percentages', (tester) async {
     final h = (await tester.runAsync(
       () => harness(role: AppRole.teacher, profileRole: 'teacher'),

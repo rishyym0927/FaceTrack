@@ -197,6 +197,13 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
         },
     )
     assert pub.status_code == 200, pub.text
+    # Month boundaries use the institute demo's Asia/Kolkata reporting day.
+    # This instant is October in UTC, but November locally.
+    with connect(b.urls["owner"]) as c:
+        c.execute(
+            "UPDATE app.sessions SET starts_at=%s WHERE id=%s",
+            ("2026-10-31T19:00:00+00:00", sid),
+        )
     offering = b.ids["offering"]
     data = (
         await b.client.get(
@@ -207,6 +214,11 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
     row = data["students"][0]
     assert row["present"] == 1 and row["attended"] == 1 and row["assessed"] == 1
     assert row["percentage"] == 100.0 and row["conducted"] == 1
+    assert len(data["monthly"]) == 1
+    assert data["monthly"][0]["month"] == "2026-11"
+    assert data["monthly"][0]["attended"] == 1
+    assert data["monthly"][0]["assessed"] == 1
+    assert data["monthly"][0]["percentage"] == 100.0
     review = f"/v1/sessions/{sid}/attendance"
     full = (await b.client.get(review, headers=b.headers("teacher"))).json()
     params = {"known_version": full["session"]["version"], "known_processing": False}
@@ -246,13 +258,17 @@ async def test_offering_attendance_summary_aggregates_and_is_teacher_only(bio):
     assert corr.status_code == 200, corr.text
     changed = await b.client.get(review, headers=b.headers("teacher"), params=params)
     assert changed.json()["items"][0]["status"] == "absent"
-    after = (
+    after_data = (
         await b.client.get(
             f"/v1/offerings/{offering}/attendance-summary", headers=b.headers("teacher")
         )
-    ).json()["students"][0]
+    ).json()
+    after = after_data["students"][0]
     assert after["absent"] == 1 and after["present"] == 0
     assert after["assessed"] == 1 and after["percentage"] == 0
+    assert after_data["monthly"] == [
+        {"month": data["monthly"][0]["month"], "attended": 0, "assessed": 1, "percentage": 0.0}
+    ]
     # Only Present and Absent can be recorded now.
     current = (await b.client.get(f"/v1/sessions/{sid}", headers=b.headers("teacher"))).json()
     for legacy in ("late", "excused", "unassessed"):

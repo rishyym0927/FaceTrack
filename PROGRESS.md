@@ -1,6 +1,12 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 13 November 2026 (Asia/Kolkata)
+**Reviewed:** 14 November 2026 (Asia/Kolkata)
+
+## Teacher Subjects notification cleanup — 14 November 2026
+
+- Removed the duplicate “Needs your attention” notification card from the Teacher Subjects list on web and Android. The persistent notification bell and Notifications page remain available, and subject-specific pending-work links remain in each subject detail. No API or notification behavior changed.
+- Moved the faculty attendance dashboard to a dedicated Attendance tab, leaving Subjects as a subject list. Removed duplicate dashboard loads from Account and Admin; Account links to Attendance. Added weighted monthly trends, a compact responsive layout and exact below-75% comparisons. The backend derives trends from latest finalized publication revisions in Asia/Kolkata, and per-subject summaries keep their previous fields.
+- Verification: Teacher Flutter analysis found no issues, 88 Teacher tests passed in the full run and a later focused access-loss regression passed; 65 API tests and Ruff passed. The Teacher production-configured web build succeeded. The new route test confirmed Subjects makes no dashboard request until Attendance opens. A live deployment remains pending. Android source changed, but no updated Android APK has been built or installed.
 
 ## Pending-media recovery and attendance response — 13 November 2026
 

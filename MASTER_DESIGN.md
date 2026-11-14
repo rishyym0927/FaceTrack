@@ -8,6 +8,10 @@ The agreed technology stack is unchanged. This revision removes repeated explana
 
 The iPhone beta extends the existing Student and Teacher Flutter products. It uses separate app IDs and the existing hosted HTTPS API, attendance and consent flows. TestFlight distribution requires signed builds and physical iPhone verification of both capture workflows.
 
+Teacher Subjects lists assigned subjects without repeating the notification inbox. The persistent bell and dedicated Notifications page surface cross-subject updates; each subject detail keeps compact links to its own pending work.
+
+Teacher attendance analytics live in a dedicated Attendance destination. Subjects remains a subject list, Account links to Attendance, and Admin omits its duplicate dashboard. The dashboard uses latest finalized publications, groups session dates in Asia/Kolkata for monthly trends, weights rates by assessed marks, and compares unrounded attendance counts with the 75% threshold. Older Teacher clients can continue using the existing summary fields.
+
 ## Contents
 
 1. [Scope and decisions](#1-scope-and-decisions)

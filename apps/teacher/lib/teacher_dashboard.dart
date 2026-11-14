@@ -5,6 +5,16 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+/// Uses unrounded counts so 74.95% is not mistaken for 75%.
+bool belowAttendanceThreshold(Json student) {
+  final attended = (student['attended'] as num?)?.toInt() ?? 0;
+  final assessed =
+      (student['assessed'] as num?)?.toInt() ??
+      attended + ((student['absent'] as num?)?.toInt() ?? 0);
+  return assessed > 0 && attended * 4 < assessed * 3;
+}
 
 /// Attendance below this percentage (of assessed classes) needs attention.
 const attendanceThreshold = 75;
@@ -37,8 +47,7 @@ class SubjectStats {
   }
 
   int get below => students.where(_isBelow).length;
-  static bool _isBelow(Json s) =>
-      s['percentage'] is num && (s['percentage'] as num) < attendanceThreshold;
+  static bool _isBelow(Json s) => belowAttendanceThreshold(s);
 }
 
 /// One subject's attendance summary; a failure is kept on the subject so the
@@ -58,7 +67,9 @@ Future<SubjectStats> fetchSubjectStats(
   } catch (e) {
     return SubjectStats(
       o,
-      error: e is AppFailure ? e : const AppFailure('Could not load this subject.'),
+      error: e is AppFailure
+          ? e
+          : const AppFailure('Could not load this subject.'),
     );
   }
 }
@@ -72,6 +83,15 @@ class StudentRecord {
   String get name => '${data['official_name']}';
   String get number => '${data['enrollment_number']}';
   num? get percentage => data['percentage'] as num?;
+  double? get exactPercentage {
+    final attended = (data['attended'] as num?)?.toInt() ?? 0;
+    final assessed =
+        (data['assessed'] as num?)?.toInt() ??
+        attended + ((data['absent'] as num?)?.toInt() ?? 0);
+    return assessed == 0 ? null : 100 * attended / assessed;
+  }
+
+  bool get belowThreshold => belowAttendanceThreshold(data);
 }
 
 /// Cross-subject totals for whatever subjects are currently in view.
@@ -87,10 +107,10 @@ class DashboardTotals {
       for (final d in s.students) {
         final r = StudentRecord(s, d);
         everyone.add(r.id);
-        final p = r.percentage;
+        final p = r.exactPercentage;
         if (p == null) continue;
         percentages.add(p);
-        if (p < attendanceThreshold) {
+        if (r.belowThreshold) {
           atRisk.add(r.id);
           lowest.add(r);
         }
@@ -98,7 +118,7 @@ class DashboardTotals {
     }
     students = everyone.length;
     atRiskStudents = atRisk.length;
-    lowest.sort((a, b) => a.percentage!.compareTo(b.percentage!));
+    lowest.sort((a, b) => a.exactPercentage!.compareTo(b.exactPercentage!));
   }
   int loaded = 0, classes = 0, attended = 0, assessed = 0;
   int students = 0, atRiskStudents = 0;
@@ -109,6 +129,38 @@ class DashboardTotals {
   double? get overall => assessed == 0 ? null : 100 * attended / assessed;
   int bucket(num lo, num hi) =>
       percentages.where((p) => p >= lo && p < hi).length;
+}
+
+class MonthlyAttendance {
+  const MonthlyAttendance(this.month, this.attended, this.assessed);
+  final String month;
+  final int attended, assessed;
+  double? get percentage => assessed == 0 ? null : 100 * attended / assessed;
+}
+
+/// Merge subject months by assessed marks, never average percentages.
+List<MonthlyAttendance> attendanceTrend(List<SubjectStats> subjects) {
+  final totals = <String, (int, int)>{};
+  for (final subject in subjects) {
+    if (subject.error != null) continue;
+    for (final raw in (subject.summary?['monthly'] as List?) ?? const []) {
+      if (raw is! Map) continue;
+      final month = raw['month'];
+      if (month is! String || !RegExp(r'^\d{4}-\d{2}$').hasMatch(month)) {
+        continue;
+      }
+      final attended = (raw['attended'] as num?)?.toInt() ?? 0;
+      final assessed = (raw['assessed'] as num?)?.toInt() ?? 0;
+      if (attended < 0 || assessed < attended) continue;
+      final old = totals[month] ?? (0, 0);
+      totals[month] = (old.$1 + attended, old.$2 + assessed);
+    }
+  }
+  final months = totals.keys.toList()..sort();
+  return [
+    for (final month in months)
+      MonthlyAttendance(month, totals[month]!.$1, totals[month]!.$2),
+  ];
 }
 
 /// A semester group: subjects of the same semester (and term).
@@ -122,7 +174,9 @@ List<SemesterGroup> groupBySemester(List<SubjectStats> all) {
   final terms = {for (final s in all) s.offering.termCode};
   final map = <String, List<SubjectStats>>{};
   for (final s in all) {
-    map.putIfAbsent('${s.offering.termCode}|${s.offering.semester}', () => []).add(s);
+    map
+        .putIfAbsent('${s.offering.termCode}|${s.offering.semester}', () => [])
+        .add(s);
   }
   final keys = map.keys.toList()
     ..sort((a, b) {
@@ -142,11 +196,63 @@ List<SemesterGroup> groupBySemester(List<SubjectStats> all) {
   ];
 }
 
+/// Dedicated faculty analytics destination. Data is fetched only when opened.
+class TeacherAttendancePage extends ConsumerStatefulWidget {
+  const TeacherAttendancePage({super.key});
+
+  @override
+  ConsumerState<TeacherAttendancePage> createState() =>
+      _TeacherAttendancePageState();
+}
+
+class _TeacherAttendancePageState extends ConsumerState<TeacherAttendancePage>
+    with ResumeRefresh<TeacherAttendancePage> {
+  int refreshTick = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    watchLifecycle();
+  }
+
+  @override
+  void dispose() {
+    unwatchLifecycle();
+    super.dispose();
+  }
+
+  @override
+  void refreshOnResume() => setState(() => refreshTick++);
+
+  @override
+  Widget build(BuildContext context) {
+    final api = ref.read(servicesProvider).api;
+    final institute = ref.watch(authProvider).institute;
+    if (institute == null) return const SizedBox.shrink();
+    return ContentPage(
+      onRefresh: () async => setState(() => refreshTick++),
+      children: [
+        const PageHeader(title: 'Attendance'),
+        TeacherDashboard(
+          api: api,
+          institute: institute,
+          refreshTick: refreshTick,
+        ),
+      ],
+    );
+  }
+}
+
 /// The faculty's attendance dashboard: overall figures, semester-wise and
 /// subject-wise statistics, a distribution chart and an attention list. It is
 /// based on the published attendance summaries returned by the faculty API.
 class TeacherDashboard extends StatefulWidget {
-  const TeacherDashboard({super.key, required this.api, required this.institute, this.refreshTick = 0});
+  const TeacherDashboard({
+    super.key,
+    required this.api,
+    required this.institute,
+    this.refreshTick = 0,
+  });
   final ApiClient api;
   final String institute;
   final int refreshTick;
@@ -165,6 +271,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   String? _group; // null = all semesters
   _Sort _sort = _Sort.lowest;
   bool _attentionOnly = false;
+  int _trendPage = 0;
+  String? _selectedMonth;
   int _generation = 0;
 
   @override
@@ -176,7 +284,8 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   @override
   void didUpdateWidget(covariant TeacherDashboard oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.institute != widget.institute || oldWidget.api != widget.api) {
+    if (oldWidget.institute != widget.institute ||
+        oldWidget.api != widget.api) {
       _subjects = [];
       _group = null;
       _hasMore = false;
@@ -185,6 +294,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       ApiClient.freshReads(_load);
     }
   }
+
   @override
   void dispose() {
     _generation++;
@@ -210,17 +320,21 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         );
         if (!mounted || generation != _generation) return;
         for (final item in (page['items'] as List).cast<Json>()) {
-          results.add(SubjectStats(
-            Offering.fromJson(item['offering'] as Json),
-            summary: item['summary'] as Json,
-          ));
+          results.add(
+            SubjectStats(
+              Offering.fromJson(item['offering'] as Json),
+              summary: item['summary'] as Json,
+            ),
+          );
         }
         cursor = page['next_cursor'] as String?;
       } while (cursor != null && ++pages < _maxPages);
       setState(() {
         _subjects = results;
         _hasMore = cursor != null;
-        if (_group != null && !_subjects.any((s) => _key(s) == _group)) _group = null;
+        if (_group != null && !_subjects.any((s) => _key(s) == _group)) {
+          _group = null;
+        }
       });
     } catch (e) {
       if (mounted && generation == _generation) {
@@ -239,11 +353,14 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         });
       }
     } finally {
-      if (mounted && generation == _generation) setState(() => _loading = false);
+      if (mounted && generation == _generation) {
+        setState(() => _loading = false);
+      }
     }
   }
 
-  static String _key(SubjectStats s) => '${s.offering.termCode}|${s.offering.semester}';
+  static String _key(SubjectStats s) =>
+      '${s.offering.termCode}|${s.offering.semester}';
 
   List<SubjectStats> get _visible => _group == null
       ? _subjects
@@ -255,7 +372,9 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       switch (_sort) {
         case _Sort.lowest:
           final x = a.percentage, y = b.percentage;
-          if (x == null && y == null) return a.offering.title.compareTo(b.offering.title);
+          if (x == null && y == null) {
+            return a.offering.title.compareTo(b.offering.title);
+          }
           if (x == null) return 1;
           if (y == null) return -1;
           return x.compareTo(y);
@@ -282,24 +401,30 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       if (s.error != null) continue;
       final o = s.offering;
       for (final d in s.students) {
-        lines.add([
-          esc(semesterLabel(o.semester)),
-          esc(o.branch),
-          esc(o.section),
-          esc(o.courseCode),
-          esc(o.title),
-          esc(d['enrollment_number']),
-          esc(d['official_name']),
-          esc(d['conducted']),
-          esc(d['attended']),
-          esc(d['absent']),
-          esc(d['percentage']),
-        ].join(','));
+        lines.add(
+          [
+            esc(semesterLabel(o.semester)),
+            esc(o.branch),
+            esc(o.section),
+            esc(o.courseCode),
+            esc(o.title),
+            esc(d['enrollment_number']),
+            esc(d['official_name']),
+            esc(d['conducted']),
+            esc(d['attended']),
+            esc(d['absent']),
+            esc(d['percentage']),
+          ].join(','),
+        );
       }
     }
     final label = _group == null
         ? 'all-semesters'
-        : _groups.firstWhere((g) => g.key == _group).label.toLowerCase().replaceAll(RegExp('[^a-z0-9]+'), '-');
+        : _groups
+              .firstWhere((g) => g.key == _group)
+              .label
+              .toLowerCase()
+              .replaceAll(RegExp('[^a-z0-9]+'), '-');
     await FilePicker.saveFile(
       fileName: 'attendance-$label.csv',
       bytes: utf8.encode('${lines.join('\n')}\n'),
@@ -329,7 +454,14 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     if (_error != null && _subjects.isEmpty) {
       return Panel(child: ErrorView(_error!, retry: _load));
     }
-    if (_subjects.isEmpty) return const SizedBox.shrink();
+    if (_subjects.isEmpty) {
+      return const Panel(
+        child: MessageView(
+          title: 'No published attendance yet',
+          message: 'Publish attendance in a subject to see its overview here.',
+        ),
+      );
+    }
 
     final theme = Theme.of(context);
     final visible = _visible;
@@ -337,120 +469,141 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     final shown = _sorted(visible).where((s) {
       if (!_attentionOnly) return true;
       final p = s.percentage;
-      return s.error != null || (p != null && p < attendanceThreshold);
+      return s.error != null ||
+          (p != null && s.attended * 4 < (s.attended + s.absent) * 3);
     }).toList();
     final failed = visible.where((s) => s.error != null).length;
     final groups = _groups;
 
-    return Panel(
-      accent: true,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Expanded(
-                child: Text('Attendance overview', style: theme.textTheme.titleLarge),
-              ),
-              IconButton(
-                tooltip: 'Refresh overview',
-                onPressed: _loading ? null : () => ApiClient.freshReads(_load),
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
-          ),
-          Text(
-            'Faculty-published attendance across '
-            '${visible.length} subject${visible.length == 1 ? '' : 's'}'
-            '${_group == null ? '' : ' · ${groups.firstWhere((g) => g.key == _group).label}'}.',
-            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-          ),
-          if (_error != null) ErrorView(_error!, retry: _load),
-          if (_hasMore) const Text('Totals cover only the subjects loaded.'),
-          if (groups.length > 1) ...[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                ChoiceChip(
-                  label: const Text('All semesters'),
-                  selected: _group == null,
-                  onSelected: (_) => setState(() => _group = null),
-                ),
-                for (final g in groups)
-                  ChoiceChip(
-                    label: Text(g.label),
-                    selected: _group == g.key,
-                    onSelected: (_) => setState(() => _group = g.key),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text('Overview', style: theme.textTheme.titleLarge),
                   ),
-              ],
-            ),
-          ],
-          if (failed > 0) ...[
-            const SizedBox(height: 12),
-            _Notice(
-              '$failed subject${failed == 1 ? '' : 's'} could not be loaded and '
-              '${failed == 1 ? 'is' : 'are'} left out of the totals.',
-              onRetry: _load,
-            ),
-          ],
-          const SizedBox(height: 18),
-          Wrap(
-            spacing: 20,
-            runSpacing: 16,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              PercentRing(
-                value: totals.overall,
-                caption: totals.overall == null ? 'No data yet' : 'overall',
+                  IconButton(
+                    tooltip: 'Refresh overview',
+                    onPressed: _loading
+                        ? null
+                        : () => ApiClient.freshReads(_load),
+                    icon: const Icon(Icons.refresh),
+                  ),
+                ],
               ),
-              ConstrainedBox(
-                constraints: const BoxConstraints(minWidth: 280, maxWidth: 760),
-                child: StatGrid(
-                  minTileWidth: 150,
+              if (_loading) ...[
+                const SizedBox(height: 8),
+                const LinearProgressIndicator(semanticsLabel: 'Refreshing attendance'),
+              ],
+              Text(
+                'Faculty-published attendance across '
+                '${visible.length} subject${visible.length == 1 ? '' : 's'}'
+                '${_group == null ? '' : ' · ${groups.firstWhere((g) => g.key == _group).label}'}.',
+                style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              if (_error != null) ErrorView(_error!, retry: _load),
+              if (_hasMore)
+                const Text('Totals cover only the subjects loaded.'),
+              if (groups.length > 1) ...[
+                const SizedBox(height: 14),
+                Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
                   children: [
-                    StatTile(
-                      label: 'Overall attendance',
-                      value: totals.overall ?? 0,
-                      decimals: 1,
-                      suffix: '%',
-                      accent: percentColor(totals.overall),
-                      icon: Icons.insights_outlined,
-                      caption: totals.overall == null ? 'Nothing published yet' : 'across assessed classes',
+                    ChoiceChip(
+                      label: const Text('All semesters'),
+                      selected: _group == null,
+                      onSelected: (_) => setState(() => _group = null),
                     ),
-                    StatTile(
-                      label: 'Subjects',
-                      value: totals.loaded,
-                      icon: Icons.menu_book_outlined,
-                    ),
-                    StatTile(
-                      label: 'Classes held',
-                      value: totals.classes,
-                      icon: Icons.event_available_outlined,
-                    ),
-                    StatTile(
-                      label: 'Students below $attendanceThreshold%',
-                      value: totals.atRiskStudents,
-                      accent: totals.atRiskStudents == 0 ? _green : _red,
-                      icon: Icons.warning_amber_outlined,
-                      caption: totals.atRiskStudents == 0
-                          ? 'All on track'
-                          : 'of ${totals.students} students',
-                    ),
+                    for (final g in groups)
+                      ChoiceChip(
+                        label: Text(g.label),
+                        selected: _group == g.key,
+                        onSelected: (_) => setState(() => _group = g.key),
+                      ),
                   ],
                 ),
+              ],
+              if (failed > 0) ...[
+                const SizedBox(height: 12),
+                _Notice(
+                  '$failed subject${failed == 1 ? '' : 's'} could not be loaded and '
+                  '${failed == 1 ? 'is' : 'are'} left out of the totals.',
+                  onRetry: _load,
+                ),
+              ],
+              const SizedBox(height: 18),
+              Wrap(
+                spacing: 20,
+                runSpacing: 16,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  PercentRing(
+                    value: totals.overall,
+                    caption: totals.overall == null ? 'No data yet' : 'overall',
+                  ),
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      minWidth: 280,
+                      maxWidth: 760,
+                    ),
+                    child: StatGrid(
+                      minTileWidth: 150,
+                      children: [
+                        StatTile(
+                          label: 'Overall attendance',
+                          value: totals.overall ?? 0,
+                          decimals: 1,
+                          suffix: '%',
+                          accent: percentColor(totals.overall),
+                          icon: Icons.insights_outlined,
+                          caption: totals.overall == null
+                              ? 'Nothing published yet'
+                              : 'across assessed classes',
+                        ),
+                        StatTile(
+                          label: 'Subjects',
+                          value: totals.loaded,
+                          icon: Icons.menu_book_outlined,
+                        ),
+                        StatTile(
+                          label: 'Classes held',
+                          value: totals.classes,
+                          icon: Icons.event_available_outlined,
+                        ),
+                        StatTile(
+                          label: 'Below $attendanceThreshold% in a subject',
+                          value: totals.atRiskStudents,
+                          accent: totals.atRiskStudents == 0 ? _green : _red,
+                          icon: Icons.warning_amber_outlined,
+                          caption: totals.atRiskStudents == 0
+                              ? 'All on track'
+                              : 'of ${totals.students} students',
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
               ),
+              if (groups.length > 1 && _group == null) ...[
+                const SizedBox(height: 24),
+                Text('Semester-wise', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 8),
+                for (final g in groups) _semesterRow(g),
+              ],
             ],
           ),
-          if (groups.length > 1 && _group == null) ...[
-            const SizedBox(height: 24),
-            Text('Semester-wise', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 8),
-            for (final g in groups) _semesterRow(g),
-          ],
-          const SizedBox(height: 24),
-          LayoutBuilder(
+        ),
+        const SizedBox(height: 16),
+        Panel(child: _trend(visible)),
+        const SizedBox(height: 16),
+        Panel(
+          child: LayoutBuilder(
             builder: (context, c) {
               final distribution = _distribution(totals);
               final attention = _attention(totals);
@@ -470,54 +623,72 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
               );
             },
           ),
-          const SizedBox(height: 24),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            alignment: WrapAlignment.spaceBetween,
-            crossAxisAlignment: WrapCrossAlignment.center,
+        ),
+        const SizedBox(height: 16),
+        Panel(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text('Subject-wise statistics', style: theme.textTheme.titleMedium),
-              OutlinedButton.icon(
-                onPressed: visible.every((s) => s.students.isEmpty) ? null : _export,
-                icon: const Icon(Icons.download, size: 18),
-                label: const Text('Export report'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SegmentedButton<_Sort>(
-                showSelectedIcon: false,
-                segments: const [
-                  ButtonSegment(value: _Sort.lowest, label: Text('Lowest first')),
-                  ButtonSegment(value: _Sort.name, label: Text('Subject')),
-                  ButtonSegment(value: _Sort.semester, label: Text('Semester')),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                alignment: WrapAlignment.spaceBetween,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  Text(
+                    'Subject-wise statistics',
+                    style: theme.textTheme.titleMedium,
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: visible.every((s) => s.students.isEmpty)
+                        ? null
+                        : _export,
+                    icon: const Icon(Icons.download, size: 18),
+                    label: const Text('Export report'),
+                  ),
                 ],
-                selected: {_sort},
-                onSelectionChanged: (v) => setState(() => _sort = v.first),
               ),
-              FilterChip(
-                label: Text('Below $attendanceThreshold% only'),
-                selected: _attentionOnly,
-                onSelected: (v) => setState(() => _attentionOnly = v),
+              const SizedBox(height: 10),
+              Wrap(
+                spacing: 12,
+                runSpacing: 8,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [
+                  SegmentedButton<_Sort>(
+                    showSelectedIcon: false,
+                    segments: const [
+                      ButtonSegment(
+                        value: _Sort.lowest,
+                        label: Text('Lowest first'),
+                      ),
+                      ButtonSegment(value: _Sort.name, label: Text('Subject')),
+                      ButtonSegment(
+                        value: _Sort.semester,
+                        label: Text('Semester'),
+                      ),
+                    ],
+                    selected: {_sort},
+                    onSelectionChanged: (v) => setState(() => _sort = v.first),
+                  ),
+                  FilterChip(
+                    label: Text('Below $attendanceThreshold% only'),
+                    selected: _attentionOnly,
+                    onSelected: (v) => setState(() => _attentionOnly = v),
+                  ),
+                ],
               ),
+              const SizedBox(height: 8),
+              if (shown.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.symmetric(vertical: 16),
+                  child: Text('No subjects match this filter.'),
+                )
+              else
+                for (final s in shown) _subjectRow(s),
             ],
           ),
-          const SizedBox(height: 8),
-          if (shown.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 16),
-              child: Text('No subjects match this filter.'),
-            )
-          else
-            for (final s in shown) _subjectRow(s),
-        ],
-      ),
+        ),
+      ],
     );
   }
 
@@ -534,7 +705,10 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             Row(
               children: [
                 Expanded(
-                  child: Text(g.label, style: const TextStyle(fontWeight: FontWeight.w700)),
+                  child: Text(
+                    g.label,
+                    style: const TextStyle(fontWeight: FontWeight.w700),
+                  ),
                 ),
                 Flexible(
                   child: Text(
@@ -558,10 +732,114 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     );
   }
 
+  Widget _trend(List<SubjectStats> subjects) {
+    final months = attendanceTrend(subjects);
+    final page = _trendPage.clamp(
+      0,
+      months.isEmpty ? 0 : (months.length - 1) ~/ 6,
+    );
+    final end = months.length - page * 6;
+    final start = (end - 6).clamp(0, months.length);
+    final visibleMonths = months.sublist(start, end);
+    final selected = months.where((m) => m.month == _selectedMonth).firstOrNull;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'Attendance trend',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+        const SizedBox(height: 4),
+        Text(
+          'Published attendance by month · weighted by assessed marks',
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        if (months.isEmpty)
+          const Text('Monthly trend will appear after attendance is published.')
+        else ...[
+          for (final month in visibleMonths)
+            InkWell(
+              onTap: () => setState(() => _selectedMonth = month.month),
+              borderRadius: BorderRadius.circular(12),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            month.month,
+                            style: TextStyle(
+                              fontWeight: _selectedMonth == month.month
+                                  ? FontWeight.w700
+                                  : FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        Text(
+                          month.percentage == null
+                              ? '—'
+                              : '${month.percentage!.toStringAsFixed(1)}%',
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    TrackBar(
+                      value: (month.percentage ?? 0) / 100,
+                      color: percentColor(month.percentage),
+                      height: 12,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          if (selected != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                '${selected.month}: ${selected.attended} attended out of ${selected.assessed} assessed marks',
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          if (months.length > 6)
+            Wrap(
+              spacing: 8,
+              children: [
+                TextButton.icon(
+                  onPressed: end <= 6
+                      ? null
+                      : () => setState(() => _trendPage = page + 1),
+                  icon: const Icon(Icons.arrow_back),
+                  label: const Text('Earlier'),
+                ),
+                TextButton.icon(
+                  onPressed: page == 0
+                      ? null
+                      : () => setState(() => _trendPage = page - 1),
+                  icon: const Icon(Icons.arrow_forward),
+                  label: const Text('Later'),
+                ),
+              ],
+            ),
+        ],
+      ],
+    );
+  }
+
   Widget _distribution(DashboardTotals t) => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
-      Text('Attendance distribution', style: Theme.of(context).textTheme.titleMedium),
+      Text(
+        'Attendance distribution',
+        style: Theme.of(context).textTheme.titleMedium,
+      ),
       const SizedBox(height: 4),
       Text(
         'Student records by percentage band',
@@ -611,13 +889,18 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
             ),
             trailing: Text(
               '${r.percentage!.toStringAsFixed(1)}%',
-              style: TextStyle(fontWeight: FontWeight.w800, color: percentColor(r.percentage)),
+              style: TextStyle(
+                fontWeight: FontWeight.w800,
+                color: percentColor(r.percentage),
+              ),
             ),
           ),
       if (t.lowest.length > 6)
         Text(
           '+ ${t.lowest.length - 6} more records. Export the report for the full list.',
-          style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+          ),
         ),
     ],
   );
@@ -641,13 +924,19 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                     o.title,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 15),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 15,
+                    ),
                   ),
                 ),
                 if (s.error == null)
                   Text(
                     p == null ? '—' : '${p.toStringAsFixed(1)}%',
-                    style: TextStyle(fontWeight: FontWeight.w800, color: percentColor(p)),
+                    style: TextStyle(
+                      fontWeight: FontWeight.w800,
+                      color: percentColor(p),
+                    ),
                   ),
                 const Icon(Icons.chevron_right, size: 20),
               ],
@@ -656,18 +945,28 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
               o.subtitle,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 13),
+              style: TextStyle(
+                color: theme.colorScheme.onSurfaceVariant,
+                fontSize: 13,
+              ),
             ),
             const SizedBox(height: 8),
             if (s.error != null)
               Text(s.error!.message, style: const TextStyle(color: _red))
             else ...[
-              TrackBar(value: (p ?? 0) / 100, color: percentColor(p), height: 8),
+              TrackBar(
+                value: (p ?? 0) / 100,
+                color: percentColor(p),
+                height: 8,
+              ),
               const SizedBox(height: 6),
               Text(
                 '${s.students.length} students · ${s.conducted} classes held · '
                 '${s.below} below $attendanceThreshold%',
-                style: TextStyle(color: theme.colorScheme.onSurfaceVariant, fontSize: 12),
+                style: TextStyle(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  fontSize: 12,
+                ),
               ),
             ],
           ],
