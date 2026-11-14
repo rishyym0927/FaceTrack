@@ -6,7 +6,7 @@
 
 - Added changed-component CI for API with managed local PostgreSQL, worker/ML synthetic tests, Flutter analysis/tests and non-deployable web builds, plus browser scanner checks. A required aggregate gate allows path-skipped jobs while failing for any selected check that fails. Added always-on workflow lint, tracked-private-file, Compose, shell and web-release rollback checks, monthly grouped Action updates, and an optional manual Android debug compile job.
 - Workflows use read-only repository permissions, no production secrets, no signed APK distribution and no Azure deployment. See [CI guide](docs/CI.md). Actual GitHub-hosted runs and branch protection setup must be verified after push. The signed camera checks and private ML receipt remain separate release gates.
-- First hosted run exposed missing `ffmpeg`/`ffprobe` on GitHub's Linux runner; added an explicit install step to the worker and ML jobs. Re-run hosted checks before calling CI verified.
+- The first hosted run exposed missing `ffmpeg`/`ffprobe` on GitHub's Linux runner; the worker and ML jobs now install them. On pushed revision `dcfa7ca`, [Changed-component CI](https://github.com/rishyym0927/FaceTrack/actions/runs/43593421844) passed every selected job and its aggregate gate; [repository safety](https://github.com/rishyym0927/FaceTrack/actions/runs/43593421901) passed. A manually requested [Student debug APK compile](https://github.com/rishyym0927/FaceTrack/actions/runs/43593600864) also passed; it did not sign or distribute an app. The Teacher manual Android job has not been run. `main` has no required-check branch protection yet, so green CI is visible but merges are not blocked by these checks.
 
 ## Teacher Subjects notification cleanup — 14 November 2026
 
