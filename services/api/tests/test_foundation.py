@@ -1,11 +1,13 @@
 import asyncio
 import json
+from types import SimpleNamespace
 from uuid import UUID
 
 import jwt
 import pytest
 from sqlalchemy import text
 
+from app import auth as auth_module
 from app.db import context, make_engine
 from app.main import create_app
 from tools.seed import connect, seed
@@ -100,6 +102,12 @@ async def test_claim_live_confirmed_email_and_no_role_escalation(backend):
 async def test_provider_unavailable_is_not_authenticated(backend):
     backend.state["outage"] = True
     assert (await backend.client.get("/v1/me", headers=backend.headers())).status_code == 503
+
+
+async def test_first_valid_token_loads_jwks_during_first_30_seconds(backend, monkeypatch):
+    monkeypatch.setattr(auth_module, "time", SimpleNamespace(monotonic=lambda: 5.0))
+    result = await backend.client.get("/v1/me", headers=backend.headers())
+    assert result.status_code == 200, result.text
 
 
 async def test_full_join_approval_and_confidentiality(backend):

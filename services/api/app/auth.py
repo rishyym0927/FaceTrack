@@ -18,7 +18,7 @@ class Principal:
 class Authenticator:
     def __init__(self, settings, client: httpx.AsyncClient):
         self.settings, self.client = settings, client
-        self.keys, self.loaded_at = {}, 0.0
+        self.keys, self.loaded_at = {}, None
         self.lock = asyncio.Lock()
 
     async def verify(self, token: str) -> Principal:
@@ -30,10 +30,12 @@ class Authenticator:
             if header.get("alg") != "ES256" or not isinstance(kid, str) or not 1 <= len(kid) <= 200:
                 raise ValueError()
             now = time.monotonic()
-            if now - self.loaded_at > 300 or (kid not in self.keys and now - self.loaded_at > 30):
+            if self.loaded_at is None or now - self.loaded_at > 300 or (
+                kid not in self.keys and now - self.loaded_at > 30
+            ):
                 async with self.lock:
                     now = time.monotonic()
-                    if now - self.loaded_at > 300 or (
+                    if self.loaded_at is None or now - self.loaded_at > 300 or (
                         kid not in self.keys and now - self.loaded_at > 30
                     ):
                         try:
