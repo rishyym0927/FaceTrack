@@ -384,6 +384,12 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
         BiometricAttempt.fromJson,
       ),
     );
+    for (final controller in [requests, students, pendingFaces, faces]) {
+      controller.addListener(() {
+        final error = controller.error;
+        if (error != null && _accessLost(error)) _clearSubject(error);
+      });
+    }
     unawaited(_loadRecord());
     unawaited(_loadWork());
     watchLifecycle();
@@ -433,14 +439,6 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
               ? [requests, students, pendingFaces]
               : [faces];
           await Future.wait(controllers.map((controller) => controller.load()));
-          if (!mounted) return;
-          for (final controller in controllers) {
-            final error = controller.error;
-            if (error != null && _accessLost(error)) {
-              _clearSubject(error);
-              break;
-            }
-          }
         }),
       );
     } else if (stale) {
