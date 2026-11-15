@@ -77,7 +77,10 @@ case "$WEB_STAGE" in
   *) echo "Invalid remote staging directory." >&2; exit 1 ;;
 esac
 for app in teacher student; do
-  if ! rsync -az -e "ssh -i '$KEY'" "$WT/apps/$app/build/web/" "$REMOTE:$WEB_STAGE/$app/"; then
+  # Release directories are immutable after activation. Reuse unchanged assets
+  # (including the browser guidance model and WASM) from the active release.
+  if ! rsync -azc --link-dest="$WEB_ROOT/web-current/$app" -e "ssh -i '$KEY'" \
+      "$WT/apps/$app/build/web/" "$REMOTE:$WEB_STAGE/$app/"; then
     ssh_vm "rm -rf '$WEB_STAGE'" || true
     exit 1
   fi
@@ -96,7 +99,7 @@ fi
 # every service is recreated on the new tree; the previous tree is restored if that fails and is
 # removed only once worker and agent run from the new one.
 ssh_vm 'sudo rm -rf /opt/facetrack.new && sudo install -d -o azureuser -g azureuser /opt/facetrack.new'
-git -C "$ROOT" archive --format=tar "$TARGET" | ssh_vm 'tar -xf - -C /opt/facetrack.new'
+git -C "$ROOT" archive --format=tar.gz "$TARGET" | ssh_vm 'tar -xzf - -C /opt/facetrack.new'
 rsync -az -e "ssh -i '$KEY'" "$ROOT/deploy/azure/activate_web.py" "$REMOTE:$WEB_STAGE/"
 ssh_vm "WEB_STAGE='$WEB_STAGE' WEB_BASE='https://$HOST' sh -s" <<'REMOTE_DEPLOY'
 set -e

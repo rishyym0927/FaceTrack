@@ -1,6 +1,13 @@
 # FaceTrack development checkpoint
 
-**Reviewed:** 14 November 2026 (Asia/Kolkata)
+**Reviewed:** 15 November 2026 (Asia/Kolkata)
+
+## Subject navigation and academic editing — 15 November 2026
+
+- Subject tabs retain visited panels, filters and scroll. The routed fixture opens Queries without loading Sessions and revisiting a current tab sends zero subject requests. Subject badges use one server summary and Sessions requests one page at a time. Attendance dashboard links open the subject Overview.
+- Admin → Academic setup → Manage academic records edits catalog titles and codes, allocation titles, term codes and dates, and class-group semester numbers. API writes require an active tenant admin and current record version. Timetable-related edits invalidate import previews. Rejected edits and retries preserve existing history.
+- Managed local PostgreSQL and mocked Auth: 70 API tests passed, including admin denial, tenant isolation, idempotency, timetable scope, and record version checks. Flutter: 90 Teacher tests plus the focused editor test, 22 Student tests, and 72 shared tests passed. Nine browser scanner tests passed. Physical Android navigation and comparative Chrome/Android timing remain open.
+- Rollout sequence: deploy subject navigation and the schema-compatible bridge at `a4c14aa`, back up the hosted database, apply `0009_academic_edit`, then deploy Admin. To roll back after migration, redeploy the bridge SHA rather than downgrading the database.
 
 ## GitHub Actions checks — 14 November 2026
 

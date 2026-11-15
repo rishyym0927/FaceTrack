@@ -141,6 +141,32 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  testWidgets('Academic editor submits a versioned allocation rename', (tester) async {
+    final h = await _admin(tester);
+    final writes = <RequestOptions>[];
+    final base = _adapter(h.account, []);
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((request) async {
+      if (request.method == 'PATCH') {
+        writes.add(request);
+        return jsonResponse({'id': 'o1', 'version': 2});
+      }
+      return base.handler(request);
+    });
+    await _pumpAdmin(tester, h);
+    await section(tester, 'Academic setup');
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Manage academic records'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Edit teaching allocation'));
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextFormField), 'Compilers Lab');
+    await tester.tap(find.text('Save changes'));
+    await tester.pumpAndSettle();
+    expect(writes.single.path, '/v1/admin/offerings/o1');
+    expect(writes.single.headers['If-Match'], '1');
+    expect(writes.single.data, {'title': 'Compilers Lab'});
+    expect(find.text('Academic record updated.'), findsOneWidget);
+  });
+
   testWidgets('Admin opens on a console that names the next step', (
     tester,
   ) async {

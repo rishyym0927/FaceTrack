@@ -6,6 +6,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 part 'admin/admin_forms.dart';
+part 'admin/admin_academic_editor.dart';
 part 'admin/admin_tour.dart';
 part 'admin/admin_widgets.dart';
 
@@ -59,6 +60,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   late final String institute;
   _Section section = _Section.overview;
   bool peopleStudents = false;
+  bool manageAcademic = false;
   bool loading = true;
   String? loadError, studentsError;
 
@@ -120,8 +122,11 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
 
   int _reloadGeneration = 0;
 
+  int _directoryGeneration = 0;
+  bool _directoriesLoaded = false;
+  String? teachersError;
+
   Future<void> _reload() async {
-    // A newer reload (pull-to-refresh, after a save) wins over an older one.
     final generation = ++_reloadGeneration;
     setState(() {
       loading = true;
@@ -133,39 +138,61 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         api.academics(institute, 'courses'),
         api.academics(institute, 'class-groups'),
         _allOfferings(),
-        fetchAllPages(api, '/v1/admin/teachers', institute, maxPages: 25),
       ]);
-      List<Json> studentList = [];
-      String? studentProblem;
-      try {
-        studentList = await fetchAllPages(
-          api,
-          '/v1/admin/students',
-          institute,
-          maxPages: 25,
-        );
-      } catch (e) {
-        studentProblem = e is AppFailure
-            ? e.message
-            : 'Could not load students.';
-      }
       if (!mounted || generation != _reloadGeneration) return;
       setState(() {
         terms = lists[0] as List<Academic>;
         courses = lists[1] as List<Academic>;
         groups = lists[2] as List<Academic>;
         offerings = lists[3] as List<Offering>;
-        teachers = lists[4] as List<Json>;
-        students = studentList;
-        studentsError = studentProblem;
         loading = false;
       });
     } catch (e) {
       if (!mounted || generation != _reloadGeneration) return;
       setState(() {
         loading = false;
-        loadError = e is AppFailure ? e.message : 'Could not load admin data.';
+        loadError = e is AppFailure ? e.message : 'Could not load academic records.';
       });
+    }
+    if (mounted && generation == _reloadGeneration && section != _Section.academics) {
+      await _reloadDirectories();
+    }
+  }
+
+  Future<void> _reloadDirectories() async {
+    final generation = ++_directoryGeneration;
+    await Future.wait([
+      for (final kind in ['teachers', 'students'])
+        () async {
+          try {
+            final rows = await fetchAllPages(api, '/v1/admin/$kind', institute, maxPages: 25);
+            if (!mounted || generation != _directoryGeneration) return;
+            setState(() {
+              if (kind == 'teachers') {
+                teachers = rows;
+                teachersError = null;
+              } else {
+                students = rows;
+                studentsError = null;
+              }
+            });
+          } catch (e) {
+            if (!mounted || generation != _directoryGeneration) return;
+            final message = e is AppFailure ? e.message : 'Could not load $kind.';
+            setState(() {
+              if (kind == 'teachers') {
+                teachers = [];
+                teachersError = message;
+              } else {
+                students = [];
+                studentsError = message;
+              }
+            });
+          }
+        }(),
+    ]);
+    if (mounted && generation == _directoryGeneration) {
+      setState(() => _directoriesLoaded = true);
     }
   }
 
@@ -272,10 +299,13 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   ];
 
   // --- Navigation and forms ----------------------------------------------------
-  void _goSection(_Section s) => setState(() {
-    section = s;
-    fresh = null;
-  });
+  void _goSection(_Section s) {
+    setState(() {
+      section = s;
+      fresh = null;
+    });
+    if (s != _Section.academics && !_directoriesLoaded) _reloadDirectories();
+  }
 
   Widget _formFor(_Target t) => switch (t) {
     _Target.term => _TermForm(
@@ -992,13 +1022,13 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                   label: 'Faculty',
                   value: teachers.length,
                   icon: Icons.badge_outlined,
-                  caption: '${_linked(teachers)} with login',
+                  caption: teachersError ?? (_directoriesLoaded ? '${_linked(teachers)} with login' : 'Loading'),
                 ),
                 StatTile(
                   label: 'Students',
                   value: students.length,
                   icon: Icons.school_outlined,
-                  caption: studentsError ?? '${_linked(students)} with login',
+                  caption: studentsError ?? (_directoriesLoaded ? '${_linked(students)} with login' : 'Loading'),
                 ),
               ],
             ),
@@ -1273,6 +1303,51 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   }
 
   // --- Academic setup --------------------------------------------------------------
+  Future<void> _editAcademic(_AcademicEntry row) async {
+    final version = row.version;
+    if (version == null) {
+      showMessage(context, 'Reload academic records before editing.');
+      return;
+    }
+    final changed = await showDialog<bool>(
+      context: context,
+      builder: (_) => _AcademicEditor(
+        row: row,
+        save: (fields, mutation) async {
+          await api.send(
+            'PATCH', '/v1/admin/${row.kind}/${row.id}',
+            institute: institute,
+            body: fields, mutation: mutation, version: version,
+          );
+        },
+      ),
+    );
+    if (!mounted || changed == null) return;
+    try {
+      await ApiClient.freshReads(() async {
+        final records = row.kind == 'offerings'
+            ? null
+            : await api.academics(institute, row.kind);
+        final allocations = await _allOfferings();
+        if (!mounted) return;
+        setState(() {
+          switch (row.kind) {
+            case 'terms': terms = records!;
+            case 'courses': courses = records!;
+            case 'class-groups': groups = records!;
+          }
+          offerings = allocations;
+        });
+      });
+      if (mounted && changed) showMessage(context, 'Academic record updated.');
+    } catch (error) {
+      if (mounted) {
+        showMessage(context, error is AppFailure
+            ? error.message : 'Could not refresh academic records.');
+      }
+    }
+  }
+
   List<Widget> _academics() {
     final cards = [
       _SetupCard(
@@ -1350,6 +1425,20 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
             'Build the structure in order: term → subjects → class groups → allocations. '
             'Use the names and codes from the timetable.',
       ),
+      Align(
+        alignment: Alignment.centerLeft,
+        child: OutlinedButton.icon(
+          icon: Icon(manageAcademic ? Icons.expand_less : Icons.edit_outlined),
+          label: Text(manageAcademic ? 'Hide record editor' : 'Manage academic records'),
+          onPressed: () => setState(() => manageAcademic = !manageAcademic),
+        ),
+      ),
+      if (manageAcademic)
+        _AcademicManagement(
+          terms: terms, courses: courses, groups: groups, offerings: offerings,
+          edit: _editAcademic,
+        ),
+      const SizedBox(height: 16),
       LayoutBuilder(
         key: _k['academic'],
         builder: (context, c) {

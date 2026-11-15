@@ -5,7 +5,7 @@ FastAPI verifies Supabase Auth tokens and manages tenant and object authorizatio
 ## Current contract
 
 - Python `>=3.11,<3.12`, FastAPI, Pydantic 2, SQLAlchemy Core/asyncio and psycopg 3
-- PostgreSQL schema head `0008_admin`
+- PostgreSQL schema head `0009_academic_edit`
 - 37 business tables with forced RLS
 - restricted `facetrack_api` runtime role; separate owner credential for migrations/tools
 - Supabase ES256 user-token verification; no development login bypass
@@ -54,7 +54,7 @@ After [configuring an environment](../../docs/INSTALLATION.md), start the API fr
 - Liveness: `http://127.0.0.1:8000/health/live`
 - Readiness: `http://127.0.0.1:8000/health/ready`
 
-Readiness checks the restricted runtime role, migration `0008_admin`, 37 forced-RLS tables and publishable-key configuration. It does not test a real Auth login, Storage or worker.
+Readiness checks the restricted runtime role, supported migration revision, 37 forced-RLS tables and publishable-key configuration. It does not test a real Auth login, Storage or worker.
 
 ## Docker development
 

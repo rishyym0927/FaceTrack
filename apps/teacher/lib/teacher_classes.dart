@@ -231,6 +231,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   final visited = <int>{};
   final dirty = <int>{};
   final versions = <int, int>{};
+  final panels = <int, Widget>{};
   final scroll = ScrollController();
   final offsets = <int, double>{};
   int scrollGeneration = 0;
@@ -290,6 +291,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
       recordError = error;
       work = null;
       visited.clear();
+      panels.clear();
       dirty.clear();
       offsets.clear();
     });
@@ -443,6 +445,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
       );
     } else if (stale) {
       versions[next] = (versions[next] ?? 0) + 1;
+      panels.remove(next);
     }
   }
 
@@ -751,7 +754,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
                 enabled: entry.$1 == tab,
                 child: ExcludeFocus(
                   excluding: entry.$1 != tab,
-                  child: _tabBody(entry.$1),
+                  child: panels.putIfAbsent(entry.$1, () => _tabBody(entry.$1)),
                 ),
               ),
             ),

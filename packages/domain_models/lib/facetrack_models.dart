@@ -130,10 +130,14 @@ class Academic {
       title = j['title'] as String?,
       branch = j['branch'] as String?,
       section = j['section'] as String?,
+      startsOn = j['starts_on'] as String?,
+      endsOn = j['ends_on'] as String?,
+      version = (j['version'] as num?)?.toInt(),
       semester = (j['semester'] as num?)?.toInt();
   final String id;
   final String? termId, code, title, branch, section;
-  final int? semester;
+  final String? startsOn, endsOn;
+  final int? semester, version;
 
   /// "BCS 201 · Design & Analysis of Algorithm", "Odd Semester 2026 (2026-ODD)"
   /// or "CSE · 3rd Semester · Section CSE1".

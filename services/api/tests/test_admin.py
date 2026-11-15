@@ -301,3 +301,75 @@ async def test_directories_roster_and_subjects_page_in_a_stable_order(backend):
     courses = await walk(b, "/v1/academics/courses", "unassigned", limit=1)
     codes = [x["code"] for x in courses]
     assert len(codes) >= 2 and codes == sorted(codes)
+
+
+async def test_academic_edit_checks_tenant_version_and_idempotency(backend):
+    b = backend
+    make_admin(b)
+    headers = b.headers("unassigned", key="edit-course", version=1)
+    path = "/v1/admin/courses/" + b.ids["course"]
+    body = {"code": "FT-501", "title": "  Updated catalog title  "}
+    denied = await b.client.patch(path, headers=b.headers(version=1), json=body)
+    assert denied.status_code == 403
+    hidden = await b.client.patch("/v1/admin/courses/" + b.ids["other_course"], headers=headers, json=body)
+    assert hidden.status_code == 404
+    before = (await b.client.get("/v1/offerings/" + b.ids["offering"], headers=b.headers())).json()
+    edited = await b.client.patch(path, headers=headers, json=body)
+    assert edited.status_code == 200, edited.text
+    assert edited.json() == {"id": b.ids["course"], "version": 2}
+    assert (await b.client.patch(path, headers=headers, json=body)).json() == edited.json()
+    stale = await b.client.patch(path, headers=b.headers("unassigned", key="stale", version=1), json=body)
+    assert stale.status_code == 409, stale.text
+    assert stale.json()["error"]["code"] == "VERSION_CONFLICT"
+    after = (await b.client.get("/v1/offerings/" + b.ids["offering"], headers=b.headers())).json()
+    assert after == {**before, "course_code": "FT-501"}
+    with connect(b.urls["owner"]) as conn:
+        assert conn.execute("SELECT count(*) FROM app.audit_events WHERE action='academic.edited'").fetchone() == (1,)
+        assert conn.execute(
+            "SELECT schedule_revision FROM app.terms WHERE id=%s", (b.ids["term"],)
+        ).fetchone() == (1,)
+
+
+async def test_academic_terms_groups_and_allocation_edits(backend):
+    b = backend
+    make_admin(b)
+
+    async def edit(kind, key, body):
+        return await b.client.patch(
+            f"/v1/admin/{kind}/{b.ids[key]}", headers=b.headers("unassigned", version=1), json=body
+        )
+
+    assert (await edit("class-groups", "group", {"semester": 0})).status_code == 422
+    for kind, key, fields in [
+        ("class-groups", "group", {"semester": 5}),
+        ("offerings", "offering", {"title": "New allocation name"}),
+        ("terms", "term", {"code": "FT-TERM", "starts_on": "2020-01-01", "ends_on": "2090-12-31"}),
+    ]:
+        result = await edit(kind, key, fields)
+        assert result.status_code == 200, result.text
+    current = (await b.client.get("/v1/offerings/" + b.ids["offering"], headers=b.headers())).json()
+    assert (current["semester"], current["title"], current["term_code"]) == (5, "New allocation name", "FT-TERM")
+
+
+async def test_admin_cannot_shrink_term_across_existing_session(backend):
+    b = backend
+    make_admin(b)
+    with connect(b.urls["owner"]) as conn:
+        conn.execute(
+            """INSERT INTO app.sessions(institute_id,offering_id,teacher_id,starts_at,ends_at,occurrence_key)
+            VALUES (%s,%s,%s, now(), now()+interval '1 hour','term-date-conflict')""",
+            (b.ids["institute"], b.ids["offering"], b.ids["teacher_profile"]),
+        )
+    tomorrow = date.today() + timedelta(days=2)
+    term = await b.client.patch(
+        "/v1/admin/terms/" + b.ids["term"],
+        headers=b.headers("unassigned", version=1),
+        json={"code": "DEMO-TERM", "starts_on": tomorrow.isoformat(),
+              "ends_on": (tomorrow + timedelta(days=60)).isoformat()},
+    )
+    assert term.status_code == 409, term.text
+    assert term.json()["error"]["code"] == "TERM_SCHEDULE_CONFLICT"
+    with connect(b.urls["owner"]) as conn:
+        assert conn.execute(
+            "SELECT version,schedule_revision FROM app.terms WHERE id=%s", (b.ids["term"],)
+        ).fetchone() == (1, 0)

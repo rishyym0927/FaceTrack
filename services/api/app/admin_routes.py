@@ -6,18 +6,19 @@ depth rather than the only gate. Creating an actual login account is optional an
 needs SUPABASE_SERVICE_ROLE_KEY; without it the identity/role endpoints still work.
 """
 
+import json
 from datetime import date
 from typing import Annotated, Literal
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 from fastapi import Depends, Header, Query, Request
-from pydantic import Field, model_validator
+from pydantic import Field, StringConstraints, model_validator
 
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import DEFAULT_GROUP_SECTION, Strict
-from .security import check_cursor, idempotent, page, roles
+from .security import audit, check_cursor, expected_version, idempotent, page, roles
 from .security import remember as remember_effect
 
 
@@ -102,6 +103,27 @@ class TermCreate(Strict):
 class CourseCreate(Strict):
     code: str = Field(min_length=1, max_length=32)
     title: str = Field(min_length=1, max_length=150)
+
+
+AcademicCode = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=32)]
+AcademicTitle = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=150)]
+
+
+class TermEdit(TermCreate):
+    code: AcademicCode
+
+
+class CourseEdit(Strict):
+    code: AcademicCode
+    title: AcademicTitle
+
+
+class OfferingEdit(Strict):
+    title: AcademicTitle
+
+
+class GroupEdit(Strict):
+    semester: int = Field(ge=1, le=20)
 
 
 class GroupCreate(Strict):
@@ -217,6 +239,59 @@ def install(app, engine, settings, principal, storage, auth):
                 {"i": institute_id, "cur": str(cursor) if cursor else None, "n": limit + 1},
             )
             return page(rows, limit)
+
+    Version = Annotated[str | None, Header(alias="If-Match")]
+
+    async def edit_academic(kind, identifier, body, request, user, institute, key, version):
+        async with transaction(engine, user.user_id, institute) as conn:
+            await require_admin(conn, user.user_id, institute)
+            current = expected_version(version)
+            fields = body.model_dump(mode="json")
+            route = request.url.path
+            cached, fingerprint = await idempotent(
+                conn, user.user_id, institute, route, key, {"version": current, "fields": fields}
+            )
+            if cached is not None:
+                return cached
+            row = await one(
+                conn,
+                "SELECT app.admin_edit_academic(:kind,:id,:v,CAST(:fields AS jsonb)) AS result",
+                {"kind": kind, "id": identifier, "v": current, "fields": json.dumps(fields)},
+            )
+            result = row["result"]
+            if result.get("error") == "missing":
+                raise APIError(404, "NOT_FOUND", "Academic record not found.")
+            if result.get("error") == "stale":
+                raise APIError(409, "VERSION_CONFLICT", "This record changed. Reload it and review your edits.")
+            if result.get("error") == "schedule":
+                raise APIError(409, "TERM_SCHEDULE_CONFLICT", "Existing classes fall outside those term dates.")
+            if result.get("error") == "invalid":
+                raise APIError(422, "VALIDATION_FAILED", "The academic fields are invalid.")
+            await audit(
+                conn, user.user_id, institute, "academic.edited", kind, identifier, request.state.request_id
+            )
+            await remember_effect(conn, user.user_id, institute, route, key, fingerprint, result, 200)
+            return result
+
+    @app.patch("/v1/admin/courses/{identifier}")
+    async def edit_course(identifier: UUID, body: CourseEdit, request: Request, user: User,
+                          institute_id: Institute, key: Key, version: Version = None):
+        return await edit_academic("courses", identifier, body, request, user, institute_id, key, version)
+
+    @app.patch("/v1/admin/offerings/{identifier}")
+    async def edit_offering(identifier: UUID, body: OfferingEdit, request: Request, user: User,
+                            institute_id: Institute, key: Key, version: Version = None):
+        return await edit_academic("offerings", identifier, body, request, user, institute_id, key, version)
+
+    @app.patch("/v1/admin/terms/{identifier}")
+    async def edit_term(identifier: UUID, body: TermEdit, request: Request, user: User,
+                        institute_id: Institute, key: Key, version: Version = None):
+        return await edit_academic("terms", identifier, body, request, user, institute_id, key, version)
+
+    @app.patch("/v1/admin/class-groups/{identifier}")
+    async def edit_group(identifier: UUID, body: GroupEdit, request: Request, user: User,
+                         institute_id: Institute, key: Key, version: Version = None):
+        return await edit_academic("class-groups", identifier, body, request, user, institute_id, key, version)
 
     @app.post("/v1/admin/terms", status_code=201)
     async def create_term(body: TermCreate, request: Request, user: User, institute_id: Institute, key: Key):

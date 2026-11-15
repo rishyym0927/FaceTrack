@@ -1,6 +1,6 @@
 # FaceTrack installation and setup
 
-Use this guide to run FaceTrack from the repository. For the hosted websites and signed Android APKs, start with the [user guide](USER_GUIDE.md). The API expects migration head `0008_admin`. For the hosted demo and release procedure, see [Azure deployment](DEPLOY_AZURE.md).
+Use this guide to run FaceTrack from the repository. For the hosted websites and signed Android APKs, start with the [user guide](USER_GUIDE.md). The API expects migration head `0009_academic_edit`. For the hosted demo and release procedure, see [Azure deployment](DEPLOY_AZURE.md).
 
 FaceTrack has three different run modes. Choose one before installing anything:
 
@@ -434,7 +434,7 @@ Only `API_BASE_URL`, `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY` and `DEFAULT_INS
 
 ### API returns `NOT_READY`
 
-Run `docker compose logs --tail 100 api`. Confirm migration head `0008_admin`, the runtime URL uses `facetrack_api` rather than the owner, 37 tables have forced RLS, and the publishable key is configured.
+Run `docker compose logs --tail 100 api`. Confirm migration head `0009_academic_edit`, the runtime URL uses `facetrack_api` rather than the owner, 37 tables have forced RLS, and the publishable key is configured.
 
 ### Worker repeatedly reports unauthorized or no jobs complete
 

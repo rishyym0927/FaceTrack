@@ -219,7 +219,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 or not owner
                 or owner["owns"]
                 or policies["count"] != 37
-                or revision["version_num"] not in {"0008_admin", "0009_academic_edit"}
+                or revision["version_num"] != "0009_academic_edit"
                 or not configured
             ):
                 raise ValueError()

@@ -205,12 +205,13 @@ async def work_summary(conn, actor, institute, offering=None):
                WHERE (s.institute_id,s.offering_id)=(o.institute_id,o.id)
                  AND s.status IN ('closed','review_required','no_data'))
             END AS sessions_to_review,
+            CASE WHEN CAST(:o AS uuid) IS NOT NULL THEN '[]'::jsonb ELSE
             (SELECT coalesce(jsonb_agg(to_jsonb(action) ORDER BY action.starts_at DESC,action.id),'[]')
              FROM (SELECT s.id,s.status,s.starts_at FROM app.sessions s
                    WHERE (s.institute_id,s.offering_id)=(o.institute_id,o.id)
                      AND (s.status IN ('closed','review_required','no_data')
                        OR (s.status='open' AND s.starts_at<=now()-interval '3 hours'))
-                   ORDER BY s.starts_at DESC,s.id LIMIT 150) action) AS sessions
+                   ORDER BY s.starts_at DESC,s.id LIMIT 150) action) END AS sessions
         FROM app.offerings o {OFFERING_JOINS}
         WHERE o.institute_id=:i AND (CAST(:o AS uuid) IS NULL OR o.id=:o) AND (:admin OR EXISTS (
           SELECT 1 FROM app.offering_teachers ot
