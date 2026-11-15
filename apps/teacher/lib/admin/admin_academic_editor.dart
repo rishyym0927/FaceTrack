@@ -215,8 +215,9 @@ class _AcademicEditorState extends State<_AcademicEditor> {
     final value = input!.trim();
     if (field == 'semester') {
       final semester = int.tryParse(value);
-      if (semester == null || semester < 1 || semester > 20)
+      if (semester == null || semester < 1 || semester > 20) {
         return 'Enter 1 to 20.';
+      }
     }
     if (field == 'starts_on' || field == 'ends_on') {
       final date = DateTime.tryParse(value);
