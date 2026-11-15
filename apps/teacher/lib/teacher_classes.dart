@@ -974,7 +974,7 @@ class _AttentionStrip extends StatelessWidget {
 }
 
 /// Icon tabs with counts; scrolls sideways on narrow screens.
-class _SubjectTabs extends StatelessWidget {
+class _SubjectTabs extends StatefulWidget {
   const _SubjectTabs({
     required this.tabs,
     required this.selected,
@@ -984,28 +984,71 @@ class _SubjectTabs extends StatelessWidget {
   final int selected;
   final ValueChanged<int> onSelect;
   @override
+  State<_SubjectTabs> createState() => _SubjectTabsState();
+}
+
+class _SubjectTabsState extends State<_SubjectTabs> {
+  final _scroll = ScrollController();
+  final _keys = <int, GlobalKey>{};
+
+  @override
+  void initState() {
+    super.initState();
+    _revealSelected();
+  }
+
+  @override
+  void didUpdateWidget(_SubjectTabs oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.selected != widget.selected) _revealSelected();
+  }
+
+  void _revealSelected() {
+    final selected = widget.selected;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || selected != widget.selected || !_scroll.hasClients) {
+        return;
+      }
+      final render = _keys[selected]?.currentContext?.findRenderObject();
+      if (render == null) return;
+      final duration = MediaQuery.disableAnimationsOf(context)
+          ? Duration.zero
+          : const Duration(milliseconds: 150);
+      _scroll.position.ensureVisible(render, alignment: .5, duration: duration);
+    });
+  }
+
+  @override
+  void dispose() {
+    _scroll.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     return Panel(
       padding: 6,
       child: SingleChildScrollView(
         scrollDirection: Axis.horizontal,
+        controller: _scroll,
         child: Row(
           children: [
-            for (final (id, label, icon, count) in tabs)
+            for (final (id, label, icon, count) in widget.tabs)
               Padding(
                 padding: const EdgeInsets.all(2),
                 child: Semantics(
+                  key: _keys.putIfAbsent(id, GlobalKey.new),
                   button: true,
-                  selected: id == selected,
+                  selected: id == widget.selected,
                   label: count > 0 ? '$label, $count waiting' : label,
-                  onTap: () => onSelect(id),
+                  onTap: () => widget.onSelect(id),
                   child: ExcludeSemantics(
                     child: Material(
                       color: Colors.transparent,
                       child: InkWell(
                         borderRadius: BorderRadius.circular(14),
-                        onTap: () => onSelect(id),
+                        onTap: () => widget.onSelect(id),
                         child: AnimatedContainer(
                           duration: const Duration(milliseconds: 200),
                           curve: Curves.easeOutCubic,
@@ -1014,7 +1057,7 @@ class _SubjectTabs extends StatelessWidget {
                             vertical: 10,
                           ),
                           decoration: BoxDecoration(
-                            color: id == selected
+                            color: id == widget.selected
                                 ? scheme.primary
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(14),
@@ -1025,7 +1068,7 @@ class _SubjectTabs extends StatelessWidget {
                               Icon(
                                 icon,
                                 size: 20,
-                                color: id == selected
+                                color: id == widget.selected
                                     ? Colors.white
                                     : scheme.onSurfaceVariant,
                               ),
@@ -1034,7 +1077,7 @@ class _SubjectTabs extends StatelessWidget {
                                 label,
                                 style: TextStyle(
                                   fontWeight: FontWeight.w700,
-                                  color: id == selected
+                                  color: id == widget.selected
                                       ? Colors.white
                                       : scheme.onSurface,
                                 ),
