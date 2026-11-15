@@ -414,6 +414,16 @@ class PagedController<T> extends ChangeNotifier {
     notifyListeners();
   }
 
+  void clear() {
+    ++_generation;
+    items = [];
+    cursor = null;
+    error = null;
+    loading = false;
+    _loaded = false;
+    notifyListeners();
+  }
+
   @override
   void dispose() {
     _disposed = true;

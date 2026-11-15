@@ -16,9 +16,13 @@ class AttendanceOverview extends StatefulWidget {
     required this.api,
     required this.institute,
     required this.offering,
+    this.version = 0,
+    this.onAccessLost,
   });
   final ApiClient api;
   final String institute, offering;
+  final int version;
+  final ValueChanged<Object>? onAccessLost;
 
   @override
   State<AttendanceOverview> createState() => _AttendanceOverviewState();
@@ -33,11 +37,18 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   bool _loading = true, _belowOnly = false;
   int _sortCol = 1; // default by enrolment
   bool _asc = true;
+  int _generation = 0;
 
   @override
   void initState() {
     super.initState();
     _load();
+  }
+
+  @override
+  void didUpdateWidget(AttendanceOverview oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.version != widget.version) _load();
   }
 
   @override
@@ -47,19 +58,25 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   }
 
   Future<void> _load() async {
+    final generation = ++_generation;
     setState(() {
       _loading = true;
       _error = null;
     });
     try {
-      final result = await widget.api.send(
-        'GET',
-        '/v1/offerings/${widget.offering}/attendance-summary',
-        institute: widget.institute,
+      final result = await ApiClient.freshReads(
+        () => widget.api.send(
+          'GET',
+          '/v1/offerings/${widget.offering}/attendance-summary',
+          institute: widget.institute,
+        ),
       );
-      if (mounted) setState(() => _data = result);
+      if (mounted && generation == _generation) setState(() => _data = result);
     } catch (e) {
-      if (mounted) {
+      if (mounted && generation == _generation) {
+        if (e is AppFailure && const {401, 403, 404}.contains(e.status)) {
+          widget.onAccessLost?.call(e);
+        }
         setState(() {
           if (e is AppFailure && const {401, 403, 404}.contains(e.status)) {
             _data = null;
@@ -72,7 +89,9 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
         });
       }
     } finally {
-      if (mounted) setState(() => _loading = false);
+      if (mounted && generation == _generation) {
+        setState(() => _loading = false);
+      }
     }
   }
 

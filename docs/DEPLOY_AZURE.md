@@ -43,7 +43,9 @@ deploy also restores the previous service tree if the web checks fail. Keep
 `/srv/facetrack` writable by the deploy user and retain the previous release
 directory for recovery.
 
-The deploy reads `.local/flutter/production.json` with the same four public values as [development configuration](INSTALLATION.md#55-configure-flutter) and the public HTTPS API origin. It deploys the remote `main` revision and carries forward private environment and model files. Apply any required schema change separately before deploying code that needs it.
+The deploy reads `.local/flutter/production.json` with the same four public values as [development configuration](INSTALLATION.md#55-configure-flutter) and the public HTTPS API origin. It deploys the remote `main` revision and carries forward private environment and model files. Apply any required schema change separately before deploying code that needs it. To roll back, set `FACETRACK_DEPLOY_REV` to the full SHA of a compatible revision already in `origin/main` history, then run the full deploy.
+
+The academic edit rollout requires a bridge release that accepts both `0008_admin` and `0009_academic_edit`. Deploy and check the bridge first, take a private database backup, and use the owner connection to apply `0009_academic_edit`. Verify the API is still ready before deploying the editor. Roll back the application to the bridge if necessary. The additive migration can remain installed.
 
 After the script succeeds, verify the public endpoints and check container state:
 

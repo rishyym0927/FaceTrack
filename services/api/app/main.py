@@ -219,7 +219,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 or not owner
                 or owner["owns"]
                 or policies["count"] != 37
-                or revision["version_num"] != "0008_admin"
+                or revision["version_num"] not in {"0008_admin", "0009_academic_edit"}
                 or not configured
             ):
                 raise ValueError()
@@ -289,10 +289,10 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 conn, user.user_id, institute_id, body, key, request.state.request_id
             )
 
-    @app.get("/v1/teacher/work-summary", response_model=schemas.TeacherWorkSummary)
-    async def teacher_work_summary(user: User, institute_id: Institute):
+    @app.get("/v1/teacher/work-summary", response_model=schemas.TeacherWorkSummary, response_model_exclude_none=True)
+    async def teacher_work_summary(user: User, institute_id: Institute, offering_id: UUID | None = None):
         async with transaction(engine, user.user_id, institute_id) as conn:
-            return await services.work_summary(conn, user.user_id, institute_id)
+            return await services.work_summary(conn, user.user_id, institute_id, offering_id)
 
     @app.get("/v1/offerings/{offering_id}", response_model=schemas.Offering)
     async def offering_detail(offering_id: UUID, user: User, institute_id: Institute):

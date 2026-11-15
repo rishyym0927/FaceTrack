@@ -575,3 +575,18 @@ async def test_teacher_work_summary_is_scoped_and_counts_requests(backend):
     ]
     assert (await b.client.get(url, headers=b.headers("student1"))).status_code == 403
     assert (await b.client.get(url, headers=b.headers("unassigned"))).json()["items"] == []
+
+
+async def test_subject_work_summary_has_exact_counts_and_checks_assignment(backend):
+    b = backend
+    url = "/v1/teacher/work-summary"
+    params = {"offering_id": b.ids["offering"]}
+    result = await b.client.get(url, headers=b.headers(), params=params)
+    assert result.status_code == 200, result.text
+    assert [(item["id"], item["sessions_to_review"]) for item in result.json()["items"]] == [
+        (b.ids["offering"], 0)
+    ]
+    assert (await b.client.get(url, headers=b.headers("unassigned"), params=params)).status_code == 404
+    assert (
+        await b.client.get(url, headers=b.headers(), params={"offering_id": b.ids["other_offering"]})
+    ).status_code == 404

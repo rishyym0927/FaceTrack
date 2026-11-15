@@ -10,9 +10,15 @@ class TeacherDisputes extends StatefulWidget {
     required this.api,
     required this.institute,
     required this.offering,
+    this.version = 0,
+    this.changed,
+    this.onAccessLost,
   });
   final ApiClient api;
   final String institute, offering;
+  final int version;
+  final ValueChanged<bool>? changed;
+  final ValueChanged<Object>? onAccessLost;
 
   @override
   State<TeacherDisputes> createState() => _TeacherDisputesState();
@@ -32,7 +38,22 @@ class _TeacherDisputesState extends State<TeacherDisputes> {
         query: {'status': 'open', 'cursor': ?cursor},
       );
       return PageData.fromJson(result, (json) => json);
-    })..load();
+    });
+    controller.addListener(_checkAccess);
+    controller.load();
+  }
+
+  void _checkAccess() {
+    final error = controller.error;
+    if (error is AppFailure && const {401, 403, 404}.contains(error.status)) {
+      widget.onAccessLost?.call(error);
+    }
+  }
+
+  @override
+  void didUpdateWidget(TeacherDisputes oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.version != widget.version) controller.load();
   }
 
   @override
@@ -84,7 +105,8 @@ class _TeacherDisputesState extends State<TeacherDisputes> {
       ),
     );
     reason.dispose();
-    if (changed == true) {
+    if (changed == true && mounted) {
+      widget.changed?.call(decision == 'accepted');
       await controller.load();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(

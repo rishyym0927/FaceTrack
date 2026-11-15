@@ -11,10 +11,12 @@ class BiometricReviews extends StatelessWidget {
     required this.controller,
     required this.api,
     required this.institute,
+    this.changed,
   });
   final PagedController<BiometricAttempt> controller;
   final ApiClient api;
   final String institute;
+  final VoidCallback? changed;
   Future<void> video(BuildContext context, BiometricAttempt attempt) async {
     await showDialog<void>(
       context: context,
@@ -151,7 +153,13 @@ class BiometricReviews extends StatelessWidget {
         ),
       );
     }
-    await controller.load();
+    if (changed == true && context.mounted) {
+      if (this.changed != null) {
+        this.changed!();
+      } else {
+        await controller.load();
+      }
+    }
   }
 
   @override

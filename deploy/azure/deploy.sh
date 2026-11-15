@@ -1,6 +1,6 @@
 #!/bin/sh
 # Redeploy FaceTrack to the Azure VM from a Mac with the repo, the private files and the SSH key.
-# Ships exactly origin/main (never uncommitted local edits), keeps the server's private .env files
+# Ships a committed revision of origin/main, keeps the server's private .env files
 # and model files, rebuilds the containers and the two web apps. See docs/DEPLOY_AZURE.md.
 #   deploy/azure/deploy.sh            # code + web apps + restart
 #   deploy/azure/deploy.sh --web-only # only rebuild and upload the web apps
@@ -45,13 +45,22 @@ until ssh_vm true 2>/dev/null; do
 done
 
 git -C "$ROOT" fetch -q origin
-REV=$(git -C "$ROOT" rev-parse --short origin/main)
-echo "Deploying origin/main $REV to $HOST"
+TARGET=${FACETRACK_DEPLOY_REV:-origin/main}
+case "$TARGET" in
+  origin/main) ;;
+  *[!0-9a-f]*|'') echo "Use a full commit SHA for FACETRACK_DEPLOY_REV." >&2; exit 1 ;;
+  *) [ "${#TARGET}" -eq 40 ] || { echo "Use a full commit SHA for FACETRACK_DEPLOY_REV." >&2; exit 1; } ;;
+esac
+TARGET=$(git -C "$ROOT" rev-parse --verify "$TARGET^{commit}")
+git -C "$ROOT" merge-base --is-ancestor "$TARGET" origin/main ||
+  { echo "Deploy revision must be in origin/main history." >&2; exit 1; }
+REV=$(git -C "$ROOT" rev-parse --short "$TARGET")
+echo "Deploying $REV to $HOST"
 
 TMP=$(mktemp -d)
 WT="$TMP/facetrack-main"
 trap 'git -C "$ROOT" worktree remove --force "$WT" >/dev/null 2>&1 || true; rm -rf "$TMP"' EXIT
-git -C "$ROOT" worktree add --detach -q "$WT" origin/main
+git -C "$ROOT" worktree add --detach -q "$WT" "$TARGET"
 
 for app in teacher student; do
   (cd "$WT/apps/$app" && "$ROOT/scripts/flutter" pub get --enforce-lockfile >/dev/null &&
@@ -87,7 +96,7 @@ fi
 # every service is recreated on the new tree; the previous tree is restored if that fails and is
 # removed only once worker and agent run from the new one.
 ssh_vm 'sudo rm -rf /opt/facetrack.new && sudo install -d -o azureuser -g azureuser /opt/facetrack.new'
-git -C "$ROOT" archive --format=tar origin/main | ssh_vm 'tar -xf - -C /opt/facetrack.new'
+git -C "$ROOT" archive --format=tar "$TARGET" | ssh_vm 'tar -xf - -C /opt/facetrack.new'
 rsync -az -e "ssh -i '$KEY'" "$ROOT/deploy/azure/activate_web.py" "$REMOTE:$WEB_STAGE/"
 ssh_vm "WEB_STAGE='$WEB_STAGE' WEB_BASE='https://$HOST' sh -s" <<'REMOTE_DEPLOY'
 set -e

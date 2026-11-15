@@ -41,6 +41,7 @@ class TeacherSessions extends StatefulWidget {
     required this.publishableKey,
     this.version = 0,
     this.changed,
+    this.onAccessLost,
   });
   final ApiClient api;
   final String institute, offering, publishableKey;
@@ -50,6 +51,7 @@ class TeacherSessions extends StatefulWidget {
 
   /// Called after sessions were created or imported.
   final VoidCallback? changed;
+  final ValueChanged<Object>? onAccessLost;
   @override
   State<TeacherSessions> createState() => _TeacherSessionsState();
 }
@@ -70,6 +72,7 @@ class _TeacherSessionsState extends State<TeacherSessions> {
   bool loading = false;
   SessionGroup? filter;
   int _generation = 0;
+  String? cursor;
 
   @override
   void initState() {
@@ -83,39 +86,66 @@ class _TeacherSessionsState extends State<TeacherSessions> {
     if (old.version != widget.version) load();
   }
 
-  Future<void> load() async {
+  Future<void> load({bool append = false}) async {
     final generation = ++_generation;
+    final next = append ? cursor : null;
     setState(() {
       loading = true;
       error = null;
     });
     try {
-      final rows = await fetchAllPages(
-        widget.api,
-        '/v1/sessions',
-        widget.institute,
-        query: {'offering_id': widget.offering},
-        maxPages: 10,
+      final page = PageData.fromJson(
+        await ApiClient.freshReads(
+          () => widget.api.send(
+            'GET',
+            '/v1/sessions',
+            institute: widget.institute,
+            query: {
+              'offering_id': widget.offering,
+              'group': ?filter?.name,
+              'cursor': ?next,
+            },
+          ),
+        ),
+        (row) => row,
       );
       if (!mounted || generation != _generation) return;
       setState(() {
-        sessions = rows;
+        sessions = [if (append) ...?sessions, ...page.items];
+        cursor = page.nextCursor;
         loading = false;
       });
     } catch (e) {
       if (!mounted || generation != _generation) return;
+      final denied =
+          e is AppFailure && const {401, 403, 404}.contains(e.status);
+      if (denied) widget.onAccessLost?.call(e);
       setState(() {
+        if (denied) {
+          sessions = null;
+          cursor = null;
+        }
         error = e;
         loading = false;
       });
     }
   }
 
+  void selectGroup(SessionGroup? next) {
+    if (filter == next) return;
+    setState(() {
+      filter = next;
+      sessions = null;
+      cursor = null;
+    });
+    load();
+  }
+
   Future<void> create() async {
     final room = TextEditingController();
     DateTime start = DateTime.now();
     int minutes = 60;
-    await showDialog<bool>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (_) => StatefulBuilder(
         builder: (context, setLocal) => ActionDialog(
@@ -197,8 +227,10 @@ class _TeacherSessionsState extends State<TeacherSessions> {
       ),
     );
     room.dispose();
-    await load();
-    widget.changed?.call();
+    if (saved == true && mounted) {
+      await load();
+      if (mounted) widget.changed?.call();
+    }
   }
 
   Future<void> importTimetable() async {
@@ -305,7 +337,7 @@ class _TeacherSessionsState extends State<TeacherSessions> {
     } else if (all.isEmpty) {
       list = MessageView(
         icon: Icons.event_note_outlined,
-        title: 'No sessions yet',
+        title: filter == null ? 'No sessions yet' : 'No sessions in this group',
         message: 'Create a session for your next class or import a timetable.',
       );
     } else {
@@ -348,7 +380,14 @@ class _TeacherSessionsState extends State<TeacherSessions> {
               Reveal(
                 key: ValueKey(s['id']),
                 delayMs: i < 8 ? i * 30 : 0,
-                child: SessionCard(session: s),
+                child: SessionCard(
+                  session: s,
+                  onReturn: () {
+                    if (!mounted) return;
+                    load();
+                    widget.changed?.call();
+                  },
+                ),
               ),
           ],
         ],
@@ -386,36 +425,32 @@ class _TeacherSessionsState extends State<TeacherSessions> {
             ),
           ],
         ),
-        if (all.isNotEmpty) ...[
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
+        const SizedBox(height: 14),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            ChoiceChip(
+              label: const Text('All'),
+              selected: filter == null,
+              onSelected: (_) => selectGroup(null),
+            ),
+            for (final g in SessionGroup.values)
               ChoiceChip(
-                label: Text('All ${all.length}'),
-                selected: filter == null,
-                onSelected: (_) => setState(() => filter = null),
+                label: Text(_groupInfo[g]!.$1),
+                selected: filter == g,
+                onSelected: (_) => selectGroup(g),
               ),
-              for (final g in SessionGroup.values)
-                if (groups[g]!.isNotEmpty)
-                  ChoiceChip(
-                    label: Text(
-                      '${switch (g) {
-                        SessionGroup.todo => 'To do',
-                        SessionGroup.upcoming => 'Upcoming',
-                        SessionGroup.published => 'Published',
-                        SessionGroup.cancelled => 'Cancelled',
-                      }} ${groups[g]!.length}',
-                    ),
-                    selected: filter == g,
-                    onSelected: (_) => setState(() => filter = g),
-                  ),
-            ],
-          ),
-        ],
+          ],
+        ),
         const SizedBox(height: 8),
+        if (error != null && sessions != null) ErrorView(error!, retry: load),
         list,
+        if (cursor != null)
+          TextButton(
+            onPressed: loading ? null : () => load(append: true),
+            child: const Text('Load older sessions'),
+          ),
       ],
     );
   }
@@ -423,8 +458,9 @@ class _TeacherSessionsState extends State<TeacherSessions> {
 
 /// One session: a calendar tile, time and room, its state and the next step.
 class SessionCard extends StatelessWidget {
-  const SessionCard({super.key, required this.session});
+  const SessionCard({super.key, required this.session, this.onReturn});
   final Json session;
+  final VoidCallback? onReturn;
 
   static (Color, IconData) style(String? status) => switch (status) {
     'scheduled' => (const Color(0xff465650), Icons.event_outlined),
@@ -469,7 +505,11 @@ class SessionCard extends StatelessWidget {
       'NOV',
       'DEC',
     ];
-    void open() => context.push('/sessions/${s['id']}');
+    Future<void> open() async {
+      await context.push('/sessions/${s['id']}');
+      if (context.mounted) onReturn?.call();
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 10),
       child: Material(

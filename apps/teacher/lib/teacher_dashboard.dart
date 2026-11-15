@@ -880,7 +880,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
           ListTile(
             contentPadding: EdgeInsets.zero,
             dense: true,
-            onTap: () => context.push('/classes/${r.subject.offering.id}'),
+            onTap: () => context.push('/classes/${r.subject.offering.id}?tab=overview'),
             title: Text(r.name, maxLines: 1, overflow: TextOverflow.ellipsis),
             subtitle: Text(
               '${r.number} · ${r.subject.offering.courseCode}',
@@ -911,7 +911,7 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
     final p = s.percentage;
     return InkWell(
       borderRadius: BorderRadius.circular(12),
-      onTap: () => context.push('/classes/${o.id}'),
+      onTap: () => context.push('/classes/${o.id}?tab=overview'),
       child: Padding(
         padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
         child: Column(

@@ -137,6 +137,7 @@ class _ProductAppState extends ConsumerState<ProductApp> {
   late final GoRouter router;
   NotificationCenter? notifications;
   AppLifecycleListener? lifecycle;
+  (String, String?, String?)? _notificationScope;
 
   void refreshNotifications({bool force = false}) {
     final auth = ref.read(authProvider);
@@ -255,7 +256,11 @@ class _ProductAppState extends ConsumerState<ProductApp> {
         ShellRoute(
           builder: (context, state, child) {
             // Navigating is a natural moment to refresh stale notices.
-            refreshNotifications();
+            final notificationScope = (state.uri.path, auth.account?.userId, auth.institute);
+            if (_notificationScope != notificationScope) {
+              _notificationScope = notificationScope;
+              refreshNotifications();
+            }
             return ProductShell(
               key: ValueKey(
                 (auth.account?.userId ?? '') + (auth.institute ?? ''),
@@ -649,8 +654,10 @@ class ProductShell extends StatelessWidget {
 }
 
 class ContentPage extends StatelessWidget {
-  const ContentPage({super.key, required this.children, this.onRefresh});
+  const ContentPage({super.key, required this.children, this.onRefresh, this.controller});
   final List<Widget> children;
+
+  final ScrollController? controller;
 
   /// Pull down to refresh (touch screens); the page's Refresh button remains.
   final Future<void> Function()? onRefresh;
@@ -662,6 +669,7 @@ class ContentPage extends StatelessWidget {
   }
 
   Widget _list(BuildContext context) => ListView(
+    controller: controller,
     // Always scrollable so a short page can still be pulled to refresh.
     physics: onRefresh == null ? null : const AlwaysScrollableScrollPhysics(),
     padding: EdgeInsets.symmetric(

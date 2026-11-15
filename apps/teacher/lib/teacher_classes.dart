@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -170,7 +172,6 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
 
   Future<void> open(String id) async {
     await context.push('/classes/$id');
-    if (mounted) await refreshAll();
   }
 
   @override
@@ -224,10 +225,19 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     with ResumeRefresh<TeacherClassDetail> {
   late final ApiClient api;
   late final String institute;
-  late Future<Offering> record;
   late final PagedController<Enrollment> requests, students, pendingFaces;
   late final PagedController<BiometricAttempt> faces;
   int tab = 3;
+  final visited = <int>{};
+  final dirty = <int>{};
+  final versions = <int, int>{};
+  final scroll = ScrollController();
+  final offsets = <int, double>{};
+  int scrollGeneration = 0;
+  int _recordGeneration = 0;
+  Offering? offering;
+  Object? recordError;
+  bool workFailed = false;
   static const _tabNames = <String, int>{
     'sessions': 3,
     'students': 1,
@@ -247,27 +257,63 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   Future<void> _loadWork() async {
     final generation = ++_workGeneration;
     try {
-      final w = await loadSubjectWork(api, institute, await record);
-      if (mounted && generation == _workGeneration) setState(() => work = w);
-    } catch (_) {
-      // The subject error view handles failure to load the subject itself.
+      final w = await loadSubjectWork(api, institute, widget.id);
+      if (mounted && generation == _workGeneration) {
+        setState(() {
+          work = w;
+          workFailed = false;
+        });
+      }
+    } catch (error) {
+      if (!mounted || generation != _workGeneration) return;
+      if (_accessLost(error)) {
+        _clearSubject(error);
+      } else {
+        setState(() => workFailed = true);
+      }
     }
   }
 
-  int get _toReview =>
-      work?.sessions
-          .where(
-            (s) => const {
-              'closed',
-              'review_required',
-              'no_data',
-            }.contains(s['status']),
-          )
-          .length ??
-      0;
+  int get _toReview => work?.sessionsToReview ?? 0;
 
-  /// Bumped on refresh so the sessions tab reloads with the page.
-  int sessionsVersion = 0;
+  bool _accessLost(Object error) =>
+      error is AppFailure && const {401, 403, 404}.contains(error.status);
+
+  void _clearSubject(Object error) {
+    ++_recordGeneration;
+    ++_workGeneration;
+    for (final controller in [requests, students, pendingFaces, faces]) {
+      controller.clear();
+    }
+    setState(() {
+      offering = null;
+      recordError = error;
+      work = null;
+      visited.clear();
+      dirty.clear();
+      offsets.clear();
+    });
+  }
+
+  Future<void> _loadRecord() async {
+    final generation = ++_recordGeneration;
+    try {
+      final result = await api.offering(institute, widget.id);
+      if (!mounted || generation != _recordGeneration) return;
+      setState(() {
+        offering = result;
+        recordError = null;
+      });
+      _activate(tab);
+    } catch (error) {
+      if (!mounted || generation != _recordGeneration) return;
+      if (_accessLost(error)) {
+        _clearSubject(error);
+      } else {
+        setState(() => recordError = error);
+      }
+    }
+  }
 
   int _count(int tab) => switch (tab) {
     3 => _toReview,
@@ -315,7 +361,6 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
     super.initState();
     api = ref.read(servicesProvider).api;
     institute = ref.read(authProvider).institute!;
-    record = api.offering(institute, widget.id);
     requests = PagedController(
       (cursor) => api.roster(institute, widget.id, 'requested', cursor: cursor),
     );
@@ -337,74 +382,102 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
         BiometricAttempt.fromJson,
       ),
     );
-    _loadWork();
+    unawaited(_loadRecord());
+    unawaited(_loadWork());
     watchLifecycle();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (!mounted) return;
-      final selected = _routeTab;
-      if (selected != tab) _selectTab(selected, updateRoute: false);
-    });
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final selected = _routeTab;
-    if (selected != tab) {
+    _activate(_routeTab);
+  }
+
+  @override
+  void didUpdateWidget(TeacherClassDetail oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _activate(_routeTab);
+  }
+
+  Future<void> refresh() => ApiClient.freshReads(() async {
+    if (!mounted) return;
+    dirty.addAll(visited);
+    await Future.wait([_loadRecord(), _loadWork()]);
+  });
+
+  void _activate(int next) {
+    final changed = next != tab;
+    if (changed && scroll.hasClients) offsets[tab] = scroll.offset;
+    tab = next;
+    if (changed) {
+      final generation = ++scrollGeneration;
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted && selected != tab) {
-          _selectTab(selected, updateRoute: false);
+        if (!mounted || generation != scrollGeneration || !scroll.hasClients) {
+          return;
         }
+        scroll.jumpTo(
+          (offsets[next] ?? 0).clamp(0.0, scroll.position.maxScrollExtent),
+        );
       });
     }
-  }
-
-  Future<void> refresh() async {
-    if (!mounted) return;
-    final updated = api.offering(institute, widget.id);
-    setState(() {
-      record = updated;
-      sessionsVersion++;
-    });
-    await Future.wait([_loadSelectedTab(), ApiClient.freshReads(_loadWork)]);
-  }
-
-  Future<void> _loadSelectedTab() async {
-    if (tab == 2) await faces.load();
-    if (tab == 1) {
-      await Future.wait([
-        requests.load(),
-        students.load(),
-        pendingFaces.load(),
-      ]);
-    }
-  }
-
-  void _selectTab(int next, {bool updateRoute = true}) {
-    if (next == tab) return;
-    setState(() => tab = next);
-    _loadSelectedTab();
-    if (updateRoute) {
-      final name = _tabNames.entries
-          .firstWhere((entry) => entry.value == next)
-          .key;
-      final current = GoRouterState.of(context).uri;
-      context.push(
-        current
-            .replace(queryParameters: {...current.queryParameters, 'tab': name})
-            .toString(),
+    if (offering == null) return;
+    final first = visited.add(next);
+    final stale = dirty.remove(next);
+    if (!first && !stale) return;
+    if (next == 1 || next == 2) {
+      unawaited(
+        ApiClient.freshReads(() async {
+          final controllers = next == 1
+              ? [requests, students, pendingFaces]
+              : [faces];
+          await Future.wait(controllers.map((controller) => controller.load()));
+          if (!mounted) return;
+          for (final controller in controllers) {
+            final error = controller.error;
+            if (error != null && _accessLost(error)) {
+              _clearSubject(error);
+              break;
+            }
+          }
+        }),
       );
+    } else if (stale) {
+      versions[next] = (versions[next] ?? 0) + 1;
     }
+  }
+
+  void _selectTab(int next) {
+    if (next == tab) return;
+    final name = _tabNames.entries
+        .firstWhere((entry) => entry.value == next)
+        .key;
+    final current = GoRouterState.of(context).uri;
+    setState(() => _activate(next));
+    context.replace(
+      current
+          .replace(queryParameters: {...current.queryParameters, 'tab': name})
+          .toString(),
+    );
+  }
+
+  void _changed(Set<int> tabs) {
+    if (!mounted) return;
+    setState(() {
+      dirty.addAll(tabs.where(visited.contains));
+      _activate(tab);
+    });
+    unawaited(ApiClient.freshReads(_loadWork));
   }
 
   @override
   void refreshOnResume() {
-    refresh();
+    if (ModalRoute.isCurrentOf(context) == true) unawaited(refresh());
   }
 
   @override
   void dispose() {
     unwatchLifecycle();
+    scroll.dispose();
     requests.dispose();
     students.dispose();
     pendingFaces.dispose();
@@ -414,7 +487,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
 
   Future<void> review(Enrollment entry, bool approve) async {
     final reason = TextEditingController();
-    await showDialog<bool>(
+    final saved = await showDialog<bool>(
       context: context,
       builder: (_) => ActionDialog(
         title: approve ? 'Approve student?' : 'Decline request',
@@ -464,7 +537,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
       ),
     );
     reason.dispose();
-    if (mounted) await refresh();
+    if (saved == true) _changed({1, 2});
   }
 
   Future<void> code() async {
@@ -580,128 +653,142 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
   }
 
   @override
-  Widget build(BuildContext context) => FutureBuilder<Offering>(
-    future: record,
-    builder: (context, snapshot) {
-      if (snapshot.hasError) {
-        return ContentPage(
-          onRefresh: refresh,
-          children: [ErrorView(snapshot.error!, retry: refresh)],
-        );
-      }
-      if (!snapshot.hasData) {
-        return const ContentPage(children: [SkeletonCard(), SkeletonList()]);
-      }
-      final o = snapshot.data!;
-      final current = _tabs.firstWhere((t) => t.$1 == tab);
+  Widget build(BuildContext context) {
+    final o = offering;
+    if (o == null) {
       return ContentPage(
         onRefresh: refresh,
-        children: [
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => goBack(context, '/classes'),
-              icon: const Icon(Icons.arrow_back),
-              label: const Text('All subjects'),
-            ),
-          ),
-          _SubjectHero(
-            offering: o,
-            loadingCode: loadingCode,
-            onJoinCode: code,
-            onRefresh: refresh,
-          ),
-          _AttentionStrip(
-            items: [
-              if (_toReview > 0)
-                (
-                  Icons.rate_review_outlined,
-                  '$_toReview ${_toReview == 1 ? 'session' : 'sessions'} to review',
-                  3,
-                ),
-              if ((work?.joinRequests ?? 0) > 0)
-                (
-                  Icons.person_add_alt,
-                  '${work!.joinRequests} join ${work!.joinRequests == 1 ? 'request' : 'requests'}',
-                  1,
-                ),
-              if ((work?.faceReviews ?? 0) > 0)
-                (
-                  Icons.face_outlined,
-                  '${work!.faceReviews} face ${work!.faceReviews == 1 ? 'review' : 'reviews'}',
-                  2,
-                ),
-              if ((work?.openQueries ?? 0) > 0)
-                (
-                  Icons.forum_outlined,
-                  '${work!.openQueries} open ${work!.openQueries == 1 ? 'query' : 'queries'}',
-                  4,
-                ),
-            ],
-            loaded: work != null,
-            failed: work?.failed ?? const [],
-            onRetry: () => ApiClient.freshReads(_loadWork),
-            onOpen: _selectTab,
-          ),
-          const SizedBox(height: 20),
-          _SubjectTabs(
-            tabs: [for (final t in _tabs) (t.$1, t.$2, t.$3, _count(t.$1))],
-            selected: tab,
-            onSelect: _selectTab,
-          ),
-          const SizedBox(height: 12),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Icon(
-                Icons.info_outline,
-                size: 18,
-                color: Theme.of(context).colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: Text(
-                  current.$4,
-                  style: TextStyle(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 16),
-          AnimatedSwitcher(
-            duration: MediaQuery.disableAnimationsOf(context)
-                ? Duration.zero
-                : const Duration(milliseconds: 220),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            layoutBuilder: (current, previous) => Stack(
-              alignment: Alignment.topCenter,
-              children: [...previous, ?current],
-            ),
-            child: KeyedSubtree(key: ValueKey(tab), child: _tabBody()),
-          ),
-        ],
+        children: recordError == null
+            ? const [SkeletonCard(), SkeletonList()]
+            : [ErrorView(recordError!, retry: refresh)],
       );
-    },
-  );
+    }
+    final current = _tabs.firstWhere((t) => t.$1 == tab);
+    return ContentPage(
+      onRefresh: refresh,
+      controller: scroll,
+      children: [
+        if (recordError != null) ErrorView(recordError!, retry: refresh),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => goBack(context, '/classes'),
+            icon: const Icon(Icons.arrow_back),
+            label: const Text('All subjects'),
+          ),
+        ),
+        _SubjectHero(
+          offering: o,
+          loadingCode: loadingCode,
+          onJoinCode: code,
+          onRefresh: refresh,
+        ),
+        _AttentionStrip(
+          items: [
+            if (_toReview > 0)
+              (
+                Icons.rate_review_outlined,
+                '$_toReview ${_toReview == 1 ? 'session' : 'sessions'} to review',
+                3,
+              ),
+            if ((work?.joinRequests ?? 0) > 0)
+              (
+                Icons.person_add_alt,
+                '${work!.joinRequests} join ${work!.joinRequests == 1 ? 'request' : 'requests'}',
+                1,
+              ),
+            if ((work?.faceReviews ?? 0) > 0)
+              (
+                Icons.face_outlined,
+                '${work!.faceReviews} face ${work!.faceReviews == 1 ? 'review' : 'reviews'}',
+                2,
+              ),
+            if ((work?.openQueries ?? 0) > 0)
+              (
+                Icons.forum_outlined,
+                '${work!.openQueries} open ${work!.openQueries == 1 ? 'query' : 'queries'}',
+                4,
+              ),
+          ],
+          loaded: work != null || workFailed,
+          failed: workFailed ? const ['subject work'] : const [],
+          onRetry: () => ApiClient.freshReads(_loadWork),
+          onOpen: _selectTab,
+        ),
+        const SizedBox(height: 20),
+        _SubjectTabs(
+          tabs: [for (final t in _tabs) (t.$1, t.$2, t.$3, _count(t.$1))],
+          selected: tab,
+          onSelect: _selectTab,
+        ),
+        const SizedBox(height: 12),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(
+              Icons.info_outline,
+              size: 18,
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                current.$4,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 16),
+        for (final entry in _tabs)
+          if (visited.contains(entry.$1))
+            Offstage(
+              key: ValueKey(entry.$1),
+              offstage: entry.$1 != tab,
+              child: TickerMode(
+                enabled: entry.$1 == tab,
+                child: ExcludeFocus(
+                  excluding: entry.$1 != tab,
+                  child: _tabBody(entry.$1),
+                ),
+              ),
+            ),
+      ],
+    );
+  }
 
-  Widget _tabBody() => switch (tab) {
+  Widget _tabBody(int panel) => switch (panel) {
     3 => TeacherSessions(
       api: api,
       institute: institute,
       offering: widget.id,
       publishableKey: ref.read(servicesProvider).config.publishableKey,
-      version: sessionsVersion,
-      changed: _loadWork,
+      version: versions[panel] ?? 0,
+      changed: () => _changed({5}),
+      onAccessLost: _clearSubject,
     ),
-    2 => BiometricReviews(controller: faces, api: api, institute: institute),
-    4 => TeacherDisputes(api: api, institute: institute, offering: widget.id),
+    2 => BiometricReviews(
+      controller: faces,
+      api: api,
+      institute: institute,
+      changed: () => _changed({1, 2}),
+    ),
+    4 => TeacherDisputes(
+      api: api,
+      institute: institute,
+      offering: widget.id,
+      version: versions[panel] ?? 0,
+      changed: (accepted) => _changed({if (accepted) 5}),
+      onAccessLost: _clearSubject,
+    ),
     5 => AttendanceOverview(
       api: api,
       institute: institute,
       offering: widget.id,
+      version: versions[panel] ?? 0,
+      onAccessLost: _clearSubject,
     ),
     _ => _students(),
   };

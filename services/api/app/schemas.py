@@ -56,6 +56,7 @@ class OfferingWork(Offering):
     face_reviews: int
     open_queries: int
     sessions: list[SessionWork]
+    sessions_to_review: int | None = None
 
 
 class TeacherWorkSummary(Strict):

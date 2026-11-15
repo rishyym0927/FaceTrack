@@ -430,6 +430,7 @@ def install(app, engine, settings, principal, storage):
         offering_id: UUID,
         user: User,
         institute_id: Institute,
+        group: Literal["todo", "upcoming", "published", "cancelled"] | None = None,
         cursor: UUID | None = None,
         limit: Annotated[int, Query(ge=1, le=200)] = 50,
     ):
@@ -446,12 +447,20 @@ def install(app, engine, settings, principal, storage):
                 await many(
                     c,
                     """SELECT * FROM app.sessions WHERE institute_id=:i AND offering_id=:o
+                    AND (CAST(:g AS text) IS NULL OR
+                        CASE status
+                          WHEN 'scheduled' THEN 'upcoming'
+                          WHEN 'finalized' THEN 'published'
+                          WHEN 'cancelled' THEN 'cancelled'
+                          ELSE 'todo'
+                        END = :g)
                     AND (CAST(:cur AS uuid) IS NULL OR (starts_at,id)<(SELECT starts_at,id FROM app.sessions
                       WHERE institute_id=:i AND id=CAST(:cur AS uuid)))
                     ORDER BY starts_at DESC,id DESC LIMIT :n""",
                     {
                         "i": institute_id,
                         "o": offering_id,
+                        "g": group,
                         "cur": str(cursor) if cursor else None,
                         "n": limit + 1,
                     },

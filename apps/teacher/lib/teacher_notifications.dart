@@ -25,61 +25,30 @@ class SubjectWork {
   final Offering offering;
   int joinRequests = 0, faceReviews = 0, openQueries = 0;
   List<Json> sessions = [];
+  int sessionsToReview = 0;
   final failed = <String>[];
 }
 
 Future<SubjectWork> loadSubjectWork(
   ApiClient api,
   String institute,
-  Offering o,
+  String offering,
 ) async {
-  final w = SubjectWork(o);
-  Future<void> part(String name, Future<void> Function() load) async {
-    try {
-      await load();
-    } catch (_) {
-      w.failed.add(name);
-    }
-  }
-
-  await Future.wait([
-    part('join requests', () async {
-      w.joinRequests = (await fetchAllPages(
-        api,
-        '/v1/offerings/${o.id}/roster',
-        institute,
-        query: {'status': 'requested'},
-        maxPages: 2,
-      )).length;
-    }),
-    part('face reviews', () async {
-      w.faceReviews = (await fetchAllPages(
-        api,
-        '/v1/offerings/${o.id}/biometric-enrollments',
-        institute,
-        maxPages: 2,
-      )).length;
-    }),
-    part('attendance queries', () async {
-      w.openQueries = (await fetchAllPages(
-        api,
-        '/v1/offerings/${o.id}/attendance-disputes',
-        institute,
-        query: {'status': 'open'},
-        maxPages: 2,
-      )).length;
-    }),
-    part('sessions', () async {
-      w.sessions = await fetchAllPages(
-        api,
-        '/v1/sessions',
-        institute,
-        query: {'offering_id': o.id},
-        maxPages: 3,
-      );
-    }),
-  ]);
-  return w;
+  final result = await api.send(
+    'GET',
+    '/v1/teacher/work-summary',
+    institute: institute,
+    query: {'offering_id': offering},
+  );
+  final subject = (result['items'] as List).cast<Json>().singleWhere(
+    (row) => row['id'] == offering,
+    orElse: () => throw const AppFailure('Subject unavailable.', status: 404),
+  );
+  return SubjectWork(Offering.fromJson(subject))
+    ..joinRequests = subject['join_requests'] as int
+    ..faceReviews = subject['face_reviews'] as int
+    ..openQueries = subject['open_queries'] as int
+    ..sessionsToReview = subject['sessions_to_review'] as int;
 }
 
 Iterable<AppNotice> subjectNotices(SubjectWork w, {DateTime? now}) sync* {

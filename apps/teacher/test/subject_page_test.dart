@@ -7,6 +7,7 @@ import 'package:facetrack_teacher/teacher_sessions.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../packages/app_core/test/harness.dart';
 
@@ -35,25 +36,42 @@ Map<String, dynamic> _person(String id, String name, String status) => {
   'enrollment_number': '00$id',
 };
 
+const _offering = {
+  'id': 'o1',
+  'title': 'Discrete Mathematics',
+  'course_code': 'BAS 201',
+  'term_code': '2026-ODD',
+  'branch': 'CSE',
+  'semester': 3,
+  'section': 'CSE1',
+  'version': 1,
+  'status': 'active',
+};
+
+Map<String, dynamic> _summary(int queries) => {
+  'items': [
+    {
+      ..._offering,
+      'join_requests': 1,
+      'face_reviews': 0,
+      'open_queries': queries,
+      'sessions_to_review': 1,
+      'sessions': [],
+    },
+  ],
+  'truncated': false,
+};
+
 RoutesAdapter _adapter(Harness h) => RoutesAdapter((r) async {
   if (r.path == '/v1/offerings/o1/attendance-disputes') {
     return jsonResponse({
       'error': {'code': 'UNAVAILABLE'},
     }, 503);
   }
+  if (r.path == '/v1/teacher/work-summary') return jsonResponse(_summary(0));
   if (r.path == '/v1/me') return jsonResponse(h.account);
   if (r.path == '/v1/offerings/o1') {
-    return jsonResponse({
-      'id': 'o1',
-      'title': 'Discrete Mathematics',
-      'course_code': 'BAS 201',
-      'term_code': '2026-ODD',
-      'branch': 'CSE',
-      'semester': 3,
-      'section': 'CSE1',
-      'version': 1,
-      'status': 'active',
-    });
+    return jsonResponse(_offering);
   }
   if (r.path == '/v1/offerings/o1/roster') {
     final status = r.queryParameters['status'];
@@ -68,12 +86,19 @@ RoutesAdapter _adapter(Harness h) => RoutesAdapter((r) async {
   }
   if (r.path == '/v1/sessions') {
     return jsonResponse({
-      'items': [
-        _session('a', 'review_required', '10-30'),
-        _session('b', 'scheduled', '11-03'),
-        _session('c', 'finalized', '10-27'),
-        _session('d', 'cancelled', '10-20'),
-      ],
+      'items':
+          [
+                _session('a', 'review_required', '10-30'),
+                _session('b', 'scheduled', '11-03'),
+                _session('c', 'finalized', '10-27'),
+                _session('d', 'cancelled', '10-20'),
+              ]
+              .where(
+                (row) =>
+                    r.queryParameters['group'] == null ||
+                    sessionGroup(row).name == r.queryParameters['group'],
+              )
+              .toList(),
       'next_cursor': null,
     });
   }
@@ -101,16 +126,11 @@ void main() {
     var disputeCalls = 0;
     final base = _adapter(h);
     h.services.api.dio.httpClientAdapter = RoutesAdapter((request) async {
-      if (request.path != '/v1/offerings/o1/attendance-disputes') {
+      if (request.path != '/v1/teacher/work-summary') {
         return base.handler(request);
       }
       if (++disputeCalls == 1) return older.future;
-      return jsonResponse({
-        'items': [
-          {'id': 'new-query'},
-        ],
-        'next_cursor': null,
-      });
+      return jsonResponse(_summary(1));
     });
     await tester.pumpWidget(
       ProviderScope(
@@ -126,11 +146,70 @@ void main() {
     await tester.pumpAndSettle();
     expect(disputeCalls, 2);
     expect(find.text('1 open query'), findsOneWidget);
-    older.complete(jsonResponse({'items': [], 'next_cursor': null}));
+    older.complete(jsonResponse(_summary(0)));
     await tester.pumpAndSettle();
     expect(find.text('1 open query'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets(
+    'Real subject route keeps panels and fetches only on first visit',
+    (tester) async {
+      tester.view.physicalSize = const Size(1200, 2000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final h = (await tester.runAsync(
+        () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+      ))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      final reads = <String, int>{};
+      final base = _adapter(h);
+      h.services.api.dio.httpClientAdapter = RoutesAdapter((request) {
+        reads.update(request.path, (count) => count + 1, ifAbsent: () => 1);
+        return base.handler(request);
+      });
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [servicesProvider.overrideWithValue(h.services)],
+          child: ProductApp(
+            classesBuilder: (context) => TextButton(
+              onPressed: () => context.push('/classes/o1?tab=queries'),
+              child: const Text('Open subject'),
+            ),
+            detailBuilder: (_, id) => TeacherClassDetail(id: id),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open subject'));
+      await tester.pumpAndSettle();
+      expect(reads['/v1/sessions'], isNull);
+      expect(reads['/v1/offerings/o1/attendance-disputes'], 1);
+      await tester.tap(find.text('Sessions'));
+      await tester.pumpAndSettle();
+      expect(reads['/v1/sessions'], 1);
+      await tester.tap(find.widgetWithText(ChoiceChip, 'Published'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Queries'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Sessions'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ChoiceChip>(find.widgetWithText(ChoiceChip, 'Published'))
+            .selected,
+        isTrue,
+      );
+      expect(reads['/v1/sessions'], 2);
+      expect(reads['/v1/offerings/o1/attendance-disputes'], 1);
+      expect(reads['/v1/offerings/o1'], 1);
+      expect(reads['/v1/teacher/work-summary'], 1);
+      await tester.tap(find.text('All subjects'));
+      await tester.pumpAndSettle();
+      expect(find.text('Open subject'), findsOneWidget);
+    },
+  );
 
   for (final width in const [360.0, 1280.0]) {
     testWidgets(
@@ -161,16 +240,14 @@ void main() {
         // Pending work is a shortcut to its tab.
         expect(find.text('1 session to review'), findsOneWidget);
         expect(find.text('1 join request'), findsOneWidget);
-        expect(find.text('Could not load attendance queries.'), findsOneWidget);
-        expect(find.text('Retry counts'), findsOneWidget);
         expect(find.textContaining('All caught up'), findsNothing);
         // Sessions are grouped by what to do next, with filters.
-        expect(find.text('Needs your action'), findsOneWidget);
+        expect(find.text('Needs your action'), findsWidgets);
         expect(find.text('Upcoming'), findsWidgets);
         expect(find.text('Review attendance'), findsOneWidget);
-        await tester.tap(find.widgetWithText(ChoiceChip, 'Published 1'));
+        await tester.tap(find.widgetWithText(ChoiceChip, 'Published'));
         await tester.pumpAndSettle();
-        expect(find.text('Needs your action'), findsNothing);
+        expect(find.text('Review attendance'), findsNothing);
         expect(find.text('View attendance'), findsOneWidget);
         // The join-request chip opens Students, with requests first.
         await tester.tap(find.text('1 join request'));
