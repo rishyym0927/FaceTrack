@@ -12,8 +12,10 @@ Follow the [installation guide](../../docs/INSTALLATION.md) to start the API and
 ../../scripts/flutter pub get --enforce-lockfile
 ../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5300 --dart-define-from-file=../../.local/flutter/development.json
 ../../scripts/flutter test
-node --test test_web/classroom_capture_test.cjs
+node --test test_web/classroom_capture_test.cjs   # browser framing helpers (face tracker, light, tab-close guard)
 ```
+
+`lib/main_webcam_lab.dart` is a development harness: it shows the classroom scan page with the real or a fake browser camera and a pretend upload, with no sign-in or server. Build or run it with `-t lib/main_webcam_lab.dart`; for fake cameras start Chrome with `--use-fake-device-for-media-stream --use-fake-ui-for-media-stream` (add `--use-file-for-fake-video-capture=clip.y4m` to feed a video).
 
 For local Android use, run `../../scripts/android-connect` after connecting or reconnecting the authorized phone. The app ID is `dev.facetrack.teacher`. See [Windows setup](../../docs/WINDOWS_SETUP.md) for PowerShell commands and [Azure deployment](../../docs/DEPLOY_AZURE.md#phone-apps-release-build) for signed APKs that use HTTPS. Check the [project checkpoint](../../PROGRESS.md) for physical-device results.
 

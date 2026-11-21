@@ -18,9 +18,9 @@ Azure rates are Central India retail rates checked on 11 November 2026. The esti
 
 ## What the Azure server pays for
 
-The existing Azure server is a Linux `Standard_B2as_v2` in Central India with **2 virtual CPU cores and 8 GiB of memory**. Microsoft lists the AMD EPYC 7763v processor for this VM family. It is a burstable server, which means it can handle short spikes in work while it has CPU credits. It has no GPU. [Microsoft VM specifications](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/basv2-series)
+The Azure server is a Linux `Standard_B4as_v2` in Central India with **4 virtual CPU cores and 16 GiB of memory** (upgraded from `Standard_B2as_v2`, 2 cores and 8 GiB, on 21 November 2026; the retail price is about 0.098 USD per hour, about 72 USD for a month that runs 24 hours a day, against about 36 USD before). Microsoft lists the AMD EPYC 7763v processor for this VM family. It is a burstable server, which means it can handle short spikes in work while it has CPU credits. It has no GPU. [Microsoft VM specifications](https://learn.microsoft.com/en-us/azure/virtual-machines/sizes/general-purpose/basv2-series)
 
-- **The VM** serves both websites and runs the API used by both websites and Android apps. It also runs the job queue and one CPU worker that processes classroom recordings for attendance. These services share the same VM.
+- **The VM** serves both websites and runs the API used by both websites and Android apps. It also runs the job queue and two CPU workers that process classroom recordings for attendance side by side. These services share the same VM.
 - **The 64 GiB SSD** holds Ubuntu, application containers, model files and temporary processing files. Azure can also bill for disk transactions. Student records and private media are stored in Supabase.
 - **The static public IP** gives the college's web address a stable destination. The domain change uses the existing server and IP once college IT provides the subdomain and configures DNS.
 

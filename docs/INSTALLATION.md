@@ -304,7 +304,7 @@ The configured Mac can run services without Docker. Use six terminals from the r
 |---|---|---|
 | Redis | root | `redis-server .local/enrollment/redis.conf` |
 | API | `services/api` | `.venv/bin/uvicorn app.main:create_app --factory --host 127.0.0.1 --port 8000 --no-access-log` |
-| Celery | `services/worker` | `.venv/bin/python -m celery -A facetrack_worker.executor:app worker --pool=solo --concurrency=1 --loglevel=WARNING --without-gossip --without-mingle` |
+| Celery | `services/worker` | `.venv/bin/python -m celery -A facetrack_worker.executor:app worker --pool=solo --concurrency=1 --loglevel=WARNING --without-gossip --without-mingle` (one job per process; Compose runs two replicas, see [Azure deployment](DEPLOY_AZURE.md#capacity-and-sizing)) |
 | Agent | `services/worker` | `.venv/bin/python -m facetrack_worker.agent` |
 | Teacher | `apps/teacher` | `../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5300 --dart-define-from-file=../../.local/flutter/development.json` |
 | Student | `apps/student` | `../../scripts/flutter run -d chrome --web-hostname localhost --web-port 5301 --dart-define-from-file=../../.local/flutter/development.json` |
@@ -409,6 +409,7 @@ These tests simulate browser camera and upload behavior. Use the [camera validat
 | `CORS_ORIGINS` | Override for other origins | Exact JSON list. Defaults to localhost ports 5300 and 5301. |
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional | Lets admins create login accounts from the Admin tab; blank disables only that option |
 | `ENVIRONMENT` | Optional | Defaults to `development`. |
+| `WORKER_MAX_LEASES` | Optional | Jobs one worker identity may hold at once (default 2, at most 16). Keep it equal to the agent's `WORKER_SLOTS`; with 1 only one segment is processed at a time |
 | `RESEND_API_KEY`, `RESEND_FROM` | Optional | Faculty report email; blank disables delivery |
 | `FACULTY_REPORT_URL` | Email only | Teacher (faculty) application base URL |
 
@@ -423,6 +424,11 @@ These tests simulate browser camera and upload behavior. Use the [camera validat
 | `PROFILE_PATH` | Frozen recognition profile |
 | `MEDIA_ORIGIN` | Allowed Supabase media origin |
 | `TEMP_ROOT` | Private temporary job directory |
+| `WORKER_SLOTS` | Optional, default 1 (Compose sets 2). Jobs the agent keeps claimed at once; match the number of worker containers |
+| `RECOGNITION_SAMPLE_FPS` | Optional, default 4. Frames per second sampled from a classroom clip; 0 returns to the frozen 12-frame path |
+| `RECOGNITION_THREADS` | Optional, default one per CPU core (at most 8). Threads sharing one job's detection and embedding; 0 or 1 is the serial loop |
+| `RECOGNITION_EMBED_BUDGET` | Optional, default 500. Above this many usable faces in a clip only every k-th sampled frame is embedded; 0 turns it off |
+| `RECOGNITION_PIN_SESSIONS` | Optional, default 0. 1 gives each ONNX session one thread (embeddings then differ from the frozen ones by about 2e-4 per component) |
 
 Compose overrides the API, Redis, model/profile and temporary paths with container-safe values. `MEDIA_ORIGIN` and the token still come from the private worker file.
 

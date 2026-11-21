@@ -40,9 +40,18 @@ Use the provisioned `.env` and the field names in [`.env.example`](.env.example)
 | `MANIFEST_PATH`, `PROFILE_PATH` | Approved model manifest and frozen matching profile |
 | `MEDIA_ORIGIN` | Exact Storage origin used to validate download grants |
 | `TEMP_ROOT` | Private scratch directory for job inputs and results |
+| `WORKER_SLOTS` | Jobs the agent keeps claimed at once (default 1; Compose sets 2 with two worker containers). The API must allow as many leases per identity (`WORKER_MAX_LEASES`) |
+| `RECOGNITION_SAMPLE_FPS` | Frames per second sampled from a classroom clip (default 4; 0 = frozen 12-frame path) |
+| `RECOGNITION_THREADS` | Threads sharing one job's detection and embedding (default one per core, at most 8; 0 or 1 = serial) |
+| `RECOGNITION_EMBED_BUDGET` | Usable faces per clip above which only every k-th sampled frame is embedded (default 500; 0 = off) |
+| `RECOGNITION_PIN_SESSIONS` | 1 = one ONNX thread per session (not bit-identical to the frozen sessions; default off) |
 
 Compose sets `FACETRACK_CONTAINER_NETWORK=1` and supplies private `api` and `redis` hostnames
 and container paths. Use the token and Storage origin provisioned for that backend.
+
+## How a job runs
+
+`agent.py` claims up to `WORKER_SLOTS` jobs and hands each to Celery (`executor.py`, one job per container). The executor starts a per-job child process (`childproc.py`: own process group, exits if the worker dies) that loads the models while the media downloads, then waits for the verified file. `dense.py` decodes ahead in a helper thread, detects and aligns faces, embeds the usable crops in small chunks across threads, and merges results in frame order, so the observations equal the serial loop's. `media_cache.py` remembers a file's probe result and SHA-256 so they are computed once. Progress stages go to the API with the lease heartbeat. Timings in the job log include `embedding_ms`, `embed_every` and `embedded_faces`. On the 4-vCPU VM a 20 s clip with about 18 faces per frame and a 100-student roster took 6.1 s with the default threads and 11.0 s serially (identical results; measurements in [PROGRESS.md](../../PROGRESS.md)).
 
 ## Processing and privacy
 

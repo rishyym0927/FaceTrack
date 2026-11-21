@@ -12,6 +12,7 @@ FaceTrack runs online on a single Azure virtual machine. Data stays in the hoste
 ## The server
 
 - Azure for Students subscription, resource group `facetrack-rg`, VM `facetrack-vm`, Central India, `Standard_B4as_v2` (4 vCPU, 16 GB, burstable; resized from `Standard_B2as_v2` on 2026-11-21, about 72 USD/month at retail if running all month), Ubuntu 24.04, 64 GB Standard SSD, static public IP with DNS label `facetrack`. Check actual spend and credit in the Azure portal.
+- Processing: two `worker` containers (Compose `deploy.replicas: 2`, solo pool each) fed by one `agent` with `WORKER_SLOTS=2`; the API lets one worker identity hold `WORKER_MAX_LEASES` (default 2) leases. All three numbers must agree, otherwise jobs silently run one at a time. Details under [Capacity and sizing](#capacity-and-sizing).
 - Firewall: 80 and 443 open; SSH (22) only from the operator's IP. Port 8000 is never opened: the API listens on `127.0.0.1` and Caddy fronts it.
 - Login: `ssh -i ~/.ssh/facetrack_azure azureuser@facetrack.centralindia.cloudapp.azure.com`. Use the operator's authorized SSH key.
 - Layout: code in `/opt/facetrack` (from `git archive origin/main`), web builds served at `/srv/facetrack/{teacher,student}`, Caddy config in `/etc/caddy/Caddyfile` (copy of [deploy/azure/Caddyfile](../deploy/azure/Caddyfile)).
@@ -93,7 +94,8 @@ docker compose logs --tail 100 api worker agent
 ```
 
 - Containers restart automatically after a reboot.
-- Pause billing: `az vm deallocate -g facetrack-rg -n facetrack-vm`; resume: `az vm start -g facetrack-rg -n facetrack-vm` (the IP and name stay).
+- Pause billing: `az vm deallocate -g facetrack-rg -n facetrack-vm`; resume: `az vm start -g facetrack-rg -n facetrack-vm` (the IP and name stay). A resize reset the burst-credit bank to its starting balance, and it is not known whether a deallocate does; before a demo, leave the VM running for a day so the bank refills.
+- Container logs are deleted when the containers are recreated, which every deploy does. To keep the logs of a class, save them first: `scripts/logs --vm --since 24h <session-id>` or `ssh ... 'cd /opt/facetrack && sudo docker compose logs --no-log-prefix --since 24h api worker agent' > classes.log`.
 - SSH refused after the operator's IP changes: `az network nsg rule update -g facetrack-rg --nsg-name facetrack-vmNSG -n default-allow-ssh --source-address-prefixes <new-ip>/32`.
 - The worker credential is time-limited. An expired or rejected credential pauses processing while uploads wait in the queue. Contact the operator for credential replacement. After updating the private worker configuration, recreate the worker and agent with `docker compose up -d --force-recreate worker agent` and check the agent logs.
 - "Enrolment agent waiting for local API/broker" means the agent cannot reach the API or Redis (network or startup), not a credential problem.
@@ -154,8 +156,17 @@ badly shows `recognition_complete` (low `sample_fps`, many `small` or `blur` rej
 `not_seen` count) and the worker's per-stage timings. A teacher reading out the **Reference** line
 under an error finds the exact request.
 
+## Capacity and sizing
+
+From 21 November 2026 the VM is `Standard_B4as_v2` (4 vCPU, 16 GB), about 0.098 USD/hour (about 72 USD for a month running 24 hours; retail price, not the Students credit's actual draw).
+
+- **What limits a class.** Face embedding was 85 % of ML time (about 44 ms per face on 2 vCPU). Above `RECOGNITION_EMBED_BUDGET` faces per clip only every k-th frame is embedded, and a job's detection and embedding run on `RECOGNITION_THREADS` threads. Measured on the VM, 20 s clip, about 18 faces per frame, roster 100: 6.1 s per job (11.0 s serial); two at once 13 s each. A job also spends about 9 s in API round trips because the hosted database is in Tokyo, 125 ms away, and every sequential query costs that much.
+- **Burst credits.** Baseline is 40 % of the VM (1.6 vCPU). Full use of all four cores draws about 2.4 credits a minute net; the bank caps at 2,304 and refills at 96 an hour. Watch `CPU Credits Remaining` in Azure Metrics if you scan many classes back to back.
+- **Region.** The subscription's policy only allows `koreacentral, centralindia, austriaeast, malaysiawest, eastasia`; Japan East is blocked. Korea Central is the realistic region nearer the database, but a new VM changes the hostname (it contains `centralindia`), CORS, the web builds and every installed APK, so do it only between classes, not before a demo. The regional core quota is 6 vCPUs.
+- **Not measured:** real 24, 50 or 100-student classes, accuracy under the embed budget on crowded footage, and upload times on a real network.
+
 ## Limits to state honestly
 
-- B-series VMs are burstable: long recognition jobs can slow down once CPU credits run out.
+- B-series VMs are burstable: long recognition jobs can slow down once CPU credits run out (see Capacity and sizing).
 - The InsightFace model permission covers the non-commercial academic demonstration only.
 - The phone app still points wherever its APK was built for; a phone build against this server needs `--dart-define-from-file=.local/flutter/production.json`.
