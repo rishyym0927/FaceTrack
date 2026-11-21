@@ -12,7 +12,7 @@ from . import recognition_jobs as recognition
 from . import worker_api as work
 from .db import many, one, transaction
 from .errors import APIError
-from .security import expected_version, idempotent
+from .security import audit, expected_version, idempotent
 
 
 def install(app, engine, settings, principal, storage):
@@ -207,7 +207,7 @@ def install(app, engine, settings, principal, storage):
             )
 
     @app.get("/v1/biometric-enrollments/{identifier}/review-video")
-    async def video(identifier: UUID, user: User, institute_id: Institute):
+    async def video(identifier: UUID, request: Request, user: User, institute_id: Institute):
         async with transaction(engine, user.user_id, institute_id) as conn:
             a = await bio.get_attempt(conn, institute_id, identifier)
             await bio.review_access(conn, user.user_id, institute_id, a["student_id"])
@@ -233,6 +233,16 @@ def install(app, engine, settings, principal, storage):
                     "Review video is unavailable; a new recording may be required.",
                 )
             asset = dict(asset)
+            # Every signed URL for a student's face video leaves a trace of who asked.
+            await audit(
+                conn,
+                user.user_id,
+                institute_id,
+                "enrollment.review_video_url",
+                "enrollment_attempt",
+                identifier,
+                request.state.request_id,
+            )
         return {"url": await storage.download(asset), "expires_in": 60}
 
     @app.get("/v1/jobs/{identifier}")

@@ -160,7 +160,7 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
         },
       ),
     );
-    reason.dispose();
+    disposeAfterDialog(reason);
     if (submitted == true) {
       await refresh();
       if (mounted) {

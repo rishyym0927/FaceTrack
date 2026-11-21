@@ -69,6 +69,62 @@ void main() {
     expect(polls, 1);
   });
 
+  testWidgets('A preview still not ready after the polling limit says so and can be checked again', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    var polls = 0;
+    var ready = false;
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/offerings/class') return jsonResponse({'term_id': 'term'});
+      if (r.path == '/v1/terms/term/schedule') return jsonResponse({'schedule_revision': 1});
+      if (r.path == '/v1/timetable-imports/import') {
+        polls++;
+        return jsonResponse({
+          'status': ready ? 'rejected' : 'queued',
+          'preview_json': {'rows': []},
+        });
+      }
+      throw StateError('Unexpected request: ${r.path}');
+    });
+    tester.view.physicalSize = const Size(900, 2000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TeacherTimetable(
+              api: h.services.api,
+              institute: institute,
+              offering: 'class',
+              publishableKey: 'fixture-key',
+              changed: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final state = tester.state(find.byType(TeacherTimetable)) as dynamic;
+    state.importId = 'import';
+    state.poll();
+    for (var i = 0; i < 30; i++) {
+      await tester.pump(const Duration(seconds: 2));
+    }
+    expect(polls, 25);
+    expect(find.text('Validation is taking longer than usual.'), findsOneWidget);
+    ready = true;
+    await tester.tap(find.text('Check again'));
+    await tester.pump(const Duration(milliseconds: 100));
+    expect(polls, 26);
+    expect(find.text('Validation is taking longer than usual.'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('Timetable steps stay usable at 360 px and 200% text', (
     tester,
   ) async {

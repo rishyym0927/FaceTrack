@@ -84,6 +84,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # A runaway child or ffmpeg must not take the 16 GB VM down: the container is killed (and
+    # restarted) instead. A job's child normally needs well under 1 GB. `init` reaps the
+    # ffmpeg processes orphaned when a timed-out child's group is killed.
+    mem_limit: 5g
+    pids_limit: 512
+    init: true
     restart: unless-stopped
     logging: *logging
     networks: [facetrack-private]
@@ -101,6 +107,8 @@ services:
     depends_on:
       worker:
         condition: service_started
+    mem_limit: 512m
+    init: true
     restart: unless-stopped
     logging: *logging
     networks: [facetrack-private]

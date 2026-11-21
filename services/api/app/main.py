@@ -16,6 +16,7 @@ from sqlalchemy.exc import TimeoutError as PoolTimeout
 from starlette.exceptions import HTTPException
 
 from . import client_events, logs, schemas, services
+from .accounts import confirmed_account
 from .auth import Authenticator
 from .biometric_routes import install
 from .config import Settings
@@ -40,6 +41,7 @@ def _uuid_or_none(value):
 
 def create_app(settings: Settings | None = None, *, auth_transport=None):
     settings = settings or Settings()
+    logs.install_redaction()
     engine = make_engine(settings.database_url.get_secret_value())
     client = httpx.AsyncClient(timeout=5, transport=auth_transport, follow_redirects=False)
     auth = Authenticator(settings, client)
@@ -244,25 +246,26 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
             return {"status": "ready"}
         try:
             async with engine.connect() as conn:
-                row = await one(
+                # One statement (one round trip) for every readiness fact.
+                facts = await one(
                     conn,
-                    """SELECT NOT rolsuper AND NOT rolbypassrls AS restricted
-                    FROM pg_roles WHERE rolname=current_user""",
+                    """SELECT
+                    (SELECT NOT rolsuper AND NOT rolbypassrls FROM pg_roles
+                     WHERE rolname=current_user) AS restricted,
+                    (SELECT pg_has_role(current_user, c.relowner, 'MEMBER') FROM pg_class c
+                     JOIN pg_namespace n ON n.oid=c.relnamespace
+                     WHERE n.nspname='app' AND c.relname='offerings') AS owns,
+                    (SELECT count(*) FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+                     WHERE n.nspname='app' AND c.relkind='r' AND c.relrowsecurity
+                     AND c.relforcerowsecurity) AS policies,
+                    (SELECT version_num FROM public.alembic_version) AS version_num""",
                 )
-                owner = await one(
-                    conn,
-                    "SELECT pg_has_role(current_user, c.relowner, 'MEMBER') AS owns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='app' AND c.relname='offerings'",
-                )
-                policies = await one(
-                    conn,
-                    "SELECT count(*) AS count FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='app' AND c.relkind='r' AND c.relrowsecurity AND c.relforcerowsecurity",
-                )
-                revision = await one(conn, "SELECT version_num FROM public.alembic_version")
+            row, owner = ({"restricted": facts["restricted"]}, {"owns": facts["owns"]})
+            policies, revision = {"count": facts["policies"]}, facts
             configured = bool(settings.supabase_publishable_key.get_secret_value())
             if (
-                not row
-                or not row["restricted"]
-                or not owner
+                not row["restricted"]
+                or owner["owns"] is None
                 or owner["owns"]
                 or policies["count"] != 37
                 or revision["version_num"] != "0009_academic_edit"
@@ -296,7 +299,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     async def identity_claim(
         body: schemas.IdentityClaim, request: Request, user: User, institute_id: Institute, key: Key
     ):
-        email = await auth.confirmed_email(user)
+        email = await confirmed_account(auth, user, institute_id)
         async with transaction(engine, user.user_id, institute_id, email) as conn:
             return await services.claim(
                 conn, user.user_id, institute_id, email, body, key, request.state.request_id

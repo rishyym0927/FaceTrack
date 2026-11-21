@@ -223,3 +223,34 @@ async def test_a_reported_http_status_is_not_mistaken_for_a_server_error(backend
     await b.client.post("/v1/client-events", headers=b.headers("teacher"), json=body)
     entry = lines(caplog, "client_event")[-1]
     assert entry["http_status"] == 503 and "status" not in entry
+
+
+def test_uvicorn_tracebacks_and_secret_text_are_redacted(caplog):
+    import logging
+    import sys
+
+    from app import logs
+
+    logs.install_redaction()
+    try:
+        raise ValueError("student ada@example.test enrolment 0001")
+    except ValueError:
+        exc_info = sys.exc_info()
+    seen = []
+
+    class Capture(logging.Handler):
+        def emit(self, record):
+            seen.append((record.getMessage(), record.exc_info, record.exc_text))
+
+    handler = Capture()
+    log = logging.getLogger("uvicorn.error")
+    log.addHandler(handler)
+    try:
+        log.error("Exception in ASGI application", exc_info=exc_info)
+        log.error("fetched https://x.test/a?token=abc for ada@example.test")
+    finally:
+        log.removeHandler(handler)
+    message, info, text = seen[0]
+    assert message.startswith("Unhandled ValueError at ") and info is None and text is None
+    assert "ada@example.test" not in message and "0001" not in message
+    assert "ada@example.test" not in seen[1][0] and "token=abc" not in seen[1][0]

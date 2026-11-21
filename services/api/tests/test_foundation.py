@@ -628,3 +628,50 @@ async def test_exhausted_connection_pool_is_a_retryable_503(backend):
     r = await b.client.get("/v1/_pool_probe")
     assert r.status_code == 503, r.text
     assert r.json()["error"]["code"] == "DATABASE_UNAVAILABLE" and r.json()["error"]["retryable"]
+
+
+async def test_login_provisioned_by_another_institute_cannot_claim_here(backend):
+    b = backend
+    # An administrator's server-set marker names the institute that issued the login.
+    b.state["app_metadata"] = {"provisioned_institute": "00000000-0000-4000-8000-000000000001"}
+    denied = await b.claim()
+    assert denied.status_code == 404 and denied.json()["error"]["code"] == "CLAIM_UNAVAILABLE"
+    with connect(b.urls["owner"]) as conn:
+        linked = conn.execute(
+            "SELECT count(*) FROM app.students WHERE auth_user_id IS NOT NULL"
+        ).fetchone()[0]
+    assert linked == 0
+    # The issuing institute may still be claimed, and unmarked accounts behave as before.
+    b.state["app_metadata"] = {"provisioned_institute": b.ids["institute"].upper()}
+    assert (await b.claim()).status_code == 201
+    b.state["app_metadata"] = {}
+    assert (await b.claim("student2", "0002", key="plain")).status_code == 201
+
+
+async def test_admin_created_login_records_the_issuing_institute():
+    import json
+
+    import httpx
+
+    from app import admin_routes
+    from app.config import Settings
+
+    sent = []
+
+    def handler(request):
+        sent.append(json.loads(request.content))
+        return httpx.Response(201, json={"id": "11111111-1111-4111-8111-111111111111"})
+
+    settings = Settings(
+        _env_file=None,
+        database_url="postgresql+psycopg://x@localhost/x",
+        supabase_url="https://foundation.supabase.invalid",
+        supabase_publishable_key="p",
+        supabase_service_role_key="service",
+        join_code_keys={"v1": "12" * 32},
+    )
+    async with httpx.AsyncClient(transport=httpx.MockTransport(handler)) as client:
+        auth = SimpleNamespace(client=client)
+        await admin_routes.create_login_account(auth, settings, "a@example.test", "pw", "inst-a")
+    assert sent[0]["email_confirm"] is True
+    assert sent[0]["app_metadata"] == {"provisioned_institute": "inst-a"}

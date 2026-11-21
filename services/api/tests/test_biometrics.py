@@ -428,3 +428,27 @@ async def test_teacher_review_list_first_page_and_cursor(bio):
     for label in ["student1", "unassigned", "other_teacher"]:
         denied = await b.client.get(route, headers=b.headers(label))
         assert denied.status_code in (403, 404), denied.text
+
+
+async def test_review_video_url_is_audited(bio):
+    b = bio
+    a, c, j, body = await process(b)
+    r = await b.client.get(
+        f"/v1/biometric-enrollments/{a['id']}/review-video", headers=b.headers("teacher")
+    )
+    assert r.status_code == 200, r.text
+    with connect(b.urls["owner"]) as conn:
+        rows = conn.execute(
+            "SELECT actor_id,resource_id FROM app.audit_events WHERE action='enrollment.review_video_url'"
+        ).fetchall()
+    assert len(rows) == 1 and str(rows[0][0]) == b.users["teacher"]["id"]
+    assert str(rows[0][1]) == a["id"]
+    # A refused request issues no URL and leaves no audit row.
+    denied = await b.client.get(
+        f"/v1/biometric-enrollments/{a['id']}/review-video", headers=b.headers("unassigned")
+    )
+    assert denied.status_code in (403, 404)
+    with connect(b.urls["owner"]) as conn:
+        assert conn.execute(
+            "SELECT count(*) FROM app.audit_events WHERE action='enrollment.review_video_url'"
+        ).fetchone()[0] == 1

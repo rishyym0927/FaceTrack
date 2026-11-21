@@ -59,4 +59,24 @@ void main() {
     expect(await File(logout.path).exists(), isFalse);
     expect(await store.load(), isEmpty);
   });
+
+  test('a copy that could not be recorded in the manifest is deleted, not orphaned', () async {
+    SharedPreferences.setMockInitialValues({});
+    final directory = await Directory.systemTemp.createTemp('classroom-orphan-');
+    addTearDown(() => directory.delete(recursive: true));
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(
+          const MethodChannel('plugins.flutter.io/path_provider'),
+          (_) async => directory.path,
+        );
+    final original = await File('${directory.path}/clip2.mp4').writeAsString('clip');
+    final store = ClassroomPending('teacher', 'institute', 'session');
+    await expectLater(
+      store.retain(XFile(original.path), {'unencodable': Object()}),
+      throwsA(anything),
+    );
+    final folder = Directory('${directory.path}/classroom-pending');
+    expect(folder.listSync().whereType<File>(), isEmpty);
+    expect(await original.exists(), isTrue, reason: 'the camera file is untouched');
+  });
 }

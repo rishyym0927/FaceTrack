@@ -309,6 +309,99 @@ void main() {
     expect(unloadWarningActive, isFalse);
   });
 
+  group('Session page polling', () {
+    Future<void> open(WidgetTester tester, Harness h) async {
+      tester.view.physicalSize = const Size(1280, 2400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [servicesProvider.overrideWithValue(h.services)],
+          child: ProductApp(
+            classesBuilder: (_) => Builder(
+              builder: (context) => TextButton(
+                onPressed: () => context.go('/sessions/session01'),
+                child: const Text('Open session fixture'),
+              ),
+            ),
+            sessionBuilder: (_, id) => TeacherSessionDetail(id: id),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Open session fixture'));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    Json attendance({required bool processing}) => {
+      'session': {
+        'id': 'session',
+        'offering_id': 'class',
+        'status': 'open',
+        'starts_at': '2026-10-30T05:00:00Z',
+        'version': 1,
+        'attendance_revision': 0,
+      },
+      'processing_pending': processing,
+      'items': [_row('1', 'unassessed'), _row('2', 'unassessed')],
+    };
+
+    testWidgets('looks every 15 s while open and idle, every 5 s while processing', (tester) async {
+      final h = (await tester.runAsync(
+        () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+      ))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      var processing = false, calls = 0;
+      h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+        if (r.path == '/v1/me') return jsonResponse(h.account);
+        if (r.path == '/v1/sessions/session01/attendance') {
+          calls++;
+          return jsonResponse(attendance(processing: processing));
+        }
+        return jsonResponse({'items': [], 'next_cursor': null});
+      });
+      await open(tester, h);
+      expect(calls, 1);
+      await tester.pump(const Duration(seconds: 6));
+      expect(calls, 1, reason: 'an idle open session is not polled every 5 s');
+      await tester.pump(const Duration(seconds: 10));
+      expect(calls, 2);
+      processing = true;
+      await tester.pump(const Duration(seconds: 16));
+      expect(calls, 3);
+      // Now processing: the next look is 5 s away.
+      await tester.pump(const Duration(seconds: 6));
+      expect(calls, 4);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('stops polling when the session is no longer accessible', (tester) async {
+      final h = (await tester.runAsync(
+        () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+      ))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      var calls = 0;
+      h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+        if (r.path == '/v1/me') return jsonResponse(h.account);
+        if (r.path == '/v1/sessions/session01/attendance') {
+          calls++;
+          return calls == 1
+              ? jsonResponse(attendance(processing: false))
+              : jsonResponse({'error': {'code': 'NOT_FOUND'}}, 404);
+        }
+        return jsonResponse({'items': [], 'next_cursor': null});
+      });
+      await open(tester, h);
+      await tester.pump(const Duration(seconds: 16));
+      expect(calls, 2);
+      await tester.pump(const Duration(minutes: 2));
+      expect(calls, 2, reason: 'a 404 must not be polled again');
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   testWidgets('Session steps show the current step and cancelled state', (
     tester,
   ) async {

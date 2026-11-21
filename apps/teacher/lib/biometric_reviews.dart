@@ -141,7 +141,7 @@ class BiometricReviews extends StatelessWidget {
         ),
       ),
     );
-    reason.dispose();
+    disposeAfterDialog(reason);
     if (changed == true && context.mounted) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(

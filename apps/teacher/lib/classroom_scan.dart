@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'keep_awake.dart';
 import 'processing_progress.dart';
 import 'recognition_board.dart';
 
@@ -499,6 +500,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
   @override
   void initState() {
     super.initState();
+    unawaited(keepScreenAwake(true));
     lifecycle = AppLifecycleListener(onPause: () => unawaited(scan.stop()));
     if (!scan.ended) {
       WidgetsBinding.instance.addPostFrameCallback(
@@ -540,6 +542,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
 
   @override
   void dispose() {
+    unawaited(keepScreenAwake(false));
     poll?.cancel();
     lifecycle?.dispose();
     results.dispose();

@@ -104,7 +104,7 @@ class _TeacherDisputesState extends State<TeacherDisputes> {
         },
       ),
     );
-    reason.dispose();
+    disposeAfterDialog(reason);
     if (changed == true && mounted) {
       widget.changed?.call(decision == 'accepted');
       await controller.load();

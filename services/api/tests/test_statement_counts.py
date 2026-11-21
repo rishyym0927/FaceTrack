@@ -8,13 +8,24 @@ a COMMIT. These tests count them with SQLAlchemy events and fail when a route ge
 import json
 import os
 from contextlib import contextmanager
-from datetime import datetime, timezone
 
 from sqlalchemy import event
 from test_attendance import queued_capture, recognition_ready
 from test_biometrics import bio as bio  # noqa: F401
 
 REPORT = os.environ.get("STATEMENT_REPORT")
+# Round trips (statements + BEGIN + COMMIT) a route may take. Before the round-trip work these were
+# 10, 18 (two requests), 5, 6, 9, 8 and 11 respectively.
+BUDGET = {
+    "attendance full (idle)": 5,
+    "attendance unchanged": 4,
+    "offerings": 5,
+    "work-summary": 6,
+    "work-summary offering": 7,
+    "offering detail": 8,
+    "idle claim": 5,
+    "capture status": 4,
+}
 
 
 class Counter:
@@ -65,7 +76,8 @@ def record(name, counter):
             )
 
 
-async def measured(b, name, call, budget):
+async def measured(b, name, call, budget=None):
+    budget = BUDGET.get(name, 999) if budget is None else budget
     await call()  # warm the pooled connection's role check
     with counting(b.app) as counter:
         response = await call()
@@ -84,15 +96,16 @@ async def test_hot_route_round_trips(bio):
     async def attendance():
         return await b.client.get(f"/v1/sessions/{sid}/attendance", headers=teacher)
 
+    version = (await attendance()).json()["session"]["version"]
+
     async def unchanged():
-        version = (await attendance()).json()["session"]["version"]
         return await b.client.get(
             f"/v1/sessions/{sid}/attendance",
             headers=teacher,
             params={"known_version": version, "known_processing": "false"},
         )
 
-    big = 999
+    big = None
     await measured(b, "attendance full (idle)", attendance, big)
     await measured(b, "attendance unchanged", unchanged, big)
     await measured(b, "offerings", lambda: b.client.get("/v1/offerings", headers=teacher), big)
@@ -171,4 +184,3 @@ async def test_hot_route_round_trips(bio):
         done = await b.client.post(f"/internal/v1/jobs/{jid}/complete", headers=b.wh, json=body)
     record("job complete", counter)
     assert done.status_code == 200, done.text
-    assert datetime.now(timezone.utc)  # keep import used

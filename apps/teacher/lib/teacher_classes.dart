@@ -541,7 +541,7 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
         },
       ),
     );
-    reason.dispose();
+    disposeAfterDialog(reason);
     if (saved == true) _changed({1, 2});
   }
 

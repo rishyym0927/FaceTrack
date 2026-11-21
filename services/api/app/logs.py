@@ -16,6 +16,7 @@ import logging
 import math
 import re
 import time
+import traceback
 from collections import deque
 from datetime import UTC, datetime
 
@@ -132,3 +133,40 @@ class Budget:
             for stale in [k for k, w in self.seen.items() if not w or now - w[-1] > self.seconds]:
                 del self.seen[stale]
         return True
+
+
+class RedactUvicornLogs(logging.Filter):
+    """Keep uvicorn's own log lines (notably re-raised exceptions) free of personal data.
+
+    Starlette re-raises unhandled exceptions after our handler answered, so uvicorn logs the
+    full traceback, whose exception text can carry SQL parameters or request values. Records
+    with an exception are reduced to the exception type and code location; other text has
+    anything secret-looking replaced. Our own structured events use a child logger and are
+    already filtered by ``clean``.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.exc_info and record.exc_info[1] is not None:
+            error = record.exc_info[1]
+            frames = traceback.extract_tb(record.exc_info[2]) if record.exc_info[2] else []
+            where = f"{frames[-1].filename.rsplit('/', 1)[-1]}:{frames[-1].lineno}" if frames else "?"
+            record.msg, record.args = f"Unhandled {type(error).__name__} at {where}", None
+            record.exc_info = record.exc_text = None
+            record.stack_info = None
+            return True
+        try:
+            message = record.getMessage()
+        except Exception:
+            message = str(record.msg)
+        if SENSITIVE_VALUE.search(message):
+            message = SENSITIVE_VALUE.sub("[redacted]", message)
+        record.msg, record.args = message, None
+        return True
+
+
+def install_redaction() -> None:
+    """Attach the filter to uvicorn's loggers once."""
+    for name in ("uvicorn", "uvicorn.error"):
+        target = logging.getLogger(name)
+        if not any(isinstance(f, RedactUvicornLogs) for f in target.filters):
+            target.addFilter(RedactUvicornLogs())

@@ -4429,7 +4429,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/Epoch"
+                "$ref": "#/components/schemas/Heartbeat"
               }
             }
           }
@@ -13085,6 +13085,7 @@
               "upload_done",
               "camera_failed",
               "camera_interrupted",
+              "camera_switched",
               "api_error",
               "app_error"
             ],
@@ -13766,6 +13767,53 @@
           "semester"
         ],
         "title": "GroupEdit"
+      },
+      "Heartbeat": {
+        "properties": {
+          "epoch": {
+            "type": "integer",
+            "exclusiveMinimum": 0.0,
+            "title": "Epoch"
+          },
+          "stage": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "preparing",
+                  "detecting",
+                  "recognizing",
+                  "matching",
+                  "finalizing"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stage"
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 100.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Percent"
+          }
+        },
+        "additionalProperties": false,
+        "type": "object",
+        "required": [
+          "epoch"
+        ],
+        "title": "Heartbeat",
+        "description": "A lease renewal that may also say which processing step the job is on."
       },
       "IdentityClaim": {
         "properties": {

@@ -651,6 +651,11 @@ class _ActionDialogState extends State<ActionDialog> {
   );
 }
 
+/// Disposes a dialog's controller once the dialog's exit animation can no longer use it.
+/// Disposing right after `showDialog` returns can hit a controller the closing dialog still reads.
+void disposeAfterDialog(ChangeNotifier controller) =>
+    Future<void>.delayed(const Duration(milliseconds: 400), controller.dispose);
+
 String? requiredText(String? value) =>
     (value == null || value.trim().isEmpty) ? 'This field is required.' : null;
 void showMessage(BuildContext context, String message) =>

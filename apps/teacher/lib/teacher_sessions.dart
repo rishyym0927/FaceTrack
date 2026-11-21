@@ -229,7 +229,7 @@ class _TeacherSessionsState extends State<TeacherSessions> {
         ),
       ),
     );
-    room.dispose();
+    disposeAfterDialog(room);
     if (saved == true && mounted) {
       await load();
       if (mounted) widget.changed?.call();
@@ -828,12 +828,19 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       data?['processing_pending'] as bool? ??
       _captureIsPending(capture?['status']);
 
+  /// How soon to look again: quickly only while something is being processed or a scan is
+  /// running, slowly while the session is merely open, never while the app is in the background.
+  Duration get pollInterval =>
+      processingPending || scanActive
+      ? const Duration(seconds: 5)
+      : const Duration(seconds: 15);
+
   void _schedulePoll({bool failed = false}) {
     poll?.cancel();
     if (!mounted || !foreground) return;
     if (data?['session']?['status'] == 'open' || processingPending) {
       poll = Timer(
-        Duration(seconds: failed ? 15 : 5),
+        failed ? const Duration(seconds: 15) : pollInterval,
         () => load(keepDecisions: true, conditional: true),
       );
     }
@@ -907,7 +914,14 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               ? e
               : const AppFailure('Could not load this session. Retry.'),
         );
-        _schedulePoll(failed: true);
+        // Access lost or session gone: polling again cannot help; the error has a Retry.
+        final denied = e is AppFailure && const {401, 403, 404}.contains(e.status);
+        if (denied) {
+          poll?.cancel();
+          poll = null;
+        } else {
+          _schedulePoll(failed: true);
+        }
       }
     }
   }
@@ -1014,7 +1028,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         },
       ),
     );
-    reason.dispose();
+    disposeAfterDialog(reason);
     await load();
     if (mounted && data?['session']['status'] == 'cancelled') {
       await camera.interrupt();
@@ -1390,7 +1404,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         },
       ),
     );
-    reason.dispose();
+    disposeAfterDialog(reason);
     await load();
   }
 

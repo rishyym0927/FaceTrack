@@ -142,7 +142,24 @@ async def academics(conn, actor, institute, kind, cursor, limit):
     return page(rows, limit)
 
 
+ROLES_CTE = """r AS (SELECT coalesce(array_agg(m.role),CAST('{}' AS text[])) AS roles
+    FROM app.memberships m JOIN app.institutes inst ON inst.id=m.institute_id
+    WHERE m.institute_id=:i AND m.auth_user_id=:a AND m.status='active' AND inst.status='active')"""
+
+
 async def offering_list(conn, actor, institute, cursor, limit, *, faculty_only=False):
+    # The roles are read inside the list query (one round trip). An empty answer is
+    # ambiguous (no membership, a bad cursor, or simply nothing to list), so only then do the
+    # separate checks run, in their original order, to produce the same errors or empty page.
+    query = _offering_query("'admin'=ANY(r.roles)", "'teacher'=ANY(r.roles)",
+                            "FALSE" if faculty_only else "'student'=ANY(r.roles)")
+    rows = await many(
+        conn,
+        query,
+        {"i": institute, "a": actor, "cursor": cursor, "limit": limit + 1},
+    )
+    if rows:
+        return page(rows, limit)
     permissions = await (staff if faculty_only else roles)(conn, actor, institute)
     await check_cursor(
         conn,
@@ -150,44 +167,40 @@ async def offering_list(conn, actor, institute, cursor, limit, *, faculty_only=F
         "SELECT 1 FROM app.offerings WHERE institute_id=:i AND id=CAST(:cur AS uuid)",
         {"i": institute},
     )
-    query = f"""SELECT {OFFERING_FIELDS}
-        FROM app.offerings o {OFFERING_JOINS} WHERE o.institute_id=:i AND (CAST(:cursor AS uuid) IS NULL
-        OR (c.code,g.section,o.id)>(SELECT c2.code,g2.section,o2.id FROM app.offerings o2
-          JOIN app.courses c2 ON c2.institute_id=o2.institute_id AND c2.id=o2.course_id
-          JOIN app.class_groups g2 ON g2.institute_id=o2.institute_id AND g2.id=o2.class_group_id
-          WHERE o2.institute_id=:i AND o2.id=CAST(:cursor AS uuid))) AND (
-        :admin OR EXISTS (SELECT 1 FROM app.offering_teachers ot JOIN app.teachers t
-        ON t.institute_id=ot.institute_id AND t.id=ot.teacher_id
-        WHERE ot.institute_id=o.institute_id AND ot.offering_id=o.id AND ot.status='active'
-        AND t.auth_user_id=:a AND t.status='approved' AND :faculty)
-        OR EXISTS (SELECT 1 FROM app.course_enrollments e JOIN app.students s
-        ON s.institute_id=e.institute_id AND s.id=e.student_id
-        WHERE e.institute_id=o.institute_id AND e.offering_id=o.id
-        AND e.status IN ('requested','active') AND s.auth_user_id=:a AND s.status='approved'
-        AND :student)) ORDER BY c.code,g.section,o.id LIMIT :limit"""
     rows = await many(
         conn,
-        query,
-        {
-            "i": institute,
-            "a": actor,
-            "admin": "admin" in permissions,
-            "faculty": "teacher" in permissions,
-            "student": not faculty_only and "student" in permissions,
-            "cursor": cursor,
-            "limit": limit + 1,
-        },
+        _offering_query(
+            str("admin" in permissions).upper(),
+            str("teacher" in permissions).upper(),
+            str(not faculty_only and "student" in permissions).upper(),
+        ),
+        {"i": institute, "a": actor, "cursor": cursor, "limit": limit + 1},
     )
     return page(rows, limit)
 
 
-async def work_summary(conn, actor, institute, offering=None):
-    permissions = await staff(conn, actor, institute)
-    if offering is not None:
-        await teacher_access(conn, actor, institute, offering)
-    rows = await many(
-        conn,
-        f"""SELECT {OFFERING_FIELDS},
+def _offering_query(admin, faculty, student):
+    return f"""WITH {ROLES_CTE}
+        SELECT {OFFERING_FIELDS}
+        FROM r, app.offerings o {OFFERING_JOINS} WHERE o.institute_id=:i AND (CAST(:cursor AS uuid) IS NULL
+        OR (c.code,g.section,o.id)>(SELECT c2.code,g2.section,o2.id FROM app.offerings o2
+          JOIN app.courses c2 ON c2.institute_id=o2.institute_id AND c2.id=o2.course_id
+          JOIN app.class_groups g2 ON g2.institute_id=o2.institute_id AND g2.id=o2.class_group_id
+          WHERE o2.institute_id=:i AND o2.id=CAST(:cursor AS uuid))) AND (
+        {admin} OR EXISTS (SELECT 1 FROM app.offering_teachers ot JOIN app.teachers t
+        ON t.institute_id=ot.institute_id AND t.id=ot.teacher_id
+        WHERE ot.institute_id=o.institute_id AND ot.offering_id=o.id AND ot.status='active'
+        AND t.auth_user_id=:a AND t.status='approved' AND {faculty})
+        OR EXISTS (SELECT 1 FROM app.course_enrollments e JOIN app.students s
+        ON s.institute_id=e.institute_id AND s.id=e.student_id
+        WHERE e.institute_id=o.institute_id AND e.offering_id=o.id
+        AND e.status IN ('requested','active') AND s.auth_user_id=:a AND s.status='approved'
+        AND {student})) ORDER BY c.code,g.section,o.id LIMIT :limit"""
+
+
+def _work_query(admin, teacher, extra=""):
+    return f"""WITH {ROLES_CTE}
+        SELECT {OFFERING_FIELDS},
             (SELECT count(*) FROM app.course_enrollments e
              WHERE (e.institute_id,e.offering_id)=(o.institute_id,o.id)
                AND e.status='requested') AS join_requests,
@@ -212,15 +225,33 @@ async def work_summary(conn, actor, institute, offering=None):
                      AND (s.status IN ('closed','review_required','no_data')
                        OR (s.status='open' AND s.starts_at<=now()-interval '3 hours'))
                    ORDER BY s.starts_at DESC,s.id LIMIT 150) action) END AS sessions
-        FROM app.offerings o {OFFERING_JOINS}
-        WHERE o.institute_id=:i AND (CAST(:o AS uuid) IS NULL OR o.id=:o) AND (:admin OR EXISTS (
+        FROM {extra}app.offerings o {OFFERING_JOINS}
+        WHERE o.institute_id=:i AND (CAST(:o AS uuid) IS NULL OR o.id=:o) AND ({admin} OR ({teacher} AND EXISTS (
           SELECT 1 FROM app.offering_teachers ot
           JOIN app.teachers t ON (t.institute_id,t.id)=(ot.institute_id,ot.teacher_id)
           WHERE (ot.institute_id,ot.offering_id)=(o.institute_id,o.id)
-            AND ot.status='active' AND t.auth_user_id=:a AND t.status='approved'))
-        ORDER BY c.code,g.section,o.id LIMIT 101""",
-        {"i": institute, "a": actor, "o": offering, "admin": "admin" in permissions},
+            AND ot.status='active' AND t.auth_user_id=:a AND t.status='approved')))
+        ORDER BY c.code,g.section,o.id LIMIT 101"""
+
+
+async def work_summary(conn, actor, institute, offering=None):
+    # Roles ride inside the query (one round trip). Only an empty answer needs the separate
+    # checks, which then report the same errors as before or confirm there is nothing to show.
+    params = {"i": institute, "a": actor, "o": offering}
+    rows = await many(
+        conn,
+        _work_query("'admin'=ANY(r.roles)", "'teacher'=ANY(r.roles)", "r, "),
+        params,
     )
+    if not rows:
+        permissions = await staff(conn, actor, institute)
+        if offering is not None:
+            await teacher_access(conn, actor, institute, offering)
+        rows = await many(
+            conn,
+            _work_query(str("admin" in permissions).upper(), "TRUE"),
+            params,
+        )
     return {"items": [dict(row) for row in rows[:100]], "truncated": len(rows) > 100}
 
 

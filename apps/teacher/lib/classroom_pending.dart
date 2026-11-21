@@ -98,7 +98,13 @@ class ClassroomPending {
             : <Map<String, dynamic>>[];
         final path = await files.retain(file.path);
         entries.add({'path': path, 'upload': upload});
-        await _write(entries);
+        try {
+          await _write(entries);
+        } catch (_) {
+          // The copy is in no manifest, so nothing would ever delete it (15 MB per failure).
+          await files.remove(path);
+          rethrow;
+        }
         return XFile(path);
       });
 

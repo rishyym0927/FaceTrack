@@ -22,12 +22,12 @@ def make_admin(b, label="unassigned"):
 
 async def test_existing_auth_account_is_never_reassigned_or_reset(monkeypatch):
     """An email collision may belong to another institute or an unrelated user."""
-    async def existing_account(auth, settings, email, password):
+    async def existing_account(auth, settings, email, password, institute):
         raise APIError(409, "ACCOUNT_EXISTS", "An account with that email already exists.")
 
     monkeypatch.setattr(admin_routes, "create_login_account", existing_account)
     with pytest.raises(APIError) as error:
-        await admin_routes.obtain_login(None, None, None, "person@example.test", "new-password")
+        await admin_routes.obtain_login(None, None, None, "person@example.test", "new-password", "inst")
     assert error.value.code == "ACCOUNT_EXISTS"
 
 
@@ -136,7 +136,7 @@ async def test_admin_teacher_creation_with_login_links_account_and_role(backend,
             (UUID(auth_id), "newfaculty@example.test"),
         )
 
-    async def fake_login(auth, settings, email, password):
+    async def fake_login(auth, settings, email, password, institute):
         return auth_id
 
     monkeypatch.setattr(admin_routes, "create_login_account", fake_login)
@@ -210,7 +210,7 @@ async def test_admin_adds_login_to_existing_student_and_links_it(backend, monkey
         )
     seen = {}
 
-    async def fake_login(auth, settings, email, password):
+    async def fake_login(auth, settings, email, password, institute):
         seen["email"] = email
         return auth_id
 

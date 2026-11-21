@@ -65,6 +65,9 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
   String? resumeUrl;
   int pollGeneration = 0;
 
+  /// The preview was still not ready when polling stopped; the user can check again.
+  bool pollTimedOut = false;
+
   @override
   void initState() {
     super.initState();
@@ -263,6 +266,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
   Future<void> poll() async {
     if (importId == null) return;
     final current = ++pollGeneration;
+    if (pollTimedOut && mounted) setState(() => pollTimedOut = false);
     for (var n = 0; n < 25; n++) {
       if (!mounted || current != pollGeneration) return;
       final response = await widget.api.send(
@@ -287,6 +291,15 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
         return;
       }
       await Future<void>.delayed(const Duration(seconds: 2));
+    }
+    if (mounted && current == pollGeneration) setState(() => pollTimedOut = true);
+  }
+
+  Future<void> checkAgain() async {
+    try {
+      await poll();
+    } catch (e) {
+      if (mounted) setState(() => error = friendlyError(e));
     }
   }
 
@@ -441,7 +454,22 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
               const LinearProgressIndicator(
                 semanticsLabel: 'Validating timetable',
               ),
-              if (preview?['status'] == 'queued')
+              if (pollTimedOut)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    spacing: 8,
+                    children: [
+                      const Text('Validation is taking longer than usual.'),
+                      TextButton(
+                        onPressed: checkAgain,
+                        child: const Text('Check again'),
+                      ),
+                    ],
+                  ),
+                )
+              else if (preview?['status'] == 'queued')
                 const Padding(
                   padding: EdgeInsets.only(top: 6),
                   child: Text('Waiting for validation…'),

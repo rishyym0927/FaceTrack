@@ -49,10 +49,19 @@ async def _admin_auth(auth, settings, method, path="", **kwargs):
         ) from exc
 
 
-async def create_login_account(auth, settings, email: str, password: str) -> str:
+async def create_login_account(auth, settings, email: str, password: str, institute) -> str:
     """Provision a confirmed Supabase Auth account via the service-role admin API."""
     response = await _admin_auth(
-        auth, settings, "POST", json={"email": email, "password": password, "email_confirm": True}
+        auth,
+        settings,
+        "POST",
+        json={
+            "email": email,
+            "password": password,
+            "email_confirm": True,
+            # Server-set marker: this login may only claim an identity of the issuing institute.
+            "app_metadata": {"provisioned_institute": str(institute)},
+        },
     )
     if response.status_code in (200, 201):
         try:
@@ -72,9 +81,11 @@ async def delete_login_account(auth, settings, auth_user_id: str):
         pass
 
 
-async def obtain_login(conn, auth, settings, email: str, password: str) -> tuple[str, bool]:
+async def obtain_login(
+    conn, auth, settings, email: str, password: str, institute
+) -> tuple[str, bool]:
     """Create a fresh login only; an existing account needs its owner's recovery flow."""
-    return await create_login_account(auth, settings, email, password), True
+    return await create_login_account(auth, settings, email, password, institute), True
 
 
 async def link_login(conn, auth, settings, kind, identity_id, auth_user_id, created):
@@ -342,13 +353,13 @@ def install(app, engine, settings, principal, storage, auth):
     @app.post("/v1/admin/teachers", status_code=201)
     async def create_teacher(body: TeacherCreate, request: Request, user: User, institute_id: Institute, key: Key):
         return await provision(
-            request, user, institute_id, body, key, _identity_call(body, "teacher", auth, settings)
+            request, user, institute_id, body, key, _identity_call(body, "teacher", auth, settings, institute_id)
         )
 
     @app.post("/v1/admin/students", status_code=201)
     async def create_student(body: IdentityCreate, request: Request, user: User, institute_id: Institute, key: Key):
         return await provision(
-            request, user, institute_id, body, key, _identity_call(body, "student", auth, settings)
+            request, user, institute_id, body, key, _identity_call(body, "student", auth, settings, institute_id)
         )
 
     async def add_login(kind, identity_id, body, request, user, institute_id, key):
@@ -367,7 +378,7 @@ def install(app, engine, settings, principal, storage, auth):
             if row["auth_user_id"]:
                 raise APIError(409, "LOGIN_EXISTS", "This person already has a login account.")
             auth_user_id, created = await obtain_login(
-                conn, auth, settings, row["official_email"], body.password
+                conn, auth, settings, row["official_email"], body.password, institute_id
             )
             await link_login(conn, auth, settings, role, identity_id, auth_user_id, created)
             return {"id": str(identity_id), "auth_user_id": auth_user_id, "login_created": True}
@@ -411,7 +422,7 @@ def install(app, engine, settings, principal, storage, auth):
         return await provision(request, user, institute_id, body, key, call)
 
 
-def _identity_call(body, kind, auth, settings):
+def _identity_call(body, kind, auth, settings, institute_id):
     """Build the write that creates an identity row and, optionally, a login account."""
     number_column = {"teacher": "admin_create_teacher", "student": "admin_create_student"}[kind]
 
@@ -432,7 +443,7 @@ def _identity_call(body, kind, auth, settings):
         auth_user_id = None
         if body.create_login:
             auth_user_id, created = await obtain_login(
-                conn, auth, settings, email, body.password
+                conn, auth, settings, email, body.password, institute_id
             )
             await link_login(conn, auth, settings, kind, identity_id, auth_user_id, created)
         return {"id": identity_id, "auth_user_id": auth_user_id, "login_created": bool(auth_user_id)}

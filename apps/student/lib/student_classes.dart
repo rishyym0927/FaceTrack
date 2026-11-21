@@ -132,7 +132,7 @@ class _StudentClassesState extends ConsumerState<StudentClasses>
         },
       ),
     );
-    code.dispose();
+    disposeAfterDialog(code);
     if (mounted && submitted == true) await controller.load();
   }
 

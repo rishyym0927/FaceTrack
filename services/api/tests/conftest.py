@@ -68,7 +68,7 @@ async def backend():
         supabase_publishable_key="fixture-public-key",
         join_code_keys={"v1": "12" * 32},
     )
-    state = {"outage": False, "confirmed": True, "email_override": None}
+    state = {"outage": False, "confirmed": True, "email_override": None, "app_metadata": {}}
 
     def token(label="teacher", **overrides):
         claims = {
@@ -101,6 +101,7 @@ async def backend():
                     "id": user["id"],
                     "email": state["email_override"] or user["email"],
                     "email_confirmed_at": "2026-10-22T00:00:00Z" if state["confirmed"] else None,
+                    "app_metadata": state["app_metadata"],
                 },
             )
         return httpx.Response(404)
