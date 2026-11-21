@@ -103,6 +103,50 @@ docker logs --tail 50 facetrack-project-enrolment-worker
 
 From the operator's authorized database console, verify an active, unexpired worker credential for the correct institute. Check that its permitted job types include `report` and that `last_seen_at` is recent. Check the report job and report record for `succeeded` and `ready`. After restoring the correct worker permission, let existing jobs run before requesting another report. See the [worker guide](../services/worker/README.md) for processing and credential details.
 
+## Reading the logs
+
+Every service writes **one JSON object per line**: `ts`, `service`, `event`, `level` where
+relevant, and correlation ids. The API, the worker and the agent log to Docker (rotated: 5 files
+of 10 MB each per service). The apps send anonymous diagnostics to `POST /v1/client-events`, which
+the API writes to the same log as `client_event` lines.
+
+**Trace a problem**
+
+```sh
+scripts/logs --vm <session-id>        # everything about one class: requests, jobs, app events
+scripts/logs --vm <8+ chars of ref>   # the "Reference: ..." line shown under an error in the app
+scripts/logs --vm --errors            # recent warnings and errors only
+scripts/logs --vm --resources         # CPU, memory and disk readings (one per minute)
+scripts/logs --vm --since 6h <id>     # look further back (default 1h)
+```
+
+Drop `--vm` on the VM itself or on a Mac running the Docker stack. Ids that work: an attendance
+session id, a capture id, a job id, or the start of a request id.
+
+| Event | Service | What it tells you |
+|---|---|---|
+| `request` | api | route template, status, error `code`, duration, DB wait, `session_id`/`capture_id`/`job_id` |
+| `recognition_complete` | api | roster size, students recognised, frames, detections, rejects by gate (`edge`, `small`, `landmarks`, `brightness`, `blur`), median face size, sample fps, per-stage timings, histogram of reasons |
+| `job_failed`, `lease_expired` | api | failed jobs with their code and attempt, and leases that ran out |
+| `database_error`, `unhandled_error` | api | exception type, SQLSTATE or code location. Never the message |
+| `job_dispatched`, `claim_paused` | agent | job hand-off to the worker, and why it is not claiming |
+| `agent_notice`, `agent_recovered` | agent | recurring problems (API unreachable, credential rejected, broker down), logged once a minute with a repeat count |
+| `resources` | agent | CPU %, load, memory available, disk free and used %, queue backlog |
+| `job_start`, `download_done`, `inference_done`, `job_done` | worker | each stage with durations |
+| `job_failed`, `worker_error`, `lease_lost` | worker | failure code and the **stage** it reached (`input`, `download`, `inference`, `complete`) |
+| `client_event` | api | from the apps: `scan_started`, `segment_recorded`, `upload_retry`, `upload_done`, `upload_failed`, `camera_failed`, `camera_interrupted`, `api_error`, `app_error`, `scan_stopped` |
+
+**What is never logged:** names, emails, enrolment numbers, tokens, signed URLs, embeddings,
+frames, or per-student scores. Logging code drops any field with such a name and any value that
+looks like an email, token or URL, and the app diagnostics endpoint only accepts a fixed list of
+event names and short numeric or code fields. Do not add free-text fields.
+
+**Reading a failed class:** start with `scripts/logs --vm <session-id>`. A recording that never
+processed shows `upload_*` client events and `request` lines for the capture; one that processed
+badly shows `recognition_complete` (low `sample_fps`, many `small` or `blur` rejects, a large
+`not_seen` count) and the worker's per-stage timings. A teacher reading out the **Reference** line
+under an error finds the exact request.
+
 ## Limits to state honestly
 
 - B-series VMs are burstable: long recognition jobs can slow down once CPU credits run out.

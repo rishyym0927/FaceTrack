@@ -8,16 +8,22 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import 'api.dart';
 import 'config.dart';
+import 'diagnostics.dart';
 import 'storage.dart';
 
 class AppServices {
   AppServices(this.config, this.client, this.storage)
-    : api = ApiClient(client, config.apiUrl);
+    : api = ApiClient(client, config.apiUrl),
+      diagnostics = Diagnostics(app: config.roleName) {
+    api.diagnostics = diagnostics;
+    diagnostics.send = api.postDiagnostics;
+  }
   final AppConfig config;
   final SupabaseClient client;
   final LocalStorage storage;
   Future<void> Function()? clearPrivateMedia;
   final ApiClient api;
+  final Diagnostics diagnostics;
   static Future<AppServices> initialize(AppConfig config) async {
     config.validate();
     final LocalStorage storage = kIsWeb
@@ -165,6 +171,7 @@ class AuthController extends ChangeNotifier {
     error = null;
     loading = false;
     services.api.clear();
+    services.diagnostics.clear();
     try {
       await services.clearPrivateMedia?.call();
     } catch (_) {}

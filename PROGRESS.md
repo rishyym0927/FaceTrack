@@ -350,6 +350,13 @@ The root suite's expected failure records the frozen baseline's degenerate-landm
 - **VM (read-only).** 2 vCPU (one core, 2 threads), 7.9 GiB RAM, idle, 1,211 burst credits with almost none consumed this week. A stale second agent and worker (`facetrack-project-enrolment-*`) are still running there.
 - Not done: commit, push, deploy, VM resize, load tests at 50 and 100 students.
 
+## 2026-11-21 logging and monitoring (not deployed)
+
+- **Structured JSON logs everywhere.** API (`app/logs.py`), worker and agent (`facetrack_worker/log.py`) write one JSON line per event with `request_id` and `session_id` / `capture_id` / `job_id`. Fields with sensitive names and values that look like emails, tokens or URLs are dropped before writing. Recognition summaries (counts, rejection gates, timings, reason histogram), job stages and failures with the stage reached, lease loss, and a once-a-minute host resource reading are logged. Agent outage notices are de-duplicated.
+- **App diagnostics.** Web and phone apps send anonymous, whitelisted events (camera, upload retries and failures, API errors, crashes by type) to the new `POST /v1/client-events`, which only writes to the log (no storage, no migration). Rate-limited per user; apps buffer and never block on it. Errors in the apps show a short **Reference** that matches the server's request id. Web builds carry the git revision as `APP_VERSION`.
+- **Operations.** Docker log rotation (5 x 10 MB per service), `scripts/logs` to trace a session, job, capture or request id, and a "Reading the logs" section in `docs/DEPLOY_AZURE.md`.
+- **Not done / not verified:** Azure alerts (logs only, by choice), phone-side verification of the new events, and the live behaviour of the events route on the VM until deployed.
+
 ## Setup and privacy notes
 
 - The public repository cannot run real inference by itself. Private `.env`, model, profile and demo credentials must be provisioned or securely transferred.

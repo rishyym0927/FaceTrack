@@ -477,7 +477,8 @@ async def test_withdrawal_blocks_inflight_recognition_commit(bio):
         assert c.execute("SELECT count(*) FROM app.recognition_evidence").fetchone()[0] == 0
 
 
-async def test_teacher_confirms_absence_and_student_disputes_latest_publication(bio):
+async def test_teacher_confirms_absence_and_student_disputes_latest_publication(bio, caplog):
+    caplog.set_level("INFO", logger="uvicorn.error.facetrack")
     b = bio
     with connect(b.urls["owner"]) as c:
         unseen = c.execute(
@@ -539,6 +540,21 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
             "SELECT quality_json FROM app.captures WHERE session_id=%s", (s["id"],)
         ).fetchone()[0]
     assert summary["reason"] == "seen_too_briefly" and summary["observations"] == 1
+    import json as _json
+
+    summary_lines = [
+        _json.loads(r.getMessage())
+        for r in caplog.records
+        if r.name == "uvicorn.error.facetrack" and '"recognition_complete"' in r.getMessage()
+    ]
+    assert len(summary_lines) == 1
+    done = summary_lines[0]
+    assert done["recognised"] == 1 and done["roster"] == 2
+    assert done["reasons"] == {"seen_too_briefly": 1}
+    assert done["reject_reasons"] == {"small": 1} and done["face_px_median"] == 64
+    assert done["quality"]["sampled_frames"] == 12 and "processing_total_ms" in done["timings"]
+    for private in (data["roster"][1]["student_id"], "Synthetic"):
+        assert private not in _json.dumps(done)
     assert stored["reject_reasons"] == {"small": 1} and stored["face_px_median"] == 64
     attendance = (
         await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))

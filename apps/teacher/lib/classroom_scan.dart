@@ -27,6 +27,22 @@ String? terminalClassroomUploadMessage(Object error) {
 /// upload; capture pauses (camera still open) only when that many are waiting, so the queue
 /// never grows without bound. A flaky connection is retried automatically with a growing
 /// delay and never closes the camera.
+/// Diagnostic hook: a fixed event name plus a few bounded numbers. Never file names or text.
+typedef ScanEvent =
+    void Function(
+      String name, {
+      String? code,
+      int? attempt,
+      int? bytes,
+      int? count,
+      int? durationMs,
+    });
+
+String _codeOf(Object error) =>
+    error is AppFailure && error.code != null
+    ? error.code!
+    : error.runtimeType.toString();
+
 class ClassroomScan extends ChangeNotifier {
   ClassroomScan(this.camera, this.upload, {
     Future<XFile> Function(XFile)? retain,
@@ -35,6 +51,7 @@ class ClassroomScan extends ChangeNotifier {
     this.maxQueued = 4,
     this.maxUploadRetries = 12,
     Future<void> Function(Duration)? wait,
+    this.onEvent,
   }) : retain = retain ?? _unchanged,
        remove = remove ?? _removeOwned,
        wait = wait ?? Future.delayed {
@@ -47,6 +64,7 @@ class ClassroomScan extends ChangeNotifier {
   }
   final GuidedCamera camera;
   final int maxQueued, maxUploadRetries;
+  final ScanEvent? onEvent;
   final Future<void> Function(Duration) wait;
   final Future<void> Function(XFile) upload;
   final Future<XFile> Function(XFile) retain;
@@ -81,6 +99,7 @@ class ClassroomScan extends ChangeNotifier {
     if (closed || ended || scanning || camera.busy || error != null) return;
     cameraError = null;
     scanning = true;
+    onEvent?.call('scan_started');
     _emit();
     await camera.initialize();
     if (closed || ended) return;
@@ -133,6 +152,7 @@ class ClassroomScan extends ChangeNotifier {
         final saved = await retain(file);
         _queue.add(saved);
         recorded++;
+        onEvent?.call('segment_recorded', count: recorded, bytes: await _size(saved));
         if (saved.path != file.path) await removeOwnedClip(file.path);
       } catch (_) {
         _queue.add(file);
@@ -148,6 +168,14 @@ class ClassroomScan extends ChangeNotifier {
     await _next();
   }
 
+  static Future<int?> _size(XFile file) async {
+    try {
+      return await file.length();
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _send() async {
     if (sending || closed || error != null || _queue.isEmpty) return;
     sending = true;
@@ -156,15 +184,23 @@ class ClassroomScan extends ChangeNotifier {
     try {
       while (_queue.isNotEmpty && !closed) {
         final file = _queue.first;
+        final began = DateTime.now();
         try {
           reportUpload('Preparing upload…');
           await upload(file);
+          onEvent?.call(
+            'upload_done',
+            count: submitted + 1,
+            attempt: failures,
+            durationMs: DateTime.now().difference(began).inMilliseconds,
+          );
           failures = 0;
           reconnecting = false;
         } catch (failure) {
           if (closed) return;
           final terminalMessage = terminalClassroomUploadMessage(failure);
           if (terminalMessage != null) {
+            onEvent?.call('upload_failed', code: _codeOf(failure), attempt: failures);
             retryable = false;
             error = terminalMessage;
             reconnecting = false;
@@ -173,6 +209,7 @@ class ClassroomScan extends ChangeNotifier {
           }
           failures++;
           if (failures > maxUploadRetries) {
+            onEvent?.call('upload_failed', code: 'retries_exhausted', attempt: failures);
             retryable = true;
             reconnecting = false;
             error =
@@ -181,6 +218,7 @@ class ClassroomScan extends ChangeNotifier {
             return;
           }
           // Transient: keep the camera recording and try the same segment again.
+          onEvent?.call('upload_retry', code: _codeOf(failure), attempt: failures);
           reconnecting = true;
           final seconds = backoffSeconds(failures);
           reportUpload('Connection problem. Retrying in $seconds s…');
@@ -201,6 +239,7 @@ class ClassroomScan extends ChangeNotifier {
   }
 
   Future<void> stop() async {
+    if (!ended) onEvent?.call('scan_stopped', count: submitted);
     scanning = false;
     ended = true;
     _emit();

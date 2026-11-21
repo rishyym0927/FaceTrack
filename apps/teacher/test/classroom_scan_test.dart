@@ -152,6 +152,52 @@ void main() {
     expect(scan.error, contains('Upload paused'));
     expect(scan.pending, 1);
   });
+  test('a flaky upload leaves a readable, privacy-safe trail of events', () async {
+    final camera = FakeScanCamera();
+    final trail = <String>[];
+    var failures = 2;
+    final scan = ClassroomScan(
+      camera,
+      (file) async {
+        if (failures-- > 0) throw StateError('offline at https://secret.invalid/?token=1');
+      },
+      wait: (_) async {},
+      onEvent: (name, {code, attempt, bytes, count, durationMs}) =>
+          trail.add('$name:${code ?? ''}:${attempt ?? ''}:${count ?? ''}'),
+    );
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('private-file-name');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    await scan.stop();
+    expect(trail, [
+      'scan_started:::',
+      'segment_recorded:::1',
+      'upload_retry:StateError:1:',
+      'upload_retry:StateError:2:',
+      'upload_done::2:1',
+      'scan_stopped:::1',
+    ]);
+    // Only a class name and numbers: neither the file name nor the error text.
+    expect(trail.join(), isNot(contains('private')));
+    expect(trail.join(), isNot(contains('secret')));
+  });
+  test('a terminal upload failure is reported once with its code', () async {
+    final camera = FakeScanCamera();
+    final trail = <String>[];
+    final scan = ClassroomScan(
+      camera,
+      (file) async => throw const AppFailure('expired', code: 'UPLOAD_EXPIRED'),
+      onEvent: (name, {code, attempt, bytes, count, durationMs}) =>
+          trail.add('$name:${code ?? ''}'),
+    );
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('x');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(trail.where((e) => e.startsWith('upload_failed')), ['upload_failed:UPLOAD_EXPIRED']);
+    expect(trail.where((e) => e.startsWith('upload_retry')), isEmpty);
+  });
   test('camera failure can restart without an upload retry', () async {
     final camera = FakeScanCamera()..available = false;
     final scan = ClassroomScan(camera, (_) async {});

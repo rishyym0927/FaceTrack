@@ -714,6 +714,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     institute = ref.read(authProvider).institute!;
     exitGuard = ref.read(sessionExitGuardProvider)..enter(widget.id);
     camera.addListener(changed);
+    camera.onEvent = (name, {code}) =>
+        services.diagnostics.record(name, sessionId: widget.id, code: code);
     lifecycle = AppLifecycleListener(
       onHide: () {
         foreground = false;
@@ -1171,6 +1173,16 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           },
           remove: (file) => store.remove(file.path),
           recovered: [for (final entry in recovered) XFile(entry['path'] as String)],
+          onEvent: (name, {code, attempt, bytes, count, durationMs}) =>
+              services.diagnostics.record(
+                name,
+                sessionId: widget.id,
+                code: code,
+                attempt: attempt,
+                bytes: bytes,
+                count: count,
+                durationMs: durationMs,
+              ),
         );
         if (!mounted) return;
         await Navigator.of(context, rootNavigator: true).push<void>(

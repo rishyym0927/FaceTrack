@@ -1,6 +1,7 @@
 export 'src/config.dart';
 export 'src/auth.dart';
 export 'src/api.dart';
+export 'src/diagnostics.dart';
 export 'src/widgets.dart';
 export 'src/product_app.dart';
 export 'src/notifications.dart';

@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+import logging
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from uuid import uuid4
@@ -10,6 +11,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from sqlalchemy import text
 
 from . import biometrics as bio
+from . import logs
 from .db import many, one, transaction
 from .errors import APIError
 
@@ -108,12 +110,14 @@ async def reconcile(conn, worker):
                 ),
                 {"i": i, "id": asset["id"]},
             )
-    await conn.execute(
+    expired = await conn.execute(
         text("""UPDATE app.jobs SET state=CASE WHEN attempts>=3 THEN 'failed' ELSE 'retry_wait' END,
         stage='lease_expired',error_code='LEASE_EXPIRED',available_at=now()+interval '5 seconds'
         WHERE institute_id=:i AND state IN ('leased','running') AND lease_expires_at<=now()"""),
         {"i": i},
     )
+    if expired.rowcount:
+        logs.event("lease_expired", level=logging.WARNING, jobs=expired.rowcount)
     await conn.execute(
         text("""UPDATE app.enrollment_attempts a SET status='failed',reason='Worker retries exhausted.',version=a.version+1
         FROM app.jobs j WHERE j.institute_id=:i AND j.enrollment_attempt_id=a.id AND a.institute_id=j.institute_id
@@ -390,6 +394,16 @@ async def fail(conn, worker, identifier, body):
         and body.code in ("DOWNLOAD_UNAVAILABLE", "PROCESS_TIMEOUT", "WORKER_ERROR")
     )
     state = "retry_wait" if retry else "failed"
+    logs.event(
+        "job_failed",
+        level=logging.WARNING,
+        job_id=identifier,
+        kind=job["kind"],
+        code=body.code,
+        attempts=job["attempts"],
+        retryable=body.retryable,
+        will_retry=retry,
+    )
     await conn.execute(
         text(
             "UPDATE app.jobs SET state=:s,stage=:s,error_code=:c,available_at=:at WHERE institute_id=:i AND id=:id"

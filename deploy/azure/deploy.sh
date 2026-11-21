@@ -64,7 +64,8 @@ git -C "$ROOT" worktree add --detach -q "$WT" "$TARGET"
 
 for app in teacher student; do
   (cd "$WT/apps/$app" && "$ROOT/scripts/flutter" pub get --enforce-lockfile >/dev/null &&
-    "$ROOT/scripts/flutter" build web --release --base-href "/$app/" --dart-define-from-file="$CFG")
+    "$ROOT/scripts/flutter" build web --release --base-href "/$app/" --dart-define-from-file="$CFG" \
+      --dart-define=APP_VERSION="$REV")
 done
 WEB_ROOT=/srv/facetrack
 WEB_STAGE=$(ssh_vm 'set -e

@@ -1,0 +1,54 @@
+#!/bin/sh
+# Follow one class, job or failing request through the API, worker and agent logs.
+#
+#   scripts/logs <id>                 session id, capture id, job id, or the first 8+ characters
+#                                     of a request id ("Reference: ..." shown in the app)
+#   scripts/logs --errors             only warnings and errors
+#   scripts/logs --resources          recent server CPU / memory / disk readings
+#   scripts/logs --since 2h <id>      look further back (default 1h)
+#   scripts/logs --vm <id>            read the Azure VM's logs over SSH instead of local Docker
+#   scripts/logs --stdin <id>         filter log lines piped in (used by the tests)
+#
+# Every line is one JSON object (see docs/DEPLOY_AZURE.md). jq pretty-prints when installed.
+set -eu
+SINCE=1h MODE=local ID="" ERRORS=0 RESOURCES=0
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --since) SINCE=${2:?--since needs a value}; shift ;;
+    --vm) MODE=vm ;;
+    --stdin) MODE=stdin ;;
+    --errors) ERRORS=1 ;;
+    --resources) RESOURCES=1 ;;
+    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    -*) echo "Unknown option $1" >&2; exit 2 ;;
+    *) ID=$1 ;;
+  esac
+  shift
+done
+case "$SINCE" in ''|*[!0-9a-z]*) echo "Invalid --since value." >&2; exit 2 ;; esac
+case "$ID" in *[!A-Za-z0-9-]*) echo "The id may only contain letters, digits and dashes." >&2; exit 2 ;; esac
+[ -n "$ID" ] || [ "$ERRORS" = 1 ] || [ "$RESOURCES" = 1 ] || { sed -n '2,13p' "$0" >&2; exit 2; }
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+source_logs() {
+  case "$MODE" in
+    stdin) cat ;;
+    vm)
+      ssh -i "${FACETRACK_SSH_KEY:-$HOME/.ssh/facetrack_azure}" -o ConnectTimeout=15 \
+        "azureuser@${FACETRACK_HOST:-facetrack.centralindia.cloudapp.azure.com}" \
+        "cd /opt/facetrack && sudo docker compose logs --no-log-prefix --since $SINCE api worker agent" ;;
+    *) (cd "$ROOT" && docker compose logs --no-log-prefix --since "$SINCE" api worker agent) ;;
+  esac
+}
+pretty() { if command -v jq >/dev/null 2>&1; then jq -c . 2>/dev/null || cat; else cat; fi; }
+
+# Keep only JSON event lines (uvicorn prefixes its own with "INFO:").
+filter() {
+  sed -n 's/^[A-Za-z]*:\{0,1\} *\({.*}\)$/\1/p' |
+    if [ "$RESOURCES" = 1 ]; then grep -E '"event": ?"resources"' | tail -n 20
+    else
+      if [ -n "$ID" ]; then grep -F -- "$ID"; else cat; fi |
+        if [ "$ERRORS" = 1 ]; then grep -E '"level": ?"(warning|error)"|"status": ?[45][0-9][0-9]'; else cat; fi
+    fi
+}
+source_logs | filter | pretty

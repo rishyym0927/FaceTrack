@@ -8,11 +8,20 @@
 # this file, kept for existing Windows scripts.
 name: facetrack
 
+# Container logs are rotated so they can never fill the disk: at most 5 files of 10 MB each
+# per service. See docs/DEPLOY_AZURE.md ("Reading the logs").
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   redis:
     image: redis:7.4-alpine
     command: ["redis-server", "--save", "", "--appendonly", "no"]
     restart: unless-stopped
+    logging: *logging
     networks: [facetrack-private]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -34,6 +43,7 @@ services:
       - ./services/worker:/workspace/services/worker
       - ./.local:/workspace/.local
     restart: unless-stopped
+    logging: *logging
     networks: [facetrack-private]
     healthcheck:
       test:
@@ -70,6 +80,7 @@ services:
       redis:
         condition: service_healthy
     restart: unless-stopped
+    logging: *logging
     networks: [facetrack-private]
 
   agent:
@@ -86,6 +97,7 @@ services:
       worker:
         condition: service_started
     restart: unless-stopped
+    logging: *logging
     networks: [facetrack-private]
 
   # Client model-test page (docs/MODEL_TEST_CONSOLE.md). Started only with `--profile console`;
@@ -111,6 +123,7 @@ services:
       - ./.local/console-web:/workspace/.local/console-web:ro
       - console-data:/data
     restart: "no"
+    logging: *logging
     networks: [facetrack-private]
 
 networks:

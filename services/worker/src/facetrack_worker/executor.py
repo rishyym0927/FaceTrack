@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import httpx
 from celery import Celery
 
-from . import config
+from . import config, log
 from .inference import run_child
 
 app = Celery("facetrack-enrollment", broker=config.REDIS)
@@ -79,8 +79,9 @@ def post_with_retry(client, path, body, attempts=3):
     return 0
 
 
-def post_fail(client, job, epoch, code, retryable):
+def post_fail(client, job, epoch, code, retryable, stage=None):
     # A failed /fail is retried here, never followed by a second, different /fail.
+    log.event("job_failed", "warning", job_id=job, code=code, retryable=retryable, stage=stage)
     post_with_retry(
         client,
         f"/internal/v1/jobs/{job}/fail",
@@ -139,6 +140,9 @@ def stop_child(process):
 def enroll(job, epoch):
     config.validate()
     stop, lost = threading.Event(), threading.Event()
+    started = time.monotonic()
+    stage = "start"
+    log.event("job_start", job_id=job, epoch=epoch)
 
     def heartbeat():
         last = time.monotonic()
@@ -149,11 +153,14 @@ def enroll(job, epoch):
                     last = time.monotonic()
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code in LEASE_LOST:
+                        log.event("lease_lost", "warning", job_id=job, reason="heartbeat_rejected",
+                                  status=e.response.status_code)
                         lost.set()
                         return
                 except httpx.HTTPError:
                     pass
                 if time.monotonic() - last > 100:
+                    log.event("lease_lost", "warning", job_id=job, reason="heartbeat_silent")
                     lost.set()
                     return
 
@@ -163,6 +170,7 @@ def enroll(job, epoch):
             api(client, "POST", f"/internal/v1/jobs/{job}/start", {"epoch": epoch})
             thread = threading.Thread(target=heartbeat, daemon=True)
             thread.start()
+            stage = "input"
             data = api(client, "GET", f"/internal/v1/jobs/{job}/input?epoch={epoch}").json()
             if data.get("kind") == "delivery":
                 api(client, "POST", f"/internal/v1/jobs/{job}/deliver", {"epoch": epoch})
@@ -181,6 +189,8 @@ def enroll(job, epoch):
 
                 source = Path(tmp) / "input.video"
                 if data.get("media_url"):
+                    stage = "download"
+                    download_started = time.monotonic()
                     download_deadline = time.monotonic() + 120
                     count = 0
                     checksum = hashlib.sha256()
@@ -208,6 +218,10 @@ def enroll(job, epoch):
                         raise StorageUnavailable from e
                     if count != data["byte_size"] or checksum.hexdigest() != data["source_sha256"]:
                         raise ValueError("Media integrity mismatch")
+                    log.event("download_done", job_id=job, bytes=count,
+                              duration_ms=log.elapsed_ms(download_started))
+                stage = "inference"
+                inference_started = time.monotonic()
                 receive, send = multiprocessing.get_context("spawn").Pipe(duplex=False)
                 process = start_child(
                     run_child, (send, str(source), str(config.MANIFEST), str(config.PROFILE), data)
@@ -230,28 +244,54 @@ def enroll(job, epoch):
                     return
                 if result is None:
                     result = {"ok": False, "code": "PROCESS_TIMEOUT", "retryable": True}
+                    log.event("inference_timeout", "warning", job_id=job,
+                              duration_ms=log.elapsed_ms(inference_started))
                 if result["ok"]:
-                    payload = {"epoch": epoch, **result["result"]}
+                    stage = "complete"
+                    found = result["result"]
+                    log.event(
+                        "inference_done",
+                        job_id=job,
+                        kind=data.get("kind"),
+                        inference_ms=log.elapsed_ms(inference_started),
+                        timings=found.get("timings"),
+                        quality=found.get("quality"),
+                        reject_reasons=found.get("reject_reasons"),
+                        face_px_median=found.get("face_px_median"),
+                        sample_fps=found.get("sample_fps"),
+                        proposals=len(found.get("proposals", [])) if "proposals" in found else None,
+                        unknown_observations=found.get("unknown_observations"),
+                    )
+                    payload = {"epoch": epoch, **found}
                     status = post_with_retry(client, f"/internal/v1/jobs/{job}/complete", payload)
                     if status == 422:
-                        post_fail(client, job, epoch, "RESULT_REJECTED", False)
+                        post_fail(client, job, epoch, "RESULT_REJECTED", False, stage)
+                    elif status is not None:
+                        log.event("complete_not_accepted", "warning", job_id=job, status=status)
+                    else:
+                        log.event("job_done", job_id=job, total_ms=log.elapsed_ms(started))
                     # Lease loss ends here; lease reconciliation owns an unavailable API.
                 else:
-                    post_fail(client, job, epoch, result["code"], result["retryable"])
+                    post_fail(client, job, epoch, result["code"], result["retryable"], "inference")
         except MediaUnavailable:
-            post_fail(client, job, epoch, "MEDIA_UNAVAILABLE", False)
+            post_fail(client, job, epoch, "MEDIA_UNAVAILABLE", False, stage)
         except StorageUnavailable:
-            post_fail(client, job, epoch, "DOWNLOAD_UNAVAILABLE", True)
+            post_fail(client, job, epoch, "DOWNLOAD_UNAVAILABLE", True, stage)
         except httpx.HTTPStatusError as e:
             code = conflict_code(e)
             if code in TERMINAL_CONFLICTS:
                 # The input is gone or changed: release the lease now instead of blocking
                 # finalisation until it expires.
-                post_fail(client, job, epoch, code, False)
+                post_fail(client, job, epoch, code, False, stage)
             elif e.response.status_code not in LEASE_LOST:
-                post_fail(client, job, epoch, "DOWNLOAD_UNAVAILABLE", True)
-        except (httpx.HTTPError, ValueError, OSError, EOFError):
-            post_fail(client, job, epoch, "WORKER_ERROR", True)
+                post_fail(client, job, epoch, "DOWNLOAD_UNAVAILABLE", True, stage)
+            else:
+                log.event("lease_lost", "warning", job_id=job, reason="api_rejected",
+                          status=e.response.status_code, stage=stage)
+        except (httpx.HTTPError, ValueError, OSError, EOFError) as e:
+            # The exception class and the stage say what went wrong; its text can hold paths.
+            log.event("worker_error", "error", job_id=job, stage=stage, error=type(e).__name__)
+            post_fail(client, job, epoch, "WORKER_ERROR", True, stage)
         finally:
             stop.set()
             if process is not None and process.exitcode is None:

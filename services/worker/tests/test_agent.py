@@ -35,6 +35,7 @@ def idle_worker(monkeypatch):
     from facetrack_worker import agent
 
     monkeypatch.setattr(agent, "backlog", lambda: 0)
+    agent._noticed.clear()
 
 
 def test_busy_worker_is_not_given_more_leases(monkeypatch):

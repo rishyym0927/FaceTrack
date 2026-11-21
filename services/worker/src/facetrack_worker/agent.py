@@ -6,7 +6,7 @@ import time
 import httpx
 from kombu.exceptions import OperationalError
 
-from . import config
+from . import config, log
 from .executor import api, app, clean_abandoned
 
 CREDENTIAL_REJECTED = (
@@ -25,10 +25,41 @@ def failure_notice(error):
     return WAITING, 5
 
 
+_noticed = {}
+
+
+def notice(message, level="warning", **fields):
+    """A recurring problem is logged once, then at most once a minute with a repeat count,
+    so an outage does not flood the log."""
+    now = time.monotonic()
+    last, repeats, _ = _noticed.get(message, (None, 0, level))
+    if last is not None and now - last < 60:
+        _noticed[message] = (last, repeats + 1, level)
+        return
+    log.event("agent_notice", level, message=message, repeats=repeats or None, **fields)
+    _noticed[message] = (now, 0, level)
+
+
+def recovered():
+    """Mark earlier problems as resolved so the next occurrence is logged at once. Only real
+    problems (warnings and errors) are announced, not the routine 'worker busy' note."""
+    problems = [v for v in _noticed.values() if v[2] != "info"]
+    if problems:
+        log.event(
+            "agent_recovered", cleared=len(problems), suppressed=sum(v[1] for v in problems) or None
+        )
+    _noticed.clear()
+
+
 def maintain(client):
     result = api(client, "POST", "/internal/v1/maintenance/reconcile").json()
-    if result.get("overdue_media") or result.get("deletion_failures"):
-        print("Enrolment media cleanup backlog requires attention.", flush=True)
+    overdue, failures = result.get("overdue_media"), result.get("deletion_failures")
+    if overdue or failures:
+        notice(
+            "Enrolment media cleanup backlog requires attention.",
+            overdue_media=overdue,
+            deletion_failures=failures,
+        )
     clean_abandoned()
 
 
@@ -58,9 +89,13 @@ HANDOFF_WINDOW = 90
 
 def dispatch(lease):
     lease = {"id": lease["id"], "lease_epoch": lease["lease_epoch"]}  # validate before remembering
+    retry = bool(PENDING)
     PENDING["lease"] = (lease, time.monotonic())
     app.send_task("facetrack.enroll", args=[lease["id"], lease["lease_epoch"]])
     PENDING.clear()
+    log.event(
+        "job_dispatched", job_id=lease["id"], lease_epoch=lease["lease_epoch"], after_retry=retry
+    )
 
 
 def cycle(client, maintenance):
@@ -69,6 +104,7 @@ def cycle(client, maintenance):
         if PENDING:
             lease, claimed_at = PENDING["lease"]
             if time.monotonic() - claimed_at > HANDOFF_WINDOW:
+                log.event("handoff_abandoned", "error", job_id=lease["id"])
                 PENDING.clear()  # the lease is about to expire; reconcile re-queues it
             else:
                 dispatch(lease)
@@ -76,26 +112,32 @@ def cycle(client, maintenance):
         if time.monotonic() - maintenance > 60:
             # Isolated: a failing reconcile must never stop job claiming. Retried next minute.
             maintenance = time.monotonic()
+            log.event("resources", backlog=backlog(), **log.resources())
             try:
                 maintain(client)
             except (httpx.HTTPError, ConnectionError, OSError, ValueError):
-                print(MAINTENANCE_FAILED, flush=True)
-        if backlog() >= SLOTS:
+                notice(MAINTENANCE_FAILED)
+        waiting = backlog()
+        if waiting >= SLOTS:
+            notice("Worker busy; not claiming more jobs.", "info", backlog=waiting)
             return maintenance, 1
         response = api(client, "POST", "/internal/v1/jobs/claim")
+        recovered()
         if response.status_code != 204:
             dispatch(response.json())
         return maintenance, 2
     except OperationalError:
         # The claimed lease stays in PostgreSQL and is recovered after it expires.
-        print(BROKER_WAITING, flush=True)
+        notice(BROKER_WAITING, "error", pending=bool(PENDING))
         return maintenance, 5
     except (ValueError, KeyError, TypeError):
-        print("Unexpected claim response from the API; will retry.", flush=True)
+        # A malformed claim is rejected before it is remembered, so a pending lease is kept.
+        notice("Unexpected claim response from the API; will retry.", "error")
         return maintenance, 5
     except (httpx.HTTPError, ConnectionError) as error:
         message, delay = failure_notice(error)
-        print(message, flush=True)
+        status = getattr(getattr(error, "response", None), "status_code", None)
+        notice(message, "error", status=status, error=type(error).__name__)
         return maintenance, delay
 
 

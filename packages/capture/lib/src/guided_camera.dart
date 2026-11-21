@@ -80,6 +80,9 @@ class GuidedCamera extends ChangeNotifier {
 
   final bool enrollmentGuidance;
 
+  /// Optional hook for diagnostics: `camera_failed` / `camera_interrupted` with a short code.
+  void Function(String name, {String? code})? onEvent;
+
   /// Classroom segment length. The default bitrate of the phone made 15 s clips 12-23 MB,
   /// so a fixed rate (below) is what makes longer segments fit the 25 MiB upload limit.
   static const classroomBitrate = 6000000;
@@ -254,7 +257,10 @@ class GuidedCamera extends ChangeNotifier {
       await startPreviewAnalysis();
     } catch (_) {
       await next?.dispose();
-      if (!disposed && generation == epoch) error = 'Camera unavailable. Allow camera access, close other camera apps and retry.';
+      if (!disposed && generation == epoch) {
+        error = 'Camera unavailable. Allow camera access, close other camera apps and retry.';
+        onEvent?.call('camera_failed', code: 'init');
+      }
     } finally {
       if (generation == epoch) busy = false;
       emit();
@@ -566,6 +572,9 @@ class GuidedCamera extends ChangeNotifier {
     final old = controller;
     final wasRecording = recording;
     interrupted = lifecycle && !disposed && (ready || busy);
+    if (lifecycle && !disposed) {
+      onEvent?.call('camera_interrupted', code: wasRecording ? 'recording_lost' : 'paused');
+    }
     if (lifecycle && wasRecording && !disposed) {
       error = 'The recording was interrupted when the app left the screen. Record again.';
     }

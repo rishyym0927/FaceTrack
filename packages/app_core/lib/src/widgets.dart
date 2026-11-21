@@ -362,8 +362,15 @@ class ErrorView extends StatelessWidget {
     return MessageView(
       title: title,
       message:
-          failure?.message ??
-          'Please retry. If this continues, contact your institute.',
+          (failure?.message ??
+              'Please retry. If this continues, contact your institute.') +
+          // The first characters of the server's request id: enough to find this exact failure
+          // in the server log when someone reports it.
+          switch (failure?.requestId) {
+            final String id when id.length >= 8 =>
+              '\nReference: ${id.substring(0, 8)}',
+            _ => '',
+          },
       action: OutlinedButton.icon(
         onPressed: retry,
         icon: const Icon(Icons.refresh),

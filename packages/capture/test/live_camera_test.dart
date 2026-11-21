@@ -79,6 +79,34 @@ void main() {
     },
   );
 
+  test('Interruptions are reported by short code, deliberate stops are not', () async {
+    final seen = <String>[];
+    final lost = GuidedCamera()
+      ..controller = _RecordingOnlyCamera(back)
+      ..ready = true
+      ..onEvent = (name, {code}) => seen.add('$name:$code');
+    addTearDown(lost.dispose);
+    await lost.start(const []);
+    await lost.interrupt(lifecycle: true);
+    expect(seen, ['camera_interrupted:recording_lost']);
+
+    final idle = GuidedCamera()
+      ..controller = _RecordingOnlyCamera(back)
+      ..ready = true
+      ..onEvent = (name, {code}) => seen.add('$name:$code');
+    addTearDown(idle.dispose);
+    await idle.interrupt(lifecycle: true);
+    expect(seen.last, 'camera_interrupted:paused');
+    seen.clear();
+    final deliberate = GuidedCamera()
+      ..controller = _RecordingOnlyCamera(back)
+      ..ready = true
+      ..onEvent = (name, {code}) => seen.add('$name:$code');
+    addTearDown(deliberate.dispose);
+    await deliberate.interrupt();
+    expect(seen, isEmpty);
+  });
+
   test('A deliberate stop never asks to be reopened or blames the app', () async {
     final camera = GuidedCamera()
       ..controller = _RecordingOnlyCamera(back)

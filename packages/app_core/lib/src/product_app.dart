@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'auth.dart';
+import 'diagnostics.dart';
 import 'api.dart';
 import 'config.dart';
 import 'home.dart';
@@ -45,6 +46,28 @@ final sessionExitGuardProvider = Provider<SessionExitGuard>(
   (ref) => SessionExitGuard(),
 );
 
+AppLifecycleListener? _diagnosticsLifecycle;
+
+/// Records unexpected errors (type only, never the message) and sends buffered diagnostics
+/// when the app leaves the foreground. The normal error handling still runs afterwards.
+void _watchForCrashes(Diagnostics diagnostics) {
+  final previous = FlutterError.onError;
+  FlutterError.onError = (details) {
+    diagnostics.record('app_error', code: details.exception.runtimeType);
+    previous?.call(details);
+  };
+  final dispatcher = PlatformDispatcher.instance;
+  final earlier = dispatcher.onError;
+  dispatcher.onError = (error, stack) {
+    diagnostics.record('app_error', code: error.runtimeType);
+    return earlier?.call(error, stack) ?? false;
+  };
+  _diagnosticsLifecycle ??= AppLifecycleListener(
+    onPause: () => unawaited(diagnostics.flush()),
+    onHide: () => unawaited(diagnostics.flush()),
+  );
+}
+
 Future<void> launchProduct(
   AppConfig config, {
   required WidgetBuilder classesBuilder,
@@ -65,6 +88,7 @@ Future<void> launchProduct(
   try {
     final services = await AppServices.initialize(config);
     await configure?.call(services);
+    _watchForCrashes(services.diagnostics);
     runApp(
       ProviderScope(
         overrides: [servicesProvider.overrideWithValue(services)],

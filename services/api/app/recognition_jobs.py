@@ -2,6 +2,7 @@
 
 import json
 import math
+from collections import Counter
 from itertools import groupby
 from typing import Literal
 from uuid import UUID
@@ -11,6 +12,7 @@ from pydantic import Field, field_validator
 from sqlalchemy import text
 
 from . import biometrics as bio
+from . import logs
 from .attendance import FROZEN_ELIGIBILITY, FROZEN_ELIGIBILITY_JOINS
 from .biometric_types import Epoch, WorkerComplete
 from .db import many, one
@@ -352,4 +354,18 @@ async def complete(conn, worker, job_id, body, settings):
         {"i": i, "id": asset["id"]},
     )
     await audit_worker(conn, worker, job_id, "capture.processed")
+    logs.event(
+        "recognition_complete",
+        session_id=s["id"],
+        job_id=job_id,
+        roster=len(roster),
+        recognised=len(body.proposals),
+        unknown_observations=body.unknown_observations,
+        quality=body.quality,
+        reject_reasons=body.reject_reasons,
+        face_px_median=body.face_px_median,
+        sample_fps=body.sample_fps,
+        timings=body.timings,
+        reasons=dict(Counter(d.reason for d in body.diagnostics)),
+    )
     return {"state": "succeeded"}

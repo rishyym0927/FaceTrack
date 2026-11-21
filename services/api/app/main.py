@@ -1,6 +1,6 @@
-import json
 import logging
 import time
+import traceback
 from contextlib import asynccontextmanager
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -15,7 +15,7 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 from sqlalchemy.exc import TimeoutError as PoolTimeout
 from starlette.exceptions import HTTPException
 
-from . import schemas, services
+from . import client_events, logs, schemas, services
 from .auth import Authenticator
 from .biometric_routes import install
 from .config import Settings
@@ -24,12 +24,18 @@ from .errors import APIError
 from .security import expected_version
 from .storage import Storage
 
-logger = logging.getLogger("uvicorn.error.facetrack")
 bearer = HTTPBearer(auto_error=False)
 Institute = Annotated[UUID, Header(alias="X-Institute-ID")]
 Key = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)]
 Version = Annotated[str, Header(alias="If-Match")]
 Limit = Annotated[int, Query(ge=1, le=200)]
+
+
+def _uuid_or_none(value):
+    try:
+        return str(UUID(value)) if value else None
+    except ValueError:
+        return None
 
 
 def create_app(settings: Settings | None = None, *, auth_transport=None):
@@ -74,6 +80,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     )
 
     def error_response(request, status, code, message, retryable=False, details=None):
+        request.state.error_code = code
         return JSONResponse(
             status_code=status,
             content={
@@ -105,16 +112,20 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
 
         def log(response):
             route = request.scope.get("route")
-            logger.info(
-                json.dumps(
-                    {
-                        "request_id": request.state.request_id,
-                        "route": getattr(route, "path", "unmatched"),
-                        "status": response.status_code,
-                        "duration_ms": round((time.perf_counter() - start) * 1000, 3),
-                        "db_checkout_ms": round(sum(waits), 3),
-                    }
-                )
+            path = getattr(route, "path", "unmatched")
+            status = response.status_code
+            logs.event(
+                "request",
+                level=logging.ERROR if status >= 500 else logging.WARNING if status >= 400 else logging.INFO,
+                request_id=request.state.request_id,
+                method=request.method,
+                route=path,
+                status=status,
+                code=getattr(request.state, "error_code", None),
+                institute_id=_uuid_or_none(request.headers.get("x-institute-id")),
+                duration_ms=round((time.perf_counter() - start) * 1000, 1),
+                db_checkout_ms=round(sum(waits), 1),
+                **logs.correlation(path, request.scope.get("path_params") or {}),
             )
             return response
 
@@ -169,15 +180,12 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
 
     @app.exception_handler(DBAPIError)
     async def database_error(request, error):
-        logger.error(
-            json.dumps(
-                {
-                    "request_id": request.state.request_id,
-                    "status": 503,
-                    "error": type(error.orig).__name__ if error.orig else type(error).__name__,
-                    "sqlstate": getattr(error.orig, "sqlstate", None),
-                }
-            )
+        logs.event(
+            "database_error",
+            level=logging.ERROR,
+            request_id=request.state.request_id,
+            error=type(error.orig).__name__ if error.orig else type(error).__name__,
+            sqlstate=getattr(error.orig, "sqlstate", None),
         )
         return error_response(
             request, 503, "DATABASE_UNAVAILABLE", "Database operation unavailable.", True
@@ -185,10 +193,11 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
 
     @app.exception_handler(PoolTimeout)
     async def pool_exhausted(request, error):
-        logger.error(
-            json.dumps(
-                {"request_id": request.state.request_id, "status": 503, "error": "PoolTimeout"}
-            )
+        logs.event(
+            "database_error",
+            level=logging.ERROR,
+            request_id=request.state.request_id,
+            error="PoolTimeout",
         )
         return error_response(
             request, 503, "DATABASE_UNAVAILABLE", "Database operation unavailable.", True
@@ -197,14 +206,15 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     @app.exception_handler(Exception)
     async def unexpected_error(request, error):
         # Starlette sends this from outside the middleware stack, so add its headers here.
-        logger.error(
-            json.dumps(
-                {
-                    "request_id": request.state.request_id,
-                    "status": 500,
-                    "error": type(error).__name__,
-                }
-            )
+        # Only the exception type and the code location are logged, never its message.
+        frames = traceback.extract_tb(error.__traceback__)
+        where = f"{frames[-1].filename.rsplit('/', 1)[-1]}:{frames[-1].lineno}" if frames else None
+        logs.event(
+            "unhandled_error",
+            level=logging.ERROR,
+            request_id=request.state.request_id,
+            error=type(error).__name__,
+            where=where,
         )
         return finalize(
             request,
@@ -421,6 +431,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
             )
 
     install(app, engine, settings, principal, storage)
+    client_events.install(app, principal)
     from .attendance import install as install_attendance
 
     install_attendance(app, engine, settings, principal, storage)

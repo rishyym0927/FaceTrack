@@ -131,6 +131,9 @@ Future<Harness> harness({
     client,
     const EmptyLocalStorage(),
   );
+  // Tests count and order the requests they mock; diagnostics must not add to them. The
+  // diagnostics tests install their own sender.
+  services.diagnostics.send = null;
   final h = Harness(services, accountJson(profileRole));
   services.api.dio.httpClientAdapter = RoutesAdapter(
     (r) async => jsonResponse(

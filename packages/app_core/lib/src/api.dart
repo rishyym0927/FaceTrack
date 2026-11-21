@@ -8,6 +8,8 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import 'diagnostics.dart';
+
 class AppFailure implements Exception {
   const AppFailure(this.message, {this.status, this.code, this.requestId});
   final String message;
@@ -45,6 +47,8 @@ class ApiClient {
         ),
       );
   final DateTime Function() _clock;
+  /// Receives a record of every failed request (route template, status, code only).
+  Diagnostics? diagnostics;
   final SupabaseClient auth;
   final Dio dio;
   final _reads = LinkedHashMap<String, ({DateTime at, Json data})>();
@@ -284,6 +288,14 @@ class ApiClient {
               503 => 'The service is temporarily unavailable. Please retry.',
               _ => 'Could not connect. Check your connection and retry.',
             };
+        if (path != '/v1/client-events') {
+          diagnostics?.record(
+            'api_error',
+            route: path,
+            status: status,
+            code: code ?? (status == null ? e.type.name : null),
+          );
+        }
         throw AppFailure(
           text,
           status: status,
@@ -298,6 +310,23 @@ class ApiClient {
       }
     }
     throw const AppFailure('Please sign in again.', status: 401);
+  }
+
+  /// Delivers a diagnostics batch. Bypasses the read cache and never records its own failures.
+  Future<void> postDiagnostics(Map<String, dynamic> batch) async {
+    final session = auth.auth.currentSession;
+    if (session == null || session.isExpired) {
+      throw StateError('Not signed in.');
+    }
+    await dio.post<dynamic>(
+      '/v1/client-events',
+      data: batch,
+      options: Options(
+        headers: {'Authorization': 'Bearer ${session.accessToken}'},
+        sendTimeout: const Duration(seconds: 10),
+        receiveTimeout: const Duration(seconds: 10),
+      ),
+    );
   }
 
   Future<Account> me() async => Account.fromJson(await send('GET', '/v1/me'));
