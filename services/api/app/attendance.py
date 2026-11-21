@@ -1,6 +1,8 @@
 """Teacher-controlled sessions, frozen rosters and immutable attendance publications."""
 
 import json
+import logging
+import time
 from datetime import datetime, timedelta
 from typing import Annotated, Literal
 from uuid import UUID, uuid4
@@ -11,7 +13,7 @@ from pydantic import Field, field_validator, model_validator
 from sqlalchemy import text
 
 from . import biometrics as bio
-from . import services
+from . import logs, services
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import Strict
@@ -340,6 +342,73 @@ async def recognition_pending(conn, institute, session_id):
     )
 
 
+STAGE_ORDER = ("preparing", "detecting", "recognizing", "matching", "finalizing")
+# A worker that has not called in for this long is treated as not running.
+WORKER_SILENCE_SECONDS = 90
+STALL_SECONDS = 90
+_stall_logged = logs.Budget(limit=1, seconds=300)
+
+
+async def processing_status(conn, institute, session_id):
+    """What recognition is doing for this session, for the teacher's progress screen.
+
+    ``state`` is idle (nothing pending), waiting (queued, no worker has started it), running, or
+    stalled (queued for a while with no worker online). ``stage`` and ``percent`` come from the
+    worker's own step reports.
+    """
+    from . import worker_api
+
+    jobs = await many(
+        conn,
+        """SELECT j.state, j.stage, extract(epoch from (now()-j.created_at))::int AS age
+           FROM app.jobs j JOIN app.captures cap
+             ON cap.institute_id=j.institute_id AND cap.id=j.capture_id
+           WHERE cap.institute_id=:i AND cap.session_id=:s AND j.kind='recognition'
+           ORDER BY j.created_at""",
+        {"i": institute, "s": session_id},
+    )
+    waiting = [j for j in jobs if j["state"] in ("queued", "retry_wait")]
+    active = [j for j in jobs if j["state"] in ("leased", "running")]
+    done = [j for j in jobs if j["state"] == "succeeded"]
+    failed = [j for j in jobs if j["state"] == "failed"]
+    idle_for = worker_api.worker_idle_seconds(institute)
+    starting = time.monotonic() - worker_api.STARTED < 60  # the worker may not have called in yet
+    online = idle_for is not None and idle_for <= WORKER_SILENCE_SECONDS
+    oldest_wait = max((j["age"] for j in waiting), default=0)
+    stage = percent = None
+    if active:
+        name, _, number = (active[0]["stage"] or "").partition(":")
+        stage = name if name in STAGE_ORDER else "preparing"
+        percent = int(number) if number.isdigit() else None
+    if active:
+        state = "running"
+    elif waiting:
+        state = "stalled" if not online and not starting and oldest_wait >= STALL_SECONDS else "waiting"
+    else:
+        state = "idle"
+    if state == "stalled" and _stall_logged.take(f"{institute}:{session_id}"):
+        logs.event(
+            "processing_stalled",
+            level=logging.ERROR,
+            session_id=session_id,
+            waiting=len(waiting),
+            oldest_wait_seconds=oldest_wait,
+            worker_idle_seconds=None if idle_for is None else round(idle_for),
+        )
+    return {
+        "state": state,
+        "stage": stage,
+        "percent": percent,
+        "waiting": len(waiting),
+        "running": len(active),
+        "done": len(done),
+        "failed": len(failed),
+        "total": len(jobs),
+        "oldest_wait_seconds": oldest_wait,
+        "worker_online": online,
+    }
+
+
 async def publish(conn, actor, institute, s, reason=None):
     await can_publish(conn, actor, institute, s["offering_id"])
     rows = await attendance(conn, institute, s["id"])
@@ -635,6 +704,7 @@ def install(app, engine, settings, principal, storage):
                 "session": dict(s),
                 "items": await attendance(c, institute_id, identifier),
                 "processing_pending": pending,
+                "processing": await processing_status(c, institute_id, identifier),
             }
 
     @app.put("/v1/sessions/{identifier}/attendance-review")

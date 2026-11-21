@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
 from datetime import timedelta
 from uuid import uuid4
@@ -14,6 +15,18 @@ from . import biometrics as bio
 from . import logs
 from .db import many, one, transaction
 from .errors import APIError
+
+# When a recognition worker last contacted this API, per institute. Teachers' database sessions
+# cannot read worker identities (row-level security), so liveness is tracked here, in memory.
+# The agent polls every few seconds, so this refills within moments of an API restart.
+STARTED = time.monotonic()
+RECOGNITION_SEEN: dict[str, float] = {}
+
+
+def worker_idle_seconds(institute) -> float | None:
+    """Seconds since a recognition worker last called in; None when it has not since startup."""
+    seen = RECOGNITION_SEEN.get(str(institute))
+    return None if seen is None else time.monotonic() - seen
 
 
 @asynccontextmanager
@@ -40,6 +53,8 @@ async def worker_transaction(engine, token):
             text("UPDATE app.worker_identities SET last_seen_at=now() WHERE id=:id"),
             {"id": worker["id"]},
         )
+        if "recognition" in worker["allowed_kinds"]:
+            RECOGNITION_SEEN[str(worker["institute_id"])] = time.monotonic()
         yield conn, worker
 
 
@@ -229,10 +244,13 @@ async def claim(conn, worker):
     )
 
 
-async def progress(conn, worker, identifier, epoch, *, start=False):
+async def progress(conn, worker, identifier, epoch, *, start=False, step=None, percent=None):
     await lock_job_student(conn, worker, identifier)
     job = await leased(conn, worker, identifier, epoch)
     stage = "processing" if start else job["stage"]
+    if step and not start:
+        # "detecting:40": the step and, when known, how far through it the job is.
+        stage = f"{step}:{percent}" if percent is not None else step
     await conn.execute(
         text(
             "UPDATE app.jobs SET state='running',stage=:s,lease_expires_at=now()+interval '120 seconds' WHERE institute_id=:i AND id=:id"
@@ -449,7 +467,7 @@ async def fail(conn, worker, identifier, body):
         await conn.execute(
             text(
                 """UPDATE app.attendance_records a SET status='unassessed',source='none',
-                assessment_code='processing_failed',evidence_summary=CAST(:summary AS jsonb),version=version+1
+                assessment_code='processing_failed',evidence_summary=CAST(:summary AS jsonb),version=a.version+1
                 FROM app.captures c WHERE c.institute_id=a.institute_id AND c.session_id=a.session_id
                 AND c.institute_id=:i AND c.id=:capture AND NOT a.manual_lock
                 AND a.status NOT IN ('proposed_present','proposed_absent','present','absent','late','excused')"""

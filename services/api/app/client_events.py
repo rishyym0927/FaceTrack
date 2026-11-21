@@ -25,6 +25,7 @@ EventName = Literal[
     "upload_done",
     "camera_failed",
     "camera_interrupted",
+    "camera_switched",
     "api_error",
     "app_error",
 ]

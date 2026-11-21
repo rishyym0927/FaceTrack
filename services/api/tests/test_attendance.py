@@ -893,3 +893,163 @@ async def test_sequential_scan_segments_preserve_earlier_recognition(bio):
     ).json()["items"]
     assert len(rows) == 2
     assert all(row["status"] == "proposed_present" for row in rows)
+
+
+async def queued_capture(b, s, key="queued"):
+    """Reserve, upload and complete a classroom capture without a worker claiming it."""
+    r = await b.client.post(
+        f"/v1/sessions/{s['id']}/captures",
+        headers=b.headers("teacher", key=key),
+        json={
+            "source_type": "webcam",
+            "recorded_at": datetime.now(timezone.utc).isoformat(),
+            "mime_type": "video/webm",
+            "expected_bytes": 256,
+        },
+    )
+    assert r.status_code == 201, r.text
+    cap = r.json()
+    await b.client.post(f"/v1/captures/{cap['id']}/upload-grant", headers=b.headers("teacher"))
+    done = await b.client.post(
+        f"/v1/captures/{cap['id']}/upload-complete",
+        headers=b.headers("teacher", key="complete" + key),
+        json={"asset_id": cap["asset_id"], "byte_size": 256, "sha256": "c" * 64},
+    )
+    assert done.status_code == 202, done.text
+    return cap
+
+
+async def processing(b, s):
+    r = await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
+    assert r.status_code == 200, r.text
+    return r.json()["processing"]
+
+
+async def test_processing_status_follows_a_job_from_waiting_to_running_with_steps(bio):
+    from app import worker_api
+
+    b = bio
+    s = await recognition_ready(b)
+    assert (await processing(b, s))["state"] == "idle"
+    await queued_capture(b, s)
+    waiting = await processing(b, s)
+    assert waiting["state"] in ("waiting", "stalled") and waiting["waiting"] == 1
+    assert waiting["total"] == 1 and waiting["running"] == 0
+
+    claim = await b.client.post("/internal/v1/jobs/claim", headers=b.wh)
+    job = claim.json()
+    jid, epoch = job["id"], job["lease_epoch"]
+    assert worker_api.worker_idle_seconds(b.ids["institute"]) is not None  # a worker called in
+    assert (
+        await b.client.post(f"/internal/v1/jobs/{jid}/start", headers=b.wh, json={"epoch": epoch})
+    ).status_code == 200
+    running = await processing(b, s)
+    assert running["state"] == "running" and running["stage"] == "preparing"
+    assert running["worker_online"] is True
+
+    for stage, percent in [("detecting", 40), ("recognizing", 75), ("matching", None)]:
+        body = {"epoch": epoch, "stage": stage, **({"percent": percent} if percent is not None else {})}
+        r = await b.client.post(f"/internal/v1/jobs/{jid}/heartbeat", headers=b.wh, json=body)
+        assert r.status_code == 200, r.text
+        status = await processing(b, s)
+        assert status["state"] == "running" and status["stage"] == stage and status["percent"] == percent
+
+    # A plain lease renewal keeps the last reported step.
+    await b.client.post(f"/internal/v1/jobs/{jid}/heartbeat", headers=b.wh, json={"epoch": epoch})
+    assert (await processing(b, s))["stage"] == "matching"
+
+
+async def test_heartbeat_rejects_unknown_steps_and_bad_percentages(bio):
+    b = bio
+    s = await recognition_ready(b)
+    await queued_capture(b, s)
+    job = (await b.client.post("/internal/v1/jobs/claim", headers=b.wh)).json()
+    for body in (
+        {"epoch": job["lease_epoch"], "stage": "bogus"},
+        {"epoch": job["lease_epoch"], "stage": "detecting", "percent": 101},
+        {"epoch": job["lease_epoch"], "stage": "detecting", "percent": -1},
+        {"epoch": job["lease_epoch"], "stage": "detecting;DROP TABLE"},
+    ):
+        r = await b.client.post(f"/internal/v1/jobs/{job['id']}/heartbeat", headers=b.wh, json=body)
+        assert r.status_code == 422, body
+
+
+async def test_a_queue_with_no_worker_is_reported_as_stalled_not_left_waiting(bio, caplog, monkeypatch):
+    from app import attendance, worker_api
+
+    caplog.set_level("INFO", logger="uvicorn.error.facetrack")
+    b = bio
+    s = await recognition_ready(b)
+    await queued_capture(b, s)
+    # No worker has called in, the API has been up for a while, and the job has waited too long.
+    monkeypatch.setattr(worker_api, "RECOGNITION_SEEN", {})
+    monkeypatch.setattr(worker_api, "STARTED", worker_api.time.monotonic() - 1000)
+    monkeypatch.setattr(attendance, "STALL_SECONDS", 0)
+    status = await processing(b, s)
+    assert status["state"] == "stalled" and status["worker_online"] is False
+    assert status["waiting"] == 1
+    events = [r.getMessage() for r in caplog.records if "processing_stalled" in r.getMessage()]
+    assert len(events) == 1 and s["id"] in events[0]
+    await processing(b, s)  # asking again does not repeat the alert
+    assert len([r for r in caplog.records if "processing_stalled" in r.getMessage()]) == 1
+    # Once a worker calls in, the same queue is simply waiting its turn.
+    await b.client.post("/internal/v1/jobs/claim", headers=b.wh)
+    assert (await processing(b, s))["worker_online"] is True
+
+
+async def test_a_failed_job_is_counted_so_the_screen_can_say_so(bio):
+    b = bio
+    s = await recognition_ready(b)
+    await queued_capture(b, s)
+    job = (await b.client.post("/internal/v1/jobs/claim", headers=b.wh)).json()
+    await b.client.post(
+        f"/internal/v1/jobs/{job['id']}/start", headers=b.wh, json={"epoch": job["lease_epoch"]}
+    )
+    r = await b.client.post(
+        f"/internal/v1/jobs/{job['id']}/fail",
+        headers=b.wh,
+        json={"epoch": job["lease_epoch"], "code": "INVALID_MEDIA", "retryable": False},
+    )
+    assert r.status_code == 200, r.text
+    status = await processing(b, s)
+    assert status["state"] == "idle" and status["failed"] == 1 and status["done"] == 0
+
+
+async def test_check_worker_flags_work_queued_for_an_institute_nobody_serves(bio):
+    from tools import check_worker
+
+    b = bio
+    s = await recognition_ready(b)
+    await queued_capture(b, s)
+    with connect(b.urls["owner"]) as c:
+        # Age the job, and make the institute's worker look like it has never called in.
+        c.execute("UPDATE app.jobs SET created_at=now()-interval '5 minutes'")
+        c.execute("UPDATE app.worker_identities SET last_seen_at=NULL")
+        found = {f["institute"]: f for f in check_worker.findings(c)}
+    mine = found[b.ids["institute"][:8]]
+    assert mine["queued"] == 1 and mine["oldest_queued_seconds"] >= 290
+    assert any("no worker for this institute has called in" in p for p in mine["problems"])
+
+    with connect(b.urls["owner"]) as c:
+        c.execute("UPDATE app.worker_identities SET last_seen_at=now()")
+        found = {f["institute"]: f for f in check_worker.findings(c)}
+    assert not any(
+        "has called in" in p for p in found.get(b.ids["institute"][:8], {"problems": []})["problems"]
+    )
+
+    with connect(b.urls["owner"]) as c:
+        c.execute("UPDATE app.worker_identities SET status='revoked'")
+        found = {f["institute"]: f for f in check_worker.findings(c)}
+    assert any("no recognition worker credential" in p for p in found[b.ids["institute"][:8]]["problems"])
+
+
+async def test_check_worker_is_quiet_when_a_recent_worker_serves_the_queue(bio):
+    from tools import check_worker
+
+    b = bio
+    s = await recognition_ready(b)
+    await queued_capture(b, s)
+    with connect(b.urls["owner"]) as c:
+        c.execute("UPDATE app.jobs SET created_at=now()-interval '5 minutes'")
+        c.execute("UPDATE app.worker_identities SET last_seen_at=now(), expires_at=now()+interval '60 days'")
+        assert [f for f in check_worker.findings(c) if f["institute"] == b.ids["institute"][:8]] == []

@@ -317,6 +317,25 @@ class GuidedCamera extends ChangeNotifier {
     await _closeAnalyzer(old);
   }
 
+  /// The camera a "flip" should switch to: the front camera when a rear one is in use, otherwise
+  /// the main rear camera. Phones often list several rear lenses (wide, ultra-wide, zoom); a
+  /// flip button must toggle front and rear, not walk through those.
+  CameraDescription? get otherCamera {
+    final current = selectedCamera;
+    if (current == null || cameras.length < 2) return null;
+    final front = current.lensDirection != CameraLensDirection.front;
+    for (final camera in cameras) {
+      if ((camera.lensDirection == CameraLensDirection.front) == front &&
+          camera.lensDirection != CameraLensDirection.external) {
+        return camera;
+      }
+    }
+    return null;
+  }
+
+  bool get canSwitch => otherCamera != null;
+  bool get usingFront => selectedCamera?.lensDirection == CameraLensDirection.front;
+
   Future<void> selectCamera(CameraDescription choice) async {
     if (busy ||
         recording ||

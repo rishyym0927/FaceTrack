@@ -143,13 +143,31 @@ def enroll(job, epoch):
     started = time.monotonic()
     stage = "start"
     log.event("job_start", job_id=job, epoch=epoch)
+    shown = {"stage": None, "percent": None}  # what the teacher's screen should say
+    changed = threading.Event()
+
+    def show(name, percent=None):
+        """Tell the API which step this job is on; sent with the next heartbeat."""
+        shown.update(stage=name, percent=percent)
+        changed.set()
 
     def heartbeat():
         last = time.monotonic()
         with http_client(10) as client:
-            while not stop.wait(15):
+            while not stop.is_set():
+                # Wake early when the step changes so the screen follows along; otherwise renew
+                # the lease every 15 seconds. Step updates are spaced at least 2 seconds apart.
+                changed.wait(15)
+                if stop.is_set():
+                    break
+                body = {"epoch": epoch}
+                if changed.is_set() and shown["stage"]:
+                    body.update(stage=shown["stage"])
+                    if shown["percent"] is not None:
+                        body.update(percent=int(shown["percent"]))
+                changed.clear()
                 try:
-                    api(client, "POST", f"/internal/v1/jobs/{job}/heartbeat", {"epoch": epoch})
+                    api(client, "POST", f"/internal/v1/jobs/{job}/heartbeat", body)
                     last = time.monotonic()
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code in LEASE_LOST:
@@ -163,6 +181,7 @@ def enroll(job, epoch):
                     log.event("lease_lost", "warning", job_id=job, reason="heartbeat_silent")
                     lost.set()
                     return
+                stop.wait(2)
 
     process = None
     with http_client(20) as client:
@@ -188,6 +207,7 @@ def enroll(job, epoch):
                 from pathlib import Path
 
                 source = Path(tmp) / "input.video"
+                show("preparing")
                 if data.get("media_url"):
                     stage = "download"
                     download_started = time.monotonic()
@@ -232,7 +252,11 @@ def enroll(job, epoch):
                 try:
                     while time.monotonic() < deadline and not lost.is_set():
                         if receive.poll(0.5):
-                            result = receive.recv()
+                            message = receive.recv()
+                            if "progress" in message:  # a step update, not the result yet
+                                show(message["progress"]["stage"], message["progress"].get("percent"))
+                                continue
+                            result = message
                             break
                         if not process.is_alive():
                             break
@@ -262,6 +286,7 @@ def enroll(job, epoch):
                         proposals=len(found.get("proposals", [])) if "proposals" in found else None,
                         unknown_observations=found.get("unknown_observations"),
                     )
+                    show("finalizing")
                     payload = {"epoch": epoch, **found}
                     status = post_with_retry(client, f"/internal/v1/jobs/{job}/complete", payload)
                     if status == 422:

@@ -128,8 +128,17 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
 
             people = [p["student_id"] for p in expected["roster"]]
             fps = dense.sample_fps()
+            last = {"stage": None, "percent": -100}
+
+            def report(stage, percent=None):
+                # Progress for the teacher's screen, sent at most every 10 percent per stage.
+                changed = stage != last["stage"] or percent is None or percent >= 100
+                if changed or percent - last["percent"] >= 10:
+                    last.update(stage=stage, percent=percent or 0)
+                    pipe.send({"progress": {"stage": stage, "percent": percent}})
+
             if fps > 0:
-                result = dense.recognize(pipeline, processed, people, Roster(), fps)
+                result = dense.recognize(pipeline, processed, people, Roster(), fps, progress=report)
             else:
                 result = pipeline.recognize(processed, people, Roster())
             identities = {p["student_id"]: p for p in expected["roster"]}

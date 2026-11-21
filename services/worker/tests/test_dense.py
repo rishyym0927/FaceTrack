@@ -120,3 +120,64 @@ def test_recognition_and_plain_reasons_per_student(tmp_path):
     reasons = {d["student_id"]: d["reason"] for d in result["diagnostics"]}
     assert reasons == {"s0": "recognized", "s1": "seen_too_briefly", "s2": "not_seen"}
     assert result["face_px_median"] == 120 and result["reject_reasons"] == {}
+
+
+def test_progress_runs_through_the_real_stages_in_order(tmp_path):
+    steps = []
+    visible = {i: [0] for i in range(10)}
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"x")
+
+    def frames(path, info, count, timings):
+        for i in range(count):
+            yield round(i * 1000 * info.duration / count), frame(i)
+
+    info = MediaInfo(width=640, height=480, duration=15, codec="h264", size=1)
+    pipeline = SimpleNamespace(
+        runtime=Runtime(visible),
+        profile=PROFILE,
+        model_hash="a" * 64,
+        profile_hash="b" * 64,
+        _times=lambda timings, started: timings,
+    )
+    original = dense.probe
+    dense.probe = lambda path, enrollment=False: info
+    try:
+        dense.recognize(
+            pipeline, clip, ["s0", "s1", "s2"], Roster(), 4.0, frames,
+            progress=lambda stage, percent=None: steps.append((stage, percent)),
+        )
+    finally:
+        dense.probe = original
+    order = [stage for i, (stage, _) in enumerate(steps) if i == 0 or stage != steps[i - 1][0]]
+    assert order == ["detecting", "recognizing", "matching"]
+    detecting = [p for s, p in steps if s == "detecting"]
+    assert detecting[0] == 0 and detecting[-1] == 100 and detecting == sorted(detecting)
+    recognizing = [p for s, p in steps if s == "recognizing"]
+    assert recognizing[0] == 0 and recognizing[-1] == 100
+
+
+def test_embedding_in_chunks_keeps_every_crop_in_order(tmp_path):
+    # 40 usable faces forces several chunks; each must keep its own identity.
+    visible = {i: [i % 3] for i in range(40)}
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"x")
+
+    def frames(path, info, count, timings):
+        for i in range(count):
+            yield round(i * 250), frame(i)
+
+    info = MediaInfo(width=640, height=480, duration=10, codec="h264", size=1)
+    runtime = Runtime(visible)
+    pipeline = SimpleNamespace(runtime=runtime, profile=PROFILE, model_hash="a" * 64,
+                               profile_hash="b" * 64, _times=lambda t, s: t)
+    original = dense.probe
+    dense.probe = lambda path, enrollment=False: info
+    try:
+        observations, *_ = dense.observe(pipeline, clip, 4.0, frames)
+    finally:
+        dense.probe = original
+    assert len(observations) == 40
+    identities = [int(np.argmax(vector)) for _, vector in observations]
+    assert identities == [i % 3 for i in range(40)]
+    assert [stamp for stamp, _ in observations] == sorted(stamp for stamp, _ in observations)

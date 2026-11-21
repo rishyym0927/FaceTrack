@@ -61,15 +61,29 @@ def reject_reason(frame, face, profile) -> str | None:
     return None
 
 
-def observe(pipeline, path, fps, frames=sampled_frames):
+def _noop(stage, percent=None):
+    return None
+
+
+EMBED_CHUNK = 16
+
+
+def observe(pipeline, path, fps, frames=sampled_frames, progress=_noop):
+    """Detect faces in every sampled frame, then embed the usable ones.
+
+    Two real passes, so progress can be reported honestly: first detection, quality gating and
+    alignment (frame by frame), then embedding of the aligned crops in small batches. The crops,
+    their order and the model calls are exactly those of the frozen single-pass loop.
+    """
     info = probe(path, enrollment=False)
     if info.duration < 1:
         raise SpikeError("CLIP_TOO_SHORT", "A query needs at least 1s.")
     count = min(MAX_FRAMES, max(12, round(info.duration * fps)))
     timings = dict.fromkeys(["decoding_ms", "detection_ms", "embedding_ms", "matching_ms"], 0.0)
     stats = {"sampled_frames": 0, "detections": 0, "quality_rejects": 0, "duplicate_frames": 0}
-    rejects, sizes, observations, seen = Counter(), [], [], set()
+    rejects, sizes, crops, seen = Counter(), [], [], set()
     runtime, profile = pipeline.runtime, pipeline.profile
+    progress("detecting", 0)
     for stamp, frame in frames(path, info, count, timings):
         stats["sampled_frames"] += 1
         key = hashlib.sha256(frame).digest()
@@ -81,23 +95,27 @@ def observe(pipeline, path, fps, frames=sampled_frames):
         faces = runtime.detect(frame, profile.detector_confidence, profile.nms_iou)
         timings["detection_ms"] += (time.perf_counter() - started) * 1000
         stats["detections"] += len(faces)
-        crops = []
         for face in faces:
             x1, y1, x2, y2 = face.box.astype(int)
             sizes.append(int(min(x2 - x1, y2 - y1)))
             reason = reject_reason(frame, face, profile)
             if reason is None:
-                crops.append(align(frame, face.landmarks))
+                crops.append((stamp, align(frame, face.landmarks)))
             else:
                 stats["quality_rejects"] += 1
                 rejects[reason] += 1
-        if crops:
-            started = time.perf_counter()
-            vectors = runtime.embed(crops)
-            timings["embedding_ms"] += (time.perf_counter() - started) * 1000
-            observations.extend((stamp, vector) for vector in vectors)
+        progress("detecting", round(100 * stats["sampled_frames"] / count))
     if not stats["sampled_frames"]:
         raise SpikeError("NO_FRAMES", "Video decoded no frames.")
+    observations = []
+    progress("recognizing", 0)
+    for start in range(0, len(crops), EMBED_CHUNK):
+        chunk = crops[start : start + EMBED_CHUNK]
+        began = time.perf_counter()
+        vectors = runtime.embed([crop for _, crop in chunk])
+        timings["embedding_ms"] += (time.perf_counter() - began) * 1000
+        observations.extend((stamp, vector) for (stamp, _), vector in zip(chunk, vectors))
+        progress("recognizing", round(100 * min(start + EMBED_CHUNK, len(crops)) / len(crops)))
     return observations, timings, stats, info, rejects, sizes
 
 
@@ -141,10 +159,13 @@ def explain(roster, observations, hits, proposed, profile):
     return out
 
 
-def recognize(pipeline, path, people, store, fps, frames=sampled_frames):
+def recognize(pipeline, path, people, store, fps, frames=sampled_frames, progress=_noop):
     start = time.perf_counter()
     roster = store.load(people, pipeline.model_hash, pipeline.profile_hash)
-    observations, timings, stats, info, rejects, sizes = observe(pipeline, path, fps, frames)
+    observations, timings, stats, info, rejects, sizes = observe(
+        pipeline, path, fps, frames, progress
+    )
+    progress("matching", 0)
     profile = pipeline.profile
     hits, unknown = [], 0
     began = time.perf_counter()

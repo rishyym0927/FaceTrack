@@ -37,6 +37,16 @@ class Epoch(Strict):
     epoch: int = Field(gt=0)
 
 
+STAGES = ("preparing", "detecting", "recognizing", "matching", "finalizing")
+
+
+class Heartbeat(Epoch):
+    """A lease renewal that may also say which processing step the job is on."""
+
+    stage: Literal["preparing", "detecting", "recognizing", "matching", "finalizing"] | None = None
+    percent: int | None = Field(default=None, ge=0, le=100)
+
+
 class WorkerFailure(Epoch):
     code: str = Field(pattern=r"^[A-Z0-9_]{1,80}$")
     retryable: bool = False

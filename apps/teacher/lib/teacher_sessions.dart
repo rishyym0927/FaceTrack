@@ -13,6 +13,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'attendance_table.dart';
 import 'classroom_scan.dart';
 import 'classroom_pending.dart';
+import 'processing_progress.dart';
 import 'recognition_board.dart';
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
@@ -1024,6 +1025,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     return RecognitionSnapshot(
       (result['items'] as List).cast<Json>(),
       processing: result['processing_pending'] == true,
+      info: ProcessingInfo.fromJson(result['processing']),
     );
   }
 
@@ -1189,7 +1191,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           MaterialPageRoute(
             fullscreenDialog: true,
             builder: (_) =>
-                ClassroomScanPage(scan: scan!, results: scanResults),
+                ClassroomScanPage(
+                  scan: scan!,
+                  results: scanResults,
+                  reference: widget.id.substring(0, 8),
+                ),
           ),
         );
       }
@@ -1737,8 +1743,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           const SizedBox(height: 16),
         ],
         if (processingPending && capture == null)
-          const Panel(
-            child: Text('Recording is processing. Results will update here.'),
+          Panel(
+            child: ProcessingProgress(
+              info: ProcessingInfo.fromJson(data?['processing']),
+              reference: widget.id.substring(0, 8),
+            ),
           ),
         if (capture != null) ...[
           FutureBuilder<Json>(

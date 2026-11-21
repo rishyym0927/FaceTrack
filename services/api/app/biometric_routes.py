@@ -310,9 +310,11 @@ def install(app, engine, settings, principal, storage):
             return await work.progress(conn, worker, identifier, body.epoch, start=True)
 
     @app.post("/internal/v1/jobs/{identifier}/heartbeat")
-    async def heartbeat(identifier: UUID, body: types.Epoch, authorization: Worker):
+    async def heartbeat(identifier: UUID, body: types.Heartbeat, authorization: Worker):
         async with work.worker_transaction(engine, credential(authorization)) as (conn, worker):
-            return await work.progress(conn, worker, identifier, body.epoch)
+            return await work.progress(
+                conn, worker, identifier, body.epoch, step=body.stage, percent=body.percent
+            )
 
     @app.get("/internal/v1/jobs/{identifier}/input")
     async def job_input(identifier: UUID, epoch: int, authorization: Worker):

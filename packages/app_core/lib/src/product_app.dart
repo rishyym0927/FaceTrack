@@ -9,6 +9,7 @@ import 'package:go_router/go_router.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'auth.dart';
+import 'brand.dart';
 import 'diagnostics.dart';
 import 'api.dart';
 import 'config.dart';
@@ -715,6 +716,10 @@ class ContentPage extends StatelessWidget {
 }
 
 /// Shared, scrollable sign-in and account setup frame.
+///
+/// Phones get a branded gradient header with the form on a card that overlaps it; wide screens
+/// (web, tablets) get a split layout with the brand on the left. The header shrinks when the
+/// keyboard is open or the screen is short, so the form always stays in view.
 class AuthFrame extends ConsumerWidget {
   const AuthFrame({
     super.key,
@@ -730,37 +735,270 @@ class AuthFrame extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final student = ref.read(servicesProvider).config.role == AppRole.student;
     final theme = Theme.of(context);
+    final form = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Semantics(
+          header: true,
+          child: Text(title, style: theme.textTheme.headlineMedium),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          subtitle,
+          style: TextStyle(color: theme.colorScheme.onSurfaceVariant, height: 1.45),
+        ),
+        const SizedBox(height: 24),
+        child,
+      ],
+    );
     return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+      body: LayoutBuilder(
+        builder: (context, box) {
+          if (box.maxWidth >= 840) {
+            return Row(
+              children: [
+                Expanded(
+                  flex: 5,
+                  child: _BrandPanel(student: student, wide: true),
+                ),
+                Expanded(
+                  flex: 6,
+                  child: SafeArea(
+                    child: Center(
+                      child: SingleChildScrollView(
+                        padding: const EdgeInsets.all(40),
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 440),
+                          child: form,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            );
+          }
+          final compact =
+              MediaQuery.viewInsetsOf(context).bottom > 0 || box.maxHeight < 720;
+          return SingleChildScrollView(
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 440),
+              constraints: BoxConstraints(minHeight: box.maxHeight),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text(
-                    student ? 'Student portal' : 'Faculty portal',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      color: theme.colorScheme.primary,
+                  _BrandPanel(student: student, wide: false, compact: compact),
+                  Align(
+                    alignment: Alignment.topCenter,
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 520),
+                      child: Transform.translate(
+                        offset: const Offset(0, -28),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 16),
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(28),
+                              border: Border.all(color: theme.colorScheme.outline),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: Brand.deep.withValues(alpha: .12),
+                                  blurRadius: 32,
+                                  offset: const Offset(0, 12),
+                                ),
+                              ],
+                            ),
+                            child: Padding(
+                              padding: const EdgeInsets.fromLTRB(22, 26, 22, 22),
+                              child: form,
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
                   ),
-                  const SizedBox(height: 20),
-                  Semantics(
-                    header: true,
-                    child: Text(title, style: theme.textTheme.headlineMedium),
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 20),
+                    child: Text(
+                      'FaceTrack · Human-reviewed attendance',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        fontSize: 12,
+                      ),
+                    ),
                   ),
-                  const SizedBox(height: 8),
-                  Text(subtitle),
-                  const SizedBox(height: 24),
-                  child,
                 ],
               ),
             ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _BrandPanel extends StatelessWidget {
+  const _BrandPanel({required this.student, required this.wide, this.compact = false});
+  final bool student, wide, compact;
+
+  @override
+  Widget build(BuildContext context) {
+    // The header is decoration: cap its text scaling so it never crowds out the form.
+    final media = MediaQuery.of(context);
+    return MediaQuery(
+      data: media.copyWith(textScaler: media.textScaler.clamp(maxScaleFactor: 1.2)),
+      child: _content(context),
+    );
+  }
+
+  Widget _content(BuildContext context) {
+    final points = student
+        ? const [
+            (Icons.fact_check_outlined, 'See your attendance for every subject'),
+            (Icons.rate_review_outlined, 'Raise a query if a mark looks wrong'),
+            (Icons.verified_user_outlined, 'Face enrolment only with your consent'),
+          ]
+        : const [
+            (Icons.videocam_outlined, 'Record the class in short segments'),
+            (Icons.fact_check_outlined, 'Review every suggestion before you publish'),
+            (Icons.history_edu_outlined, 'Corrections are recorded, never overwritten'),
+          ];
+    final top = MediaQuery.paddingOf(context).top;
+    final brand = Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FaceTrackMark(size: compact ? 40 : 52),
+        const SizedBox(width: 14),
+        Flexible(
+          child: Text(
+            'FaceTrack',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: compact ? 24 : 30,
+              fontWeight: FontWeight.w800,
+              letterSpacing: -.8,
+            ),
           ),
         ),
+      ],
+    );
+    final role = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.white.withValues(alpha: .14),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.white.withValues(alpha: .22)),
       ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            student ? Icons.school_outlined : Icons.badge_outlined,
+            size: 16,
+            color: Brand.mint,
+          ),
+          const SizedBox(width: 8),
+          Flexible(
+            child: Text(
+              student ? 'Student portal' : 'Faculty portal',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w600,
+                fontSize: 13,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+    final tagline = Text(
+      student ? 'Your attendance, made clear.' : 'Attendance in minutes.',
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: wide ? 34 : 24,
+        fontWeight: FontWeight.w800,
+        height: 1.2,
+        letterSpacing: -.5,
+      ),
+    );
+    final subline = Text(
+      student
+          ? 'Raise a query if a mark looks wrong.'
+          : 'Every suggestion is reviewed by you.',
+      style: const TextStyle(color: Brand.mint, fontSize: 14, height: 1.4),
+    );
+    final decoration = const BoxDecoration(gradient: Brand.gradient);
+    if (wide) {
+      return Container(
+        decoration: decoration,
+        padding: EdgeInsets.fromLTRB(56, top + 48, 56, 48),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            brand,
+            const SizedBox(height: 28),
+            role,
+            const SizedBox(height: 28),
+            tagline,
+            const SizedBox(height: 36),
+            for (final (icon, text) in points)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 16),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(9),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: .12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Icon(icon, color: Brand.mint, size: 20),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Text(
+                        text,
+                        style: const TextStyle(color: Brand.mint, fontSize: 15, height: 1.35),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      );
+    }
+    return Container(
+      decoration: decoration.copyWith(
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),
+      ),
+      padding: EdgeInsets.fromLTRB(24, top + (compact ? 14 : 28), 24, compact ? 48 : 64),
+      child: compact
+          ? Wrap(
+              alignment: WrapAlignment.spaceBetween,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              runSpacing: 10,
+              spacing: 12,
+              children: [brand, role],
+            )
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                brand,
+                const SizedBox(height: 20),
+                role,
+                const SizedBox(height: 16),
+                tagline,
+                const SizedBox(height: 4),
+                subline,
+              ],
+            ),
     );
   }
 }

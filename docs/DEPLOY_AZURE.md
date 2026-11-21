@@ -20,12 +20,18 @@ FaceTrack runs online on a single Azure virtual machine. Data stays in the hoste
 
 ## Worker ownership
 
-A worker credential is scoped to one institute and a set of job types. The VM processes jobs for the institutes with active Azure workers. Keep one worker and agent pair per institute queue. Local apps and the local API can stay running against the shared database while the Azure worker processes their jobs.
+A worker credential is scoped to **one institute** and a set of job types: the API hands a worker only jobs from its own institute. A credential for the wrong institute looks healthy (it polls, is told "nothing to do", logs no error) while every segment waits forever. Check this after any credential or compose change:
 
-- Move the default demo queue back to a Mac: `ssh … 'cd /opt/facetrack && docker compose stop worker agent'`, then start the local worker and agent.
-- Move the default demo queue to the VM again: stop the local worker and agent, then `docker compose up -d worker agent` on the VM.
+```sh
+cd services/api && .venv/bin/python -m tools.check_worker   # read-only; exits 1 if queued work has no worker
+```
 
-The IGDTUW-labelled student project uses a separate Azure agent and worker on the same VM, with Redis database 4 and separate private scratch storage. The active credential permits enrolment, classroom recognition and reports. The two containers are `facetrack-project-enrolment-agent` and `facetrack-project-enrolment-worker`. Their private configuration is held outside the deployment checkout. After an image update, refresh this pair separately and verify that it can claim jobs. Keep the base Compose pair for its own institute.
+**Current setup (from 21 November 2026).** The base Compose pair (`facetrack-worker-1`, `facetrack-agent-1`) serves the **Indira Gandhi Delhi Technical University for Women** institute, where all classes run. Its credential permits enrolment, recognition and reports and expires on 11 December 2026. The Demo institute no longer has a worker on the VM (its credential, which expired the next day, is no longer used).
+
+Before that date the base pair held the Demo institute's credential while a separate pair, `facetrack-project-enrolment-agent` and `-worker` (Redis database 4, private config under `~/.facetrack-project-enrolment`), served the real institute. A routine tidy-up stopped that second pair as "stale", and the base pair, serving the wrong institute, never processed any class. The credential was moved into `services/worker/.env` (a backup of the previous file is in `~/.facetrack-backups`) and the second pair stays stopped with restarts disabled; remove it once you are sure it is not needed. Never run two agents with the same credential.
+
+- Local apps and the local API can stay running against the shared database. Only one processing backend should serve a given institute at a time.
+- To move processing to a Mac: stop the VM's `worker` and `agent`, then start the local pair with the same institute credential.
 
 ## Updating
 
@@ -128,13 +134,14 @@ session id, a capture id, a job id, or the start of a request id.
 | `request` | api | route template, status, error `code`, duration, DB wait, `session_id`/`capture_id`/`job_id` |
 | `recognition_complete` | api | roster size, students recognised, frames, detections, rejects by gate (`edge`, `small`, `landmarks`, `brightness`, `blur`), median face size, sample fps, per-stage timings, histogram of reasons |
 | `job_failed`, `lease_expired` | api | failed jobs with their code and attempt, and leases that ran out |
+| `processing_stalled` | api | a session's jobs have been queued for 90 s or more and no recognition worker has called in. Logged once per session per 5 minutes |
 | `database_error`, `unhandled_error` | api | exception type, SQLSTATE or code location. Never the message |
 | `job_dispatched`, `claim_paused` | agent | job hand-off to the worker, and why it is not claiming |
 | `agent_notice`, `agent_recovered` | agent | recurring problems (API unreachable, credential rejected, broker down), logged once a minute with a repeat count |
 | `resources` | agent | CPU %, load, memory available, disk free and used %, queue backlog |
 | `job_start`, `download_done`, `inference_done`, `job_done` | worker | each stage with durations |
 | `job_failed`, `worker_error`, `lease_lost` | worker | failure code and the **stage** it reached (`input`, `download`, `inference`, `complete`) |
-| `client_event` | api | from the apps: `scan_started`, `segment_recorded`, `upload_retry`, `upload_done`, `upload_failed`, `camera_failed`, `camera_interrupted`, `api_error`, `app_error`, `scan_stopped` |
+| `client_event` | api | from the apps: `scan_started`, `segment_recorded`, `upload_retry`, `upload_done`, `upload_failed`, `camera_failed`, `camera_interrupted`, `camera_switched`, `api_error`, `app_error`, `scan_stopped` |
 
 **What is never logged:** names, emails, enrolment numbers, tokens, signed URLs, embeddings,
 frames, or per-student scores. Logging code drops any field with such a name and any value that

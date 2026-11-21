@@ -1,15 +1,46 @@
 import 'dart:async';
 import 'dart:io';
 
+import 'package:camera/camera.dart' show CameraDescription, CameraLensDirection;
 import 'package:flutter/services.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_teacher/classroom_scan.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+const frontCamera = CameraDescription(
+  name: 'front',
+  lensDirection: CameraLensDirection.front,
+  sensorOrientation: 270,
+);
+const rearCamera = CameraDescription(
+  name: 'rear',
+  lensDirection: CameraLensDirection.back,
+  sensorOrientation: 90,
+);
+
 class FakeScanCamera extends GuidedCamera {
+  FakeScanCamera() {
+    cameras = [rearCamera, frontCamera];
+    selectedCamera = rearCamera;
+  }
   int starts = 0, stops = 0;
   bool available = true;
+  bool failSwitch = false;
+  final selections = <String>[];
+
+  @override
+  Future<void> selectCamera(CameraDescription choice) async {
+    selections.add(choice.name);
+    if (failSwitch && choice == frontCamera) {
+      ready = false;
+      return;
+    }
+    selectedCamera = choice;
+    ready = true;
+    emit();
+  }
+
   @override
   Future<void> initialize() async {
     ready = available;
@@ -266,5 +297,123 @@ void main() {
     expect(camera.ready, false);
     expect(scan.pending, 0);
     expect(scan.canLeave, true);
+  });
+
+  group('switching between the front and rear camera', () {
+    Future<void> pause() => Future<void>.delayed(const Duration(milliseconds: 30));
+
+    test('mid-segment: the finished part is kept, then recording resumes on the other camera', () async {
+      final camera = FakeScanCamera();
+      final events = <String>[];
+      final sent = <String>[];
+      final scan = ClassroomScan(
+        camera,
+        (file) async => sent.add(file.path),
+        onEvent: (name, {code, attempt, bytes, count, durationMs}) => events.add('$name:${code ?? ''}'),
+      );
+      addTearDown(scan.dispose);
+      await scan.start();
+      camera.elapsed = 12;
+      expect(camera.starts, 1);
+      await scan.switchCamera();
+      await pause();
+      expect(camera.selections, ['front']);
+      expect(camera.selectedCamera, frontCamera);
+      expect(camera.starts, 2, reason: 'recording continues on the new camera');
+      expect(scan.scanning, isTrue);
+      expect(scan.switching, isFalse);
+      expect(scan.error, isNull);
+      expect(scan.recorded, 1); // the part recorded so far was kept
+      expect(events, contains('camera_switched:front'));
+    });
+
+    test('a very short part is dropped rather than uploaded', () async {
+      final camera = FakeScanCamera();
+      final scan = ClassroomScan(camera, (file) async {});
+      addTearDown(scan.dispose);
+      await scan.start();
+      camera.elapsed = 1;
+      await scan.switchCamera();
+      await pause();
+      expect(scan.recorded, 0);
+      expect(camera.selectedCamera, frontCamera);
+      expect(scan.scanning, isTrue);
+    });
+
+    test('before scanning it just swaps the camera and does not start recording', () async {
+      final camera = FakeScanCamera();
+      final scan = ClassroomScan(camera, (file) async {});
+      addTearDown(scan.dispose);
+      await camera.initialize();
+      await scan.switchCamera();
+      expect(camera.selectedCamera, frontCamera);
+      expect(camera.starts, 0);
+      expect(scan.scanning, isFalse);
+    });
+
+    test('if the other camera cannot open, the previous one is restored with a message', () async {
+      final camera = FakeScanCamera()..failSwitch = true;
+      final events = <String>[];
+      final scan = ClassroomScan(
+        camera,
+        (file) async {},
+        onEvent: (name, {code, attempt, bytes, count, durationMs}) => events.add('$name:${code ?? ''}'),
+      );
+      addTearDown(scan.dispose);
+      await scan.start();
+      camera.elapsed = 12;
+      await scan.switchCamera();
+      await pause();
+      expect(camera.selections, ['front', 'rear']);
+      expect(camera.selectedCamera, rearCamera);
+      expect(camera.ready, isTrue);
+      expect(scan.cameraError, contains('Could not switch cameras'));
+      expect(events, contains('camera_failed:switch'));
+      expect(scan.scanning, isTrue);
+      expect(camera.starts, 2, reason: 'and recording carries on');
+    });
+
+    test('a second tap while switching is ignored', () async {
+      final camera = FakeScanCamera();
+      final scan = ClassroomScan(camera, (file) async {});
+      addTearDown(scan.dispose);
+      await scan.start();
+      camera.elapsed = 12;
+      await Future.wait([scan.switchCamera(), scan.switchCamera()]);
+      await pause();
+      expect(camera.selections, ['front']);
+    });
+
+    test('a single-camera phone cannot switch, and neither can a finished scan', () async {
+      final camera = FakeScanCamera()..cameras = [rearCamera];
+      final scan = ClassroomScan(camera, (file) async {});
+      addTearDown(scan.dispose);
+      expect(camera.canSwitch, isFalse);
+      await scan.switchCamera();
+      expect(camera.selections, isEmpty);
+      final other = FakeScanCamera();
+      final done = ClassroomScan(other, (file) async {});
+      addTearDown(done.dispose);
+      await done.start();
+      await done.stop();
+      await done.switchCamera();
+      expect(other.selections, isEmpty);
+    });
+
+    test('otherCamera toggles direction and ignores extra rear lenses', () {
+      const ultraWide = CameraDescription(
+        name: 'ultrawide',
+        lensDirection: CameraLensDirection.back,
+        sensorOrientation: 90,
+      );
+      final camera = GuidedCamera()
+        ..cameras = [rearCamera, ultraWide, frontCamera]
+        ..selectedCamera = rearCamera;
+      expect(camera.otherCamera, frontCamera);
+      camera.selectedCamera = frontCamera;
+      expect(camera.otherCamera, rearCamera); // the main lens, not the ultra-wide
+      camera.selectedCamera = ultraWide;
+      expect(camera.otherCamera, frontCamera);
+    });
   });
 }

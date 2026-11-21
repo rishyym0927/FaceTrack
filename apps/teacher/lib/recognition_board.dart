@@ -2,6 +2,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:flutter/material.dart';
 
 import 'attendance_table.dart';
+import 'processing_progress.dart';
 
 /// How far the server's recognition has got for one student.
 ///
@@ -17,8 +18,15 @@ enum RecognitionState {
 }
 
 class RecognitionSnapshot {
-  const RecognitionSnapshot(this.rows, {this.processing = false});
+  const RecognitionSnapshot(
+    this.rows, {
+    this.processing = false,
+    this.info = const ProcessingInfo(),
+  });
   final List<Json> rows;
+
+  /// Where recognition is up to: stage, segment counts, and whether a worker is running.
+  final ProcessingInfo info;
 
   /// A segment is uploading or being processed, so current results may still change.
   final bool processing;
