@@ -67,6 +67,32 @@ def _noop(stage, percent=None):
 
 EMBED_CHUNK = 16
 
+# Embedding is ~44 ms per face on 2 vCPUs and is 85 % of the work, so a crowded segment (18 faces
+# in each of 80 frames = 1440 embeddings) took longer than it lasted. Above this many faces in a
+# clip only every k-th sampled *frame* is embedded: a student seen for 3 s is still looked at
+# about twice a second, far above the two corroborating hits the frozen rules need.
+EMBED_BUDGET_DEFAULT = 500
+
+
+def embed_budget() -> int:
+    try:
+        return max(0, int(os.environ.get("RECOGNITION_EMBED_BUDGET", EMBED_BUDGET_DEFAULT)))
+    except ValueError:
+        return EMBED_BUDGET_DEFAULT
+
+
+def thin(crops, budget):
+    """Keep whole frames, evenly spread, so that at most about ``budget`` crops remain.
+
+    Returns (kept crops, k) where k is the frame stride (1 = nothing dropped).
+    """
+    if budget <= 0 or len(crops) <= budget:
+        return crops, 1
+    stamps = sorted({stamp for stamp, _ in crops})
+    k = -(-len(crops) // budget)
+    keep = set(stamps[::k])
+    return [c for c in crops if c[0] in keep], k
+
 
 def observe(pipeline, path, fps, frames=sampled_frames, progress=_noop):
     """Detect faces in every sampled frame, then embed the usable ones.
@@ -107,6 +133,9 @@ def observe(pipeline, path, fps, frames=sampled_frames, progress=_noop):
         progress("detecting", round(100 * stats["sampled_frames"] / count))
     if not stats["sampled_frames"]:
         raise SpikeError("NO_FRAMES", "Video decoded no frames.")
+    crops, every = thin(crops, embed_budget())
+    timings["embed_every"] = float(every)
+    timings["embedded_faces"] = float(len(crops))
     observations = []
     progress("recognizing", 0)
     for start in range(0, len(crops), EMBED_CHUNK):

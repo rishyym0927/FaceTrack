@@ -1,3 +1,4 @@
+import asyncio
 from typing import Annotated
 from uuid import UUID
 
@@ -373,17 +374,28 @@ def install(app, engine, settings, principal, storage):
                     {"i": worker["institute_id"]},
                 )
             ]
-        failed = 0
-        for asset in assets:
-            try:
-                await storage.delete(asset)
-                async with work.worker_transaction(engine, token) as (conn, worker):
-                    await conn.execute(
-                        text(
-                            "UPDATE app.media_assets SET status='deleted',deleted_at=now() WHERE institute_id=:i AND id=:id"
-                        ),
-                        {"i": worker["institute_id"], "id": asset["id"]},
-                    )
-            except APIError:
-                failed += 1
+        # Tombstones are deleted again until their upload token expires (2 h), so a scan leaves
+        # dozens to redo each minute. One at a time, each in its own transaction, that took 19 s
+        # (storage call + several 125 ms database round trips apiece): run them in parallel and
+        # record the results in one transaction.
+        gate = asyncio.Semaphore(10)
+
+        async def remove(asset):
+            async with gate:
+                try:
+                    await storage.delete(asset)
+                    return asset["id"]
+                except APIError:
+                    return None
+
+        done = [i for i in await asyncio.gather(*(remove(a) for a in assets)) if i is not None]
+        failed = len(assets) - len(done)
+        if done:
+            async with work.worker_transaction(engine, token) as (conn, worker):
+                await conn.execute(
+                    text(
+                        "UPDATE app.media_assets SET status='deleted',deleted_at=now() WHERE institute_id=:i AND id=ANY(:ids)"
+                    ),
+                    {"i": worker["institute_id"], "ids": done},
+                )
         return {**result, "deletion_failures": failed}

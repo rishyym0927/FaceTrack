@@ -61,6 +61,8 @@ services:
     build:
       context: .
       dockerfile: docker/worker.Dockerfile
+    deploy:
+      replicas: 2
     env_file:
       - path: services/worker/.env
         required: false
@@ -71,6 +73,9 @@ services:
       MANIFEST_PATH: /workspace/.local/spike/models/buffalo_sc/manifest.json
       PROFILE_PATH: /workspace/.local/spike/profiles/frozen-phase1b-v1.json
       TEMP_ROOT: /workspace/.local/enrollment/tmp
+      # Jobs wait on the network and database for ~40 % of their time, so two run side by side:
+      # two worker containers (below), and the agent keeps two jobs claimed. Size to the VM's cores.
+      WORKER_SLOTS: "2"
     volumes: &worker-volumes
       - ./services/worker:/workspace/services/worker
       - ./.local:/workspace/.local

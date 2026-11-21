@@ -208,8 +208,16 @@ async def complete(conn, worker, job_id, body, settings):
         "SELECT * FROM app.session_roster WHERE institute_id=:i AND session_id=:s ORDER BY student_id",
         {"i": i, "s": lookup["session_id"]},
     )
-    for r in roster:
-        await bio.lock_student(conn, r["student_id"])
+    # One statement instead of one round trip per student (125 ms each to the hosted database).
+    # The roster is already ordered by student, which keeps the lock order the same as elsewhere.
+    if roster:
+        await conn.execute(
+            text(
+                """SELECT pg_advisory_xact_lock(hashtextextended('biometric:' || o.sid::text, 0))
+                FROM (SELECT sid FROM unnest(CAST(:ids AS uuid[])) WITH ORDINALITY AS t(sid, n) ORDER BY n) o"""
+            ),
+            {"ids": [str(r["student_id"]) for r in roster]},
+        )
     s = await one(
         conn,
         "SELECT * FROM app.sessions WHERE institute_id=:i AND id=:s FOR UPDATE",
@@ -242,66 +250,73 @@ async def complete(conn, worker, job_id, body, settings):
             or ref["template_epoch"] != p.template_epoch
         ):
             raise APIError(409, "INPUT_CHANGED", "Student consent or templates changed.")
-        ev = await one(
-            conn,
-            """INSERT INTO app.recognition_evidence(institute_id,session_id,capture_id,student_id,template_set_id,template_epoch,accepted_hits,span_ms,scores_json,job_id)
-        VALUES(:i,:s,:c,:student,:t,:epoch,:hits,:span,CAST(:scores AS jsonb),:j) RETURNING id""",
-            {
-                "i": i,
-                "s": s["id"],
-                "c": job["capture_id"],
-                "student": p.student_id,
-                "t": p.template_set_id,
-                "epoch": p.template_epoch,
-                "hits": p.hits,
-                "span": p.span_ms,
-                "scores": json.dumps({"median_similarity": p.similarity}),
-                "j": job_id,
-            },
-        )
+    if body.proposals:
+        # Evidence rows and attendance updates in two statements, however many students matched.
+        evidence = (
+            await conn.execute(
+                text(
+                    """INSERT INTO app.recognition_evidence(institute_id,session_id,capture_id,student_id,template_set_id,template_epoch,accepted_hits,span_ms,scores_json,job_id)
+                SELECT :i,:s,:c,v.student_id,v.template_set_id,v.epoch,v.hits,v.span,CAST(v.scores AS jsonb),:j
+                FROM unnest(CAST(:students AS uuid[]),CAST(:sets AS uuid[]),CAST(:epochs AS int[]),CAST(:hits AS int[]),CAST(:spans AS int[]),CAST(:scores AS text[]))
+                AS v(student_id,template_set_id,epoch,hits,span,scores)
+                RETURNING student_id,id"""
+                ),
+                {
+                    "i": i,
+                    "s": s["id"],
+                    "c": job["capture_id"],
+                    "j": job_id,
+                    "students": [str(p.student_id) for p in body.proposals],
+                    "sets": [str(p.template_set_id) for p in body.proposals],
+                    "epochs": [p.template_epoch for p in body.proposals],
+                    "hits": [p.hits for p in body.proposals],
+                    "spans": [p.span_ms for p in body.proposals],
+                    "scores": [
+                        json.dumps({"median_similarity": p.similarity}) for p in body.proposals
+                    ],
+                },
+            )
+        ).all()
+        evidence_id = {str(r[0]): r[1] for r in evidence}
         await conn.execute(
             text(
-                "UPDATE app.attendance_records SET status='proposed_present',source='ml',evidence_id=:e,assessment_code='recognized',evidence_summary=CAST(:summary AS jsonb),version=version+1 WHERE institute_id=:i AND session_id=:s AND student_id=:student AND NOT manual_lock"
+                """UPDATE app.attendance_records a SET status='proposed_present',source='ml',evidence_id=v.evidence_id,
+                assessment_code='recognized',evidence_summary=CAST(v.summary AS jsonb),version=a.version+1
+                FROM unnest(CAST(:students AS uuid[]),CAST(:evidence AS uuid[]),CAST(:summaries AS text[])) AS v(student_id,evidence_id,summary)
+                WHERE a.institute_id=:i AND a.session_id=:s AND a.student_id=v.student_id AND NOT a.manual_lock"""
             ),
             {
-                "e": ev["id"],
-                "summary": json.dumps(
-                    {"hits": p.hits, "span_ms": p.span_ms, "median_similarity": p.similarity}
-                ),
                 "i": i,
                 "s": s["id"],
-                "student": p.student_id,
+                "students": [str(p.student_id) for p in body.proposals],
+                "evidence": [str(evidence_id[str(p.student_id)]) for p in body.proposals],
+                "summaries": [
+                    json.dumps(
+                        {"hits": p.hits, "span_ms": p.span_ms, "median_similarity": p.similarity}
+                    )
+                    for p in body.proposals
+                ],
             },
         )
     proposed = {str(p.student_id) for p in body.proposals}
     why = {str(d.student_id): d for d in body.diagnostics}
     usable = max(0, body.quality.get("detections", 0) - body.quality.get("quality_rejects", 0))
     sufficient_capture = body.quality.get("sampled_frames", 0) >= 2 and usable >= 2
+    rows = []
     for r in roster:
         student_id = str(r["student_id"])
         eligible = student_id in allowed
         if student_id in proposed or (not eligible and not sufficient_capture):
             continue
-        await conn.execute(
-            text(
-                """UPDATE app.attendance_records SET status=:status,source=:source,
-                assessment_code=:code,evidence_summary=CAST(:summary AS jsonb),version=version+1
-                WHERE institute_id=:i AND session_id=:s AND student_id=:student AND NOT manual_lock
-                AND status<>'proposed_present'
-                AND (:sufficient OR status<>'proposed_absent')"""
-            ),
-            {
-                "status": "proposed_absent" if sufficient_capture else "unassessed",
-                "source": "ml" if sufficient_capture else "none",
-                "code": (
-                    "template_ineligible"
-                    if not eligible
-                    else "not_recognized"
-                    if sufficient_capture
-                    else "limited_capture"
-                ),
-                "sufficient": sufficient_capture,
-                "summary": json.dumps(
+        rows.append(
+            (
+                student_id,
+                "template_ineligible"
+                if not eligible
+                else "not_recognized"
+                if sufficient_capture
+                else "limited_capture",
+                json.dumps(
                     {
                         "usable_observations": usable,
                         **(
@@ -315,9 +330,27 @@ async def complete(conn, worker, job_id, body, settings):
                         ),
                     }
                 ),
+            )
+        )
+    if rows:
+        await conn.execute(
+            text(
+                """UPDATE app.attendance_records a SET status=:status,source=:source,
+                assessment_code=v.code,evidence_summary=CAST(v.summary AS jsonb),version=a.version+1
+                FROM unnest(CAST(:students AS uuid[]),CAST(:codes AS text[]),CAST(:summaries AS text[])) AS v(student_id,code,summary)
+                WHERE a.institute_id=:i AND a.session_id=:s AND a.student_id=v.student_id AND NOT a.manual_lock
+                AND a.status<>'proposed_present'
+                AND (:sufficient OR a.status<>'proposed_absent')"""
+            ),
+            {
+                "status": "proposed_absent" if sufficient_capture else "unassessed",
+                "source": "ml" if sufficient_capture else "none",
+                "sufficient": sufficient_capture,
                 "i": i,
                 "s": s["id"],
-                "student": r["student_id"],
+                "students": [r[0] for r in rows],
+                "codes": [r[1] for r in rows],
+                "summaries": [r[2] for r in rows],
             },
         )
     quality = {

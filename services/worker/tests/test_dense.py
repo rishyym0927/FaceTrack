@@ -181,3 +181,13 @@ def test_embedding_in_chunks_keeps_every_crop_in_order(tmp_path):
     identities = [int(np.argmax(vector)) for _, vector in observations]
     assert identities == [i % 3 for i in range(40)]
     assert [stamp for stamp, _ in observations] == sorted(stamp for stamp, _ in observations)
+
+
+def test_crowded_clips_embed_every_kth_frame_but_small_ones_are_untouched():
+    crowd = [(frame, object()) for frame in range(80) for _ in range(18)]  # 1440 faces
+    kept, every = dense.thin(crowd, 500)
+    assert every == 3 and len(kept) <= 500
+    assert {stamp for stamp, _ in kept} == set(range(0, 80, 3))  # whole frames, evenly spread
+    small = [(frame, object()) for frame in range(80) for _ in range(2)]
+    assert dense.thin(small, 500) == (small, 1)
+    assert dense.thin(crowd, 0) == (crowd, 1)  # 0 turns thinning off
