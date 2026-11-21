@@ -425,6 +425,7 @@ These tests simulate browser camera and upload behavior. Use the [camera validat
 | `MEDIA_ORIGIN` | Allowed Supabase media origin |
 | `TEMP_ROOT` | Private temporary job directory |
 | `WORKER_SLOTS` | Optional, default 1 (Compose sets 2). Jobs the agent keeps claimed at once; match the number of worker containers |
+| `DOWNLOAD_PARTS` | Optional, default 4 (1-8). Parallel ranged connections per media download; 1 = a single stream |
 | `RECOGNITION_SAMPLE_FPS` | Optional, default 4. Frames per second sampled from a classroom clip; 0 returns to the frozen 12-frame path |
 | `RECOGNITION_THREADS` | Optional, default one per CPU core (at most 8). Threads sharing one job's detection and embedding; 0 or 1 is the serial loop |
 | `RECOGNITION_EMBED_BUDGET` | Optional, default 500. Above this many usable faces in a clip only every k-th sampled frame is embedded; 0 turns it off |

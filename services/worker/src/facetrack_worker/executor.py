@@ -6,6 +6,7 @@ import signal
 import tempfile
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from urllib.parse import urlparse
 
@@ -200,7 +201,101 @@ class Heartbeat(threading.Thread):
                 self.stopped.wait(self.spacing)
 
 
+MIN_PART_BYTES = 2 * 1024 * 1024
+
+
+class RangeUnsupported(Exception):
+    """The storage server answered a ranged request with the whole file or something unusable."""
+
+
+def download_parts():
+    """DOWNLOAD_PARTS (default 4, 1 = one stream as before, at most 8): connections per download."""
+    try:
+        return min(8, max(1, int(os.environ.get("DOWNLOAD_PARTS", "4"))))
+    except ValueError:
+        return 4
+
+
 def fetch_media(client, url, destination, byte_size, sha256, lost):
+    """Download the signed URL to ``destination`` and verify size and SHA-256. Returns the bytes.
+
+    Storage is 125 ms away, and one TCP stream over such a link fills slowly (a 11 MB segment took
+    2-14 s). A large file is fetched as several ranges at once. The file is checked against the
+    leased size and SHA-256 exactly as before; a server that ignores ranges is read in one stream.
+    """
+    parts = min(download_parts(), byte_size // MIN_PART_BYTES)
+    if parts >= 2:
+        try:
+            return fetch_parts(client, url, destination, byte_size, sha256, lost, parts)
+        except RangeUnsupported:
+            log.event("download_ranges_unsupported", "warning")
+            destination.unlink(missing_ok=True)
+    return fetch_single(client, url, destination, byte_size, sha256, lost)
+
+
+def fetch_parts(client, url, destination, byte_size, sha256, lost, parts):
+    size = -(-byte_size // parts)
+    spans = [(i * size, min(byte_size, (i + 1) * size) - 1) for i in range(parts) if i * size < byte_size]
+    deadline = time.monotonic() + 120
+    with destination.open("xb") as stream:
+        destination.chmod(0o600)
+        stream.truncate(byte_size)
+
+    def get(span):
+        start, end = span
+        for attempt in (1, 2):
+            try:
+                with client.stream("GET", url, headers={"Range": f"bytes={start}-{end}"}) as response:
+                    if response.status_code == 200:
+                        raise RangeUnsupported
+                    response.raise_for_status()
+                    if response.status_code != 206 or not response.headers.get(
+                        "content-range", ""
+                    ).startswith(f"bytes {start}-{end}/"):
+                        raise RangeUnsupported
+                    position = start
+                    with destination.open("r+b") as out:
+                        out.seek(start)
+                        for block in response.iter_bytes(65536):
+                            if lost.is_set():
+                                raise LeaseLost
+                            if time.monotonic() > deadline or position + len(block) > end + 1:
+                                raise ValueError("Invalid download")
+                            out.write(block)
+                            position += len(block)
+                    if position != end + 1:
+                        raise ValueError("Media integrity mismatch")
+                    return
+            except httpx.HTTPStatusError as e:
+                if attempt == 2 or not (e.response.status_code >= 500 or e.response.status_code in (408, 429)):
+                    raise
+            except httpx.TransportError:
+                if attempt == 2:
+                    raise
+
+    pool = ThreadPoolExecutor(len(spans), thread_name_prefix="download")
+    try:
+        try:
+            for future in [pool.submit(get, span) for span in spans]:
+                future.result()
+        finally:
+            pool.shutdown(wait=True, cancel_futures=True)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code < 500 and e.response.status_code not in (408, 429):
+            raise MediaUnavailable from e
+        raise StorageUnavailable from e
+    except httpx.HTTPError as e:
+        raise StorageUnavailable from e
+    checksum = hashlib.sha256()
+    with destination.open("rb") as stream:
+        while block := stream.read(1024 * 1024):
+            checksum.update(block)
+    if destination.stat().st_size != byte_size or checksum.hexdigest() != sha256:
+        raise ValueError("Media integrity mismatch")
+    return byte_size
+
+
+def fetch_single(client, url, destination, byte_size, sha256, lost):
     """Stream the signed URL into ``destination``, hashing as it arrives. Returns the byte count.
 
     Storage errors are about the signed URL, not this worker's API lease.
@@ -283,8 +378,10 @@ def enroll(job, epoch):
                         client, data["media_url"], source, data["byte_size"],
                         data["source_sha256"], beat.lost,
                     )
-                    log.event("download_done", job_id=job, bytes=count,
-                              duration_ms=log.elapsed_ms(download_started))
+                    spent = log.elapsed_ms(download_started)
+                    log.event("download_done", job_id=job, bytes=count, duration_ms=spent,
+                              parts=min(download_parts(), count // MIN_PART_BYTES) or 1,
+                              mbps=round(count * 8 / 1000 / max(spent, 1), 1))
                 stage = "inference"
                 inference_started = time.monotonic()
                 if process is None:

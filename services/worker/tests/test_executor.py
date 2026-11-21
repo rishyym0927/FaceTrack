@@ -354,3 +354,109 @@ def test_report_child_does_not_import_the_vision_stack():
         "assert 'cv2' not in sys.modules and 'onnxruntime' not in sys.modules, 'heavy import'\n"
     )
     subprocess.run([__import__("sys").executable, "-c", code], check=True, timeout=30)
+
+
+# ---- parallel ranged download ---------------------------------------------------------------
+
+import hashlib as _hashlib
+import threading
+import os as _os
+
+
+def _range_server(body, *, ignore_ranges=False, fail=None, seen=None):
+    """A storage double: honours Range (206 + Content-Range) unless told not to."""
+
+    def handler(request):
+        header = request.headers.get("range")
+        if seen is not None:
+            seen.append(header)
+        code = fail(request) if fail else None
+        if code:
+            return httpx.Response(code)
+        if header is None or ignore_ranges:
+            return httpx.Response(200, content=body)
+        start, end = (int(x) for x in header.removeprefix("bytes=").split("-"))
+        return httpx.Response(
+            206,
+            content=body[start : end + 1],
+            headers={"content-range": f"bytes {start}-{end}/{len(body)}"},
+        )
+
+    return httpx.MockTransport(handler)
+
+
+BODY = _os.urandom(9 * 1024 * 1024 + 123)
+DIGEST = _hashlib.sha256(BODY).hexdigest()
+
+
+def _fetch(tmp_path, transport, **kw):
+    with httpx.Client(transport=transport) as client:
+        return executor.fetch_media(
+            client, MEDIA, tmp_path / "in", kw.get("size", len(BODY)), kw.get("sha", DIGEST), threading.Event()
+        )
+
+
+def test_large_download_is_fetched_as_parallel_ranges_and_verified(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOWNLOAD_PARTS", raising=False)
+    seen = []
+    assert _fetch(tmp_path, _range_server(BODY, seen=seen)) == len(BODY)
+    assert (tmp_path / "in").read_bytes() == BODY
+    assert len(seen) == 4 and all(h and h.startswith("bytes=") for h in seen)
+    assert oct((tmp_path / "in").stat().st_mode & 0o777) == "0o600"
+
+
+def test_download_parts_setting_can_restore_one_stream(tmp_path, monkeypatch):
+    monkeypatch.setenv("DOWNLOAD_PARTS", "1")
+    seen = []
+    _fetch(tmp_path, _range_server(BODY, seen=seen))
+    assert seen == [None] and (tmp_path / "in").read_bytes() == BODY
+
+
+def test_server_that_ignores_ranges_is_read_in_one_stream(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOWNLOAD_PARTS", raising=False)
+    assert _fetch(tmp_path, _range_server(BODY, ignore_ranges=True)) == len(BODY)
+    assert (tmp_path / "in").read_bytes() == BODY
+
+
+def test_one_failed_part_is_retried_once(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOWNLOAD_PARTS", raising=False)
+    tried = []
+
+    def fail(request):
+        if request.headers["range"].startswith("bytes=0-") and not tried:
+            tried.append(1)
+            return 503
+        return None
+
+    assert _fetch(tmp_path, _range_server(BODY, fail=fail)) == len(BODY)
+    assert (tmp_path / "in").read_bytes() == BODY and tried
+
+
+@pytest.mark.parametrize("status,error", [(404, executor.MediaUnavailable), (503, executor.StorageUnavailable)])
+def test_range_failures_map_to_the_same_errors_as_a_single_stream(tmp_path, monkeypatch, status, error):
+    monkeypatch.delenv("DOWNLOAD_PARTS", raising=False)
+    with pytest.raises(error):
+        _fetch(tmp_path, _range_server(BODY, fail=lambda r: status))
+
+
+def test_wrong_bytes_are_rejected_after_a_parallel_download(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOWNLOAD_PARTS", raising=False)
+    with pytest.raises(ValueError):
+        _fetch(tmp_path, _range_server(BODY), sha="0" * 64)
+
+
+def test_lost_lease_stops_a_parallel_download(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOWNLOAD_PARTS", raising=False)
+    lost = threading.Event()
+    lost.set()
+    with httpx.Client(transport=_range_server(BODY)) as client:
+        with pytest.raises(executor.LeaseLost):
+            executor.fetch_media(client, MEDIA, tmp_path / "in", len(BODY), DIGEST, lost)
+
+
+def test_small_files_stay_on_one_stream(tmp_path, monkeypatch):
+    monkeypatch.delenv("DOWNLOAD_PARTS", raising=False)
+    small = b"x" * 1000
+    seen = []
+    _fetch(tmp_path, _range_server(small, seen=seen), size=1000, sha=_hashlib.sha256(small).hexdigest())
+    assert seen == [None]
