@@ -17,6 +17,7 @@ import 'processing_progress.dart';
 import 'recognition_board.dart';
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
+import 'unload_warning.dart';
 
 String sessionDate(BuildContext context, String stamp) {
   final d = DateTime.parse(stamp).toLocal(),
@@ -776,6 +777,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             row['student_id'] == choice.key && row['status'] != choice.value,
       ),
     );
+    setUnloadWarning(exitGuard.dirty);
   }
 
   Future<void> _loadOffering(String id) async {
@@ -1391,6 +1393,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   @override
   void dispose() {
     loadGeneration++;
+    // Only while this page still owns the guard: a notice can open another session page whose
+    // initState has already armed the prompt for its own unsaved marks.
+    if (exitGuard.protects(widget.id)) setUnloadWarning(false);
     exitGuard.leave(widget.id);
     poll?.cancel();
     lifecycle?.dispose();

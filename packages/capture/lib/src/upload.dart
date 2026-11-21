@@ -29,10 +29,23 @@ class ResumableUpload {
         status >= 500 ||
         status == 408 ||
         status == 429 ||
+        // 409: the server holds a different offset than the PATCH claimed (the earlier request
+        // landed after its response was lost). 423: it is still busy with that request. Both
+        // are cured by asking the server where it is, which the retry path does anyway.
+        status == 409 ||
+        status == 423 ||
         e.type == DioExceptionType.connectionError ||
         e.type == DioExceptionType.connectionTimeout ||
         e.type == DioExceptionType.sendTimeout ||
         e.type == DioExceptionType.receiveTimeout;
+  }
+
+  /// The server's `Upload-Offset`, or a [FormatException] when the reply has none. A missing
+  /// header used to surface as a null-check error, which callers treated like a flaky network.
+  static int offsetOf(Response<dynamic> response) {
+    final value = int.tryParse(response.headers.value('upload-offset') ?? '');
+    if (value == null) throw const FormatException('Missing upload offset');
+    return value;
   }
 
   void cancel() {
@@ -78,7 +91,7 @@ class ResumableUpload {
       if (response.statusCode == 404 || response.statusCode == 410) {
         location = null;
       } else {
-        offset = int.parse(response.headers.value('upload-offset')!);
+        offset = offsetOf(response);
       }
     }
     if (location == null) {
@@ -111,6 +124,15 @@ class ResumableUpload {
       throw const FormatException('Invalid upload offset');
     const chunkSize = 6 * 1024 * 1024;
     var retries = 0;
+    // Dio reports once per KiB written; callers repaint on every call. Pass on whole percents.
+    var reported = -1.0;
+    void report(double value) {
+      if (value >= 1 || value < reported || value - reported >= .01) {
+        reported = value;
+        progress(value);
+      }
+    }
+
     while (offset < length && !cancelled) {
       final end = (offset + chunkSize).clamp(0, length);
       final builder = BytesBuilder(copy: false);
@@ -126,15 +148,15 @@ class ResumableUpload {
             headers: {...headers, 'Upload-Offset': '$offset'},
           ),
           cancelToken: token,
-          onSendProgress: (n, _) => progress((offset + n) / length),
+          onSendProgress: (n, _) => report((offset + n) / length),
         );
-        final next = int.parse(response.headers.value('upload-offset')!);
+        final next = offsetOf(response);
         if (next <= offset || next > length) {
           throw const FormatException('Invalid uploaded offset');
         }
         offset = next;
         retries = 0;
-        progress(offset / length);
+        report(offset / length);
       } on DioException catch (e) {
         if (cancelled || !transient(e) || retries >= chunkRetries) rethrow;
         retries++;
@@ -147,6 +169,8 @@ class ResumableUpload {
         );
         final kept = int.tryParse(head.headers.value('upload-offset') ?? '');
         if (kept == null || kept < 0 || kept > length) rethrow;
+        // The server kept part of the lost chunk: that is progress, so the budget starts afresh.
+        if (kept > offset) retries = 0;
         offset = kept;
       }
     }

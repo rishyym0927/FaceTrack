@@ -106,6 +106,81 @@ void main() {
     expect(c.loading, isFalse);
   });
 
+  test('A failed refresh keeps the notices and the read state', () async {
+    final c = center();
+    await c.reload(
+      'teacher.u1.i1',
+      () async => NoticeBatch([
+        notice('a', NoticeTone.action),
+        notice('b', NoticeTone.info),
+      ]),
+    );
+    await c.markRead(c.items.first);
+    expect(c.unread, 1);
+    await c.reload('teacher.u1.i1', () async => throw Exception('offline'));
+    expect(c.items, hasLength(2));
+    expect(c.failed, isNotEmpty);
+    expect(c.unread, 1);
+    // Back online: the notice read before the outage is still read.
+    await c.reload(
+      'teacher.u1.i1',
+      () async => NoticeBatch([
+        notice('a', NoticeTone.action),
+        notice('b', NoticeTone.info),
+      ]),
+    );
+    expect(c.failed, isEmpty);
+    expect(c.unread, 1);
+    final restored = center();
+    await restored.reload(
+      'teacher.u1.i1',
+      () async => NoticeBatch([
+        notice('a', NoticeTone.action),
+        notice('b', NoticeTone.info),
+      ]),
+    );
+    expect(restored.unread, 1, reason: 'the stored read state survived the outage');
+  });
+
+  test('A source that fails does not make its read notices unread again', () async {
+    final c = center();
+    NoticeBatch both() => NoticeBatch([
+      notice('a', NoticeTone.action),
+      notice('b', NoticeTone.info),
+    ]);
+    await c.reload('student.u1.i1', () async => both());
+    await c.markAllRead();
+    expect(c.unread, 0);
+    // The source for "b" is down: only "a" arrives, and the failure is reported.
+    await c.reload(
+      'student.u1.i1',
+      () async => NoticeBatch([notice('a', NoticeTone.action)], failed: const ['attendance']),
+    );
+    expect(c.failed, ['attendance']);
+    await c.reload('student.u1.i1', () async => both());
+    expect(c.unread, 0);
+  });
+
+  test('Reset forgets another account\'s notices and read state', () async {
+    final c = center();
+    await c.reload(
+      'student.u1.i1',
+      () async => NoticeBatch([notice('a', NoticeTone.action)]),
+    );
+    expect(c.unread, 1);
+    c.reset();
+    expect(c.items, isEmpty);
+    expect(c.unread, 0);
+    expect(c.loadedAt, isNull);
+    // A later load for the same account starts again from storage.
+    await c.markRead(notice('a', NoticeTone.action));
+    await c.reload(
+      'student.u1.i1',
+      () async => NoticeBatch([notice('a', NoticeTone.action)]),
+    );
+    expect(c.items, hasLength(1));
+  });
+
   test('One failing source does not hide the others', () async {
     final collector = NoticeCollector();
     await collector.source('good', () async => [notice('ok', NoticeTone.info)]);

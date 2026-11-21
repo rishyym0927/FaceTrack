@@ -174,4 +174,122 @@ void main() {
     );
     expect(saved, resource);
   });
+
+  test('A 409 or 423 means the server is elsewhere: ask where, then continue', () async {
+    for (final status in [409, 423]) {
+      final upload = ResumableUpload()..pause = (_) async {};
+      var patches = 0, heads = 0;
+      upload.dio.httpClientAdapter = UploadAdapter((r, stream) async {
+        if (r.method == 'HEAD') {
+          heads++;
+          return ResponseBody.fromString('', 200, headers: {'upload-offset': ['4']});
+        }
+        patches++;
+        if (patches == 1) return ResponseBody.fromString('', status);
+        expect(r.headers['Upload-Offset'], '4', reason: 'resumed from the server offset');
+        return ResponseBody.fromString('', 204, headers: {'upload-offset': ['10']});
+      });
+      await upload.upload(
+        XFile.fromData(Uint8List(10)),
+        grant(),
+        'public-fixture',
+        resumeUrl: resource,
+        progress: (_) {},
+        checkpoint: (_) async {},
+      );
+      expect(patches, 2, reason: 'status $status');
+      expect(heads, 2, reason: 'one resume check, one resync');
+    }
+  });
+
+  test('A reply without an offset is a format error, not a flaky network', () async {
+    for (final onPatch in [false, true]) {
+      final upload = ResumableUpload()..pause = (_) async {};
+      upload.dio.httpClientAdapter = UploadAdapter((r, stream) async {
+        if (r.method == 'HEAD') {
+          return ResponseBody.fromString('', 200, headers: onPatch ? {'upload-offset': ['0']} : {});
+        }
+        return ResponseBody.fromString('', 204);
+      });
+      await expectLater(
+        upload.upload(
+          XFile.fromData(Uint8List(10)),
+          grant(),
+          'public-fixture',
+          resumeUrl: resource,
+          progress: (_) {},
+          checkpoint: (_) async {},
+        ),
+        throwsFormatException,
+      );
+    }
+  });
+
+  test('Progress in the lost chunk renews the retry budget', () async {
+    final upload = ResumableUpload()..pause = (_) async {};
+    var patches = 0, kept = 0;
+    upload.dio.httpClientAdapter = UploadAdapter((r, stream) async {
+      if (r.method == 'HEAD') {
+        return ResponseBody.fromString('', 200, headers: {'upload-offset': ['$kept']});
+      }
+      patches++;
+      if (kept < 6) {
+        kept++; // the server stored a little more each time, but the reply was lost
+        throw DioException(requestOptions: r, type: DioExceptionType.receiveTimeout);
+      }
+      return ResponseBody.fromString('', 204, headers: {'upload-offset': ['10']});
+    });
+    await upload.upload(
+      XFile.fromData(Uint8List(10)),
+      grant(),
+      'public-fixture',
+      resumeUrl: resource,
+      progress: (_) {},
+      checkpoint: (_) async {},
+    );
+    expect(patches, 7); // more than chunkRetries (3) failures, because each one made headway
+  });
+
+  test('Progress is reported by whole percents, not once per KiB written', () async {
+    const size = 7 * 1024 * 1024; // two chunks
+    final upload = ResumableUpload();
+    var raw = 0;
+    var offset = 0;
+    upload.dio.httpClientAdapter = UploadAdapter((r, stream) async {
+      if (r.method == 'HEAD') {
+        return ResponseBody.fromString('', 200, headers: {'upload-offset': ['0']});
+      }
+      await for (final chunk in stream!) {
+        offset += chunk.length;
+      }
+      return ResponseBody.fromString('', 204, headers: {'upload-offset': ['$offset']});
+    });
+    upload.dio.interceptors.add(
+      InterceptorsWrapper(onRequest: (o, h) {
+        final inner = o.onSendProgress;
+        o.onSendProgress = (n, t) {
+          raw++;
+          inner?.call(n, t);
+        };
+        h.next(o);
+      }),
+    );
+    final seen = <double>[];
+    await upload.upload(
+      XFile.fromData(Uint8List(size)),
+      grant(),
+      'public-fixture',
+      resumeUrl: resource,
+      progress: seen.add,
+      checkpoint: (_) async {},
+    );
+    // ignore: avoid_print
+    print('dio send-progress events: $raw, reported to the caller: ${seen.length}');
+    expect(raw, greaterThan(1000)); // the transport really is that chatty
+    expect(seen.length, lessThan(130));
+    expect(seen.last, 1.0);
+    for (var i = 1; i < seen.length; i++) {
+      expect(seen[i], greaterThanOrEqualTo(seen[i - 1]));
+    }
+  });
 }

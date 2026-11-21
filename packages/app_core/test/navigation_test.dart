@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'harness.dart';
 
@@ -94,6 +95,47 @@ void main() {
     await tester.tap(find.text('Switch class'));
     await tester.pumpAndSettle();
     expect(find.text('second instance 2'), findsOneWidget);
+  });
+
+  testWidgets('Signing out clears the previous account\'s notices', (tester) async {
+    SharedPreferences.setMockInitialValues({});
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    var loads = 0;
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(
+          classesBuilder: (_) => const Text('Classes fixture'),
+          notificationsLoader: (_, _, _) async {
+            loads++;
+            return NoticeBatch([
+              const AppNotice(
+                id: 'one',
+                title: 'First account notice',
+                body: 'Body',
+                tone: NoticeTone.action,
+                icon: Icons.info_outline,
+              ),
+            ]);
+          },
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await tester.pumpAndSettle();
+    final shown = NotificationScope.of(tester.element(find.text('Classes fixture')))!;
+    expect(shown.items, hasLength(1));
+    final container = ProviderScope.containerOf(tester.element(find.text('Classes fixture')));
+    await tester.runAsync(() => container.read(authProvider).signOut());
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome back'), findsOneWidget);
+    final c = NotificationScope.of(tester.element(find.text('Welcome back')));
+    expect(c?.items ?? const [], isEmpty);
+    expect(loads, 1);
   });
 
   testWidgets('Unsaved session decision warns on route exit', (tester) async {

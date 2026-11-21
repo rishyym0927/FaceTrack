@@ -222,6 +222,18 @@ void main() {
       d.clear();
       expect(d.pending, isEmpty);
     });
+    test('clear() during a send leaves the next account\'s events untouched', () async {
+      final gate = Completer<void>();
+      final d = make(send: (_) => gate.future);
+      d.record('segment_recorded', count: 1);
+      final flushing = d.flush();
+      d.clear(); // sign-out while the batch is out
+      d.record('segment_recorded', count: 2); // the next account's first event
+      d.record('segment_recorded', count: 3);
+      gate.complete();
+      await flushing;
+      expect([for (final e in d.pending) e['count']], [2, 3]);
+    });
     test('the buffer is bounded: the oldest events are dropped', () async {
       final d = make(send: (_) async => throw StateError('offline'), maxBuffered: 5);
       for (var i = 0; i < 8; i++) {

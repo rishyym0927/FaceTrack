@@ -2,21 +2,23 @@
 
 import csv
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 
-import numpy as np
-
-from facetrack_ml.config import canonical_hash, digest, load_manifest, load_profile
+from facetrack_ml.config import canonical_hash, load_manifest, load_profile
 from facetrack_ml.errors import SpikeError
 from facetrack_ml.media import executable, probe
-from facetrack_ml.pipeline import Pipeline
-from facetrack_ml.runtime import Runtime
 
-from . import dense
+from . import media_cache
+
+# numpy, OpenCV, ONNX Runtime and the dense sampler are imported inside the functions that need
+# them: report and timetable jobs share this child entry point and never touch a model.
 
 
 class Collector:
     def save(self, person, vectors, model_hash, profile_hash):
+        import numpy as np
+
         if vectors.shape[1] != 512 or not 3 <= len(vectors) <= 5 or not np.isfinite(vectors).all():
             raise SpikeError("INVALID_TEMPLATES", "Invalid enrolment output.")
         self.templates = [
@@ -27,7 +29,10 @@ class Collector:
 
 def normalize_rotation(source, directory, *, enrollment=True):
     try:
-        probe(source, enrollment=enrollment)
+        # Remembered, so the dense sampler does not run ffprobe on the same file again.
+        media_cache.once(
+            ("probe", enrollment), source, lambda: probe(source, enrollment=enrollment)
+        )
         return source
     except SpikeError as e:
         if e.code != "ROTATED_MEDIA":
@@ -69,11 +74,52 @@ def normalize_rotation(source, directory, *, enrollment=True):
         timeout=60,
     )
     target.chmod(0o600)
-    probe(target, enrollment=enrollment)
+    media_cache.once(("probe", enrollment), target, lambda: probe(target, enrollment=enrollment))
     return target
 
 
-def run_child(pipe, source, manifest_path, profile_path, expected):
+@contextmanager
+def single_thread_sessions(threads=1):
+    """Make every ONNX Runtime session created inside this block use ``threads`` intra-op threads.
+
+    The frozen ``Runtime`` hard-codes four intra-op threads per session. Two jobs side by side on
+    a four-core VM then run eight spinning threads, and a batch-one 112 px embedding gains little
+    from the extra threads. The frozen source is not touched: while a ``Runtime`` is being built,
+    the ``SessionOptions`` class it looks up is swapped for a subclass that pins the setting.
+    Outputs were bit-identical across thread counts when measured (see PROGRESS.md).
+    """
+    import onnxruntime as ort
+
+    original = ort.SessionOptions
+
+    class PinnedOptions(original):
+        def __setattr__(self, name, value):
+            super().__setattr__(name, threads if name == "intra_op_num_threads" else value)
+
+    ort.SessionOptions = PinnedOptions
+    try:
+        yield
+    finally:
+        ort.SessionOptions = original
+
+
+def build_pipeline(manifest_path, profile, model_hash, *, parallel):
+    """Frozen pipeline; with ``parallel`` its sessions are single-threaded (see above)."""
+    from facetrack_ml.pipeline import Pipeline
+    from facetrack_ml.runtime import Runtime
+
+    if parallel:
+        with single_thread_sessions(1):
+            runtime = Runtime(Path(manifest_path))
+    else:
+        runtime = Runtime(Path(manifest_path))
+    return Pipeline(runtime, profile, model_hash)
+
+
+def run_child(pipe, source, manifest_path, profile_path, expected, wait=False):
+    """Run one job. With ``wait`` the child loads the models first, then blocks until the parent
+    has finished downloading and verifying the media and sends ``("go",)``: model loading then
+    overlaps the download instead of following it."""
     try:
         source = Path(source)
         if expected.get("kind") == "report":
@@ -84,7 +130,7 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
         if expected.get("kind") == "timetable":
             from .tabular import parse_csv
 
-            if digest(source) != expected["source_sha256"]:
+            if media_cache.sha256(source) != expected["source_sha256"]:
                 raise ValueError("CSV hash mismatch.")
             pipe.send(
                 {
@@ -92,26 +138,37 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
                     "result": {
                         "kind": "timetable",
                         "rows": parse_csv(source),
-                        "source_sha256": digest(source),
+                        "source_sha256": media_cache.sha256(source),
                     },
                 }
             )
             return
-        manifest = load_manifest(Path(manifest_path))
+        # The artifact hashes are checked by Runtime() below, so this read skips them.
+        manifest = load_manifest(Path(manifest_path), check_artifacts=False)
         model_hash = canonical_hash(manifest.model_dump())
         profile = load_profile(Path(profile_path), model_hash)
         profile_hash = canonical_hash(profile.model_dump())
-        if (
-            model_hash != expected["model_hash"]
-            or profile_hash != expected["profile_hash"]
-            or digest(source) != expected["source_sha256"]
-        ):
+        if model_hash != expected["model_hash"] or profile_hash != expected["profile_hash"]:
             raise SpikeError("INPUT_CHANGED", "Model/profile/source differs from the leased input.")
         recognition = expected.get("kind") == "recognition"
+        from . import dense
+
+        threads = dense.worker_threads() if recognition else 0
+        parallel = recognition and dense.sample_fps() > 0 and threads >= 2
+        pipeline = build_pipeline(
+            manifest_path, profile, model_hash, parallel=parallel and dense.pin_sessions()
+        )
+        if wait:
+            try:
+                pipe.recv()  # the parent has the verified media in place
+            except EOFError:
+                return  # the parent gave up (download failed, lease lost): nothing to report
+        if media_cache.sha256(source) != expected["source_sha256"]:
+            raise SpikeError("INPUT_CHANGED", "Model/profile/source differs from the leased input.")
         processed = normalize_rotation(source, source.parent, enrollment=not recognition)
         collector = Collector()
-        pipeline = Pipeline(Runtime(Path(manifest_path)), profile, model_hash)
         if recognition:
+            import numpy as np
 
             class Roster:
                 def load(self, people, model_hash, profile_hash):
@@ -138,7 +195,15 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
                     pipe.send({"progress": {"stage": stage, "percent": percent}})
 
             if fps > 0:
-                result = dense.recognize(pipeline, processed, people, Roster(), fps, progress=report)
+                result = dense.recognize(
+                    pipeline,
+                    processed,
+                    people,
+                    Roster(),
+                    fps,
+                    progress=report,
+                    threads=threads if parallel else 1,
+                )
             else:
                 result = pipeline.recognize(processed, people, Roster())
             identities = {p["student_id"]: p for p in expected["roster"]}
@@ -160,8 +225,8 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
                     "ok": True,
                     "result": {
                         "generation": expected["generation"],
-                        "source_sha256": digest(source),
-                        "processed_sha256": digest(processed),
+                        "source_sha256": media_cache.sha256(source),
+                        "processed_sha256": media_cache.sha256(processed),
                         "model_hash": model_hash,
                         "profile_hash": profile_hash,
                         "roster_hash": expected["roster_hash"],
@@ -184,8 +249,8 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
                 "ok": True,
                 "result": {
                     "generation": expected["generation"],
-                    "source_sha256": digest(source),
-                    "processed_sha256": digest(processed),
+                    "source_sha256": media_cache.sha256(source),
+                    "processed_sha256": media_cache.sha256(processed),
                     "model_hash": model_hash,
                     "profile_hash": profile_hash,
                     "templates": collector.templates,

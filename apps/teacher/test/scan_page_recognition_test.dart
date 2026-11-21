@@ -1,3 +1,4 @@
+import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_teacher/classroom_scan.dart';
 import 'package:facetrack_teacher/recognition_board.dart';
@@ -258,5 +259,26 @@ void main() {
       expect(camera.recording, isTrue); // started again on the new camera
       expect(scan.scanning, isTrue);
     });
+  });
+
+  testWidgets('a skipped oversize segment is explained on the scan page', (tester) async {
+    current = const RecognitionSnapshot([]);
+    final camera = QuietCamera();
+    final scan = ClassroomScan(camera, (file) async {
+      throw const AppFailure('too big', code: 'CAPTURE_SIZE');
+    });
+    addTearDown(scan.dispose);
+    await tester.pumpWidget(MaterialApp(home: ClassroomScanPage(scan: scan, results: results)));
+    await tester.pump();
+    await scan.start();
+    camera
+      ..recording = false
+      ..clip = XFile('big')
+      ..emit();
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    await settle(tester);
+    expect(scan.skipped, 1);
+    expect(find.byKey(const ValueKey('scan-skipped')), findsOneWidget);
+    expect(find.textContaining('too large to upload'), findsOneWidget);
   });
 }

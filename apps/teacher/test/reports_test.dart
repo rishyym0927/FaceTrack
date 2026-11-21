@@ -195,4 +195,63 @@ void main() {
     expect(find.text('Retry'), findsNothing);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('Retrying a report action after a failed response reuses its idempotency key', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(() => harness()))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    final keys = <String?>[];
+    var failRetry = true;
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/reports/r1/retry') {
+        keys.add(r.headers['Idempotency-Key'] as String?);
+        if (failRetry) {
+          return jsonResponse({
+            'error': {'code': 'UNAVAILABLE'},
+          }, 503);
+        }
+        return jsonResponse({'id': 'r1'});
+      }
+      return jsonResponse({
+        'items': [
+          {'id': 'r1', 'kind': 'draft', 'source_version': 1, 'status': 'failed'},
+        ],
+      });
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: appTheme(),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TeacherReports(
+              api: h.services.api,
+              institute: institute,
+              sessionId: 'session',
+              supabaseUrl: 'https://fixture.supabase.invalid',
+              sessionVersion: 1,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Retry report generation'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Retry report generation'));
+    await tester.pumpAndSettle();
+    expect(keys, hasLength(2));
+    expect(keys[0], isNotNull);
+    expect(keys[1], keys[0], reason: 'the same action must not look like a new one to the server');
+    failRetry = false;
+    await tester.tap(find.text('Retry report generation'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Retry report generation'));
+    await tester.pumpAndSettle();
+    // After a success the next action is a new one.
+    expect(keys, hasLength(4));
+    expect(keys[2], keys[0]);
+    expect(keys[3], isNot(keys[2]));
+    await tester.pumpWidget(const SizedBox());
+  });
 }

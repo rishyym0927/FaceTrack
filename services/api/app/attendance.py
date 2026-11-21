@@ -14,10 +14,11 @@ from sqlalchemy import text
 
 from . import biometrics as bio
 from . import logs, services
+from .access import ROLES, assigned, decide, teacher_access
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import Strict
-from .security import audit, check_cursor, expected_version, idempotent, page, teacher_access
+from .security import audit, check_cursor, expected_version, idempotent, page
 from .security import remember as remember_effect
 
 
@@ -106,16 +107,42 @@ class CaptureCreate(Strict):
         return self
 
 
-async def session(conn, actor, institute, identifier, *, lock=False):
+# Recognition jobs of a session, newest last, one "kind|state|age|stage" text per job.
+SESSION_JOBS = """ARRAY(SELECT concat_ws('|',j.kind,j.state,extract(epoch from (now()-j.created_at))::int,
+    coalesce(j.stage,'')) FROM app.jobs j JOIN app.captures cap
+    ON cap.institute_id=j.institute_id AND cap.id=j.capture_id
+    WHERE cap.institute_id=:i AND cap.session_id=s.id ORDER BY j.created_at) AS _jobs"""
+
+
+async def session(
+    conn, actor, institute, identifier, *, lock=False, with_jobs=False, via_capture=False
+):
+    """The session row after the faculty checks, in one statement.
+
+    With ``with_jobs`` the row also carries ``jobs``: (kind, state, age_seconds, stage) per
+    recognition job, so a status screen does not need a second look. With ``via_capture`` the
+    identifier names a capture and its session is returned (a session id never changes).
+    """
+    which = (
+        "s.id=(SELECT session_id FROM app.captures WHERE institute_id=:i AND id=:id)"
+        if via_capture
+        else "s.id=:id"
+    )
     row = await one(
         conn,
-        "SELECT * FROM app.sessions WHERE institute_id=:i AND id=:id"
-        + (" FOR UPDATE" if lock else ""),
-        {"i": institute, "id": identifier},
+        f"""SELECT s.*, {ROLES}, {assigned("s.offering_id")}{", " + SESSION_JOBS if with_jobs else ""}
+        FROM app.sessions s WHERE s.institute_id=:i AND {which}"""
+        + (" FOR UPDATE OF s" if lock else ""),
+        {"i": institute, "id": identifier, "a": actor},
     )
     if not row:
-        raise APIError(404, "NOT_FOUND", "Session not found.")
-    await teacher_access(conn, actor, institute, row["offering_id"])
+        raise APIError(
+            404, "NOT_FOUND", "Capture not found." if via_capture else "Session not found."
+        )
+    row = decide(row)
+    if with_jobs:
+        jobs = [tuple(line.split("|", 3)) for line in row.pop("_jobs")]
+        row["jobs"] = [(kind, state, int(age), stage) for kind, state, age, stage in jobs]
     return row
 
 
@@ -329,6 +356,9 @@ async def can_publish(conn, actor, institute, offering):
         )
 
 
+PENDING_STATES = ("queued", "leased", "running", "retry_wait")
+
+
 async def recognition_pending(conn, institute, session_id):
     return bool(
         await one(
@@ -350,23 +380,30 @@ _stall_logged = logs.Budget(limit=1, seconds=300)
 
 
 async def processing_status(conn, institute, session_id):
+    """What recognition is doing for this session (see ``describe_processing``)."""
+    jobs = await many(
+        conn,
+        """SELECT j.kind, j.state, extract(epoch from (now()-j.created_at))::int AS age, j.stage
+           FROM app.jobs j JOIN app.captures cap
+             ON cap.institute_id=j.institute_id AND cap.id=j.capture_id
+           WHERE cap.institute_id=:i AND cap.session_id=:s ORDER BY j.created_at""",
+        {"i": institute, "s": session_id},
+    )
+    return describe_processing(
+        institute, session_id, [(j["kind"], j["state"], j["age"], j["stage"]) for j in jobs]
+    )
+
+
+def describe_processing(institute, session_id, all_jobs):
     """What recognition is doing for this session, for the teacher's progress screen.
 
     ``state`` is idle (nothing pending), waiting (queued, no worker has started it), running, or
     stalled (queued for a while with no worker online). ``stage`` and ``percent`` come from the
-    worker's own step reports.
+    worker's own step reports. ``all_jobs`` holds (kind, state, age_seconds, stage) per job.
     """
     from . import worker_api
 
-    jobs = await many(
-        conn,
-        """SELECT j.state, j.stage, extract(epoch from (now()-j.created_at))::int AS age
-           FROM app.jobs j JOIN app.captures cap
-             ON cap.institute_id=j.institute_id AND cap.id=j.capture_id
-           WHERE cap.institute_id=:i AND cap.session_id=:s AND j.kind='recognition'
-           ORDER BY j.created_at""",
-        {"i": institute, "s": session_id},
-    )
+    jobs = [{"state": state, "stage": stage, "age": age} for kind, state, age, stage in all_jobs if kind == "recognition"]
     waiting = [j for j in jobs if j["state"] in ("queued", "retry_wait")]
     active = [j for j in jobs if j["state"] in ("leased", "running")]
     done = [j for j in jobs if j["state"] == "succeeded"]
@@ -694,17 +731,19 @@ def install(app, engine, settings, principal, storage):
         known_processing: bool | None = None,
     ):
         async with transaction(engine, user.user_id, institute_id) as c:
-            s = await session(c, user.user_id, institute_id, identifier)
-            pending = await recognition_pending(c, institute_id, identifier)
+            # The session, the access checks and its jobs arrive in one statement.
+            s = await session(c, user.user_id, institute_id, identifier, with_jobs=True)
+            jobs = s.pop("jobs")
+            pending = any(state in PENDING_STATES for _, state, _, _ in jobs)
             # While recognition is active, multiple clips may update marks and
             # capture state. Refresh the details until the queue has settled.
             if not pending and known_processing is False and known_version == s["version"]:
                 return {"unchanged": True}
             return {
-                "session": dict(s),
+                "session": s,
                 "items": await attendance(c, institute_id, identifier),
                 "processing_pending": pending,
-                "processing": await processing_status(c, institute_id, identifier),
+                "processing": describe_processing(institute_id, identifier, jobs),
             }
 
     @app.put("/v1/sessions/{identifier}/attendance-review")
@@ -1318,30 +1357,25 @@ def install(app, engine, settings, principal, storage):
                     retryable=True,
                 )
             asset, cap = uuid4(), uuid4()
-            await c.execute(
-                text("""INSERT INTO app.media_assets(id,institute_id,owner_user_id,purpose,bucket,object_key,mime_type,expected_bytes)
-            VALUES(:id,:i,:u,'classroom',:b,:k,:m,:n)"""),
-                {
-                    "id": asset,
-                    "i": institute_id,
-                    "u": user.user_id,
-                    "b": settings.enrollment_bucket,
-                    "k": f"classroom/{uuid4().hex}/{asset.hex}",
-                    "m": body.mime_type,
-                    "n": body.expected_bytes,
-                },
-            )
+            # The reservation and the capture that owns it are one statement.
             row = dict(
                 await one(
                     c,
-                    """INSERT INTO app.captures(id,institute_id,session_id,asset_id,submitted_by,source_type,recorded_at)
-            VALUES(:id,:i,:s,:a,:u,:type,:at) RETURNING *""",
+                    """WITH reserved AS (
+                    INSERT INTO app.media_assets(id,institute_id,owner_user_id,purpose,bucket,object_key,mime_type,expected_bytes)
+                    VALUES(:asset,:i,:u,'classroom',:b,:k,:m,:n) RETURNING id)
+                    INSERT INTO app.captures(id,institute_id,session_id,asset_id,submitted_by,source_type,recorded_at)
+                    SELECT :id,:i,:s,reserved.id,:u,:type,:at FROM reserved RETURNING *""",
                     {
+                        "asset": asset,
                         "id": cap,
                         "i": institute_id,
                         "s": identifier,
-                        "a": asset,
                         "u": user.user_id,
+                        "b": settings.enrollment_bucket,
+                        "k": f"classroom/{uuid4().hex}/{asset.hex}",
+                        "m": body.mime_type,
+                        "n": body.expected_bytes,
                         "type": body.source_type,
                         "at": body.recorded_at,
                     },
@@ -1351,31 +1385,51 @@ def install(app, engine, settings, principal, storage):
             return row
 
     async def capture_owned(c, user, institute, identifier, lock=False):
-        cap = await one(
+        """The capture, its session (locked when asked) and its media asset: two statements.
+
+        The session row is locked first, as everywhere else, and the capture is read after the
+        lock so a concurrent change to it is seen.
+        """
+        s = await session(c, user, institute, identifier, lock=lock, via_capture=True)
+        row = await one(
             c,
-            "SELECT * FROM app.captures WHERE institute_id=:i AND id=:id",
+            f"""SELECT cap.*, {bio.MEDIA_SELECT} FROM app.captures cap
+            JOIN app.media_assets m ON m.institute_id=cap.institute_id AND m.id=cap.asset_id
+            WHERE cap.institute_id=:i AND cap.id=:id""",
             {"i": institute, "id": identifier},
         )
-        if not cap:
+        if not row:
             raise APIError(404, "NOT_FOUND", "Capture not found.")
-        s = await session(c, user, institute, cap["session_id"], lock=lock)
-        asset = await one(
-            c,
-            "SELECT * FROM app.media_assets WHERE institute_id=:i AND id=:id",
-            {"i": institute, "id": cap["asset_id"]},
-        )
-        return cap, s, dict(asset)
+        cap, asset = bio.split_asset(row)
+        return cap, s, asset
 
     @app.get("/v1/captures/{identifier}")
     async def capture_status(identifier: UUID, user: User, institute_id: Institute):
         async with transaction(engine, user.user_id, institute_id) as c:
-            cap, _, _ = await capture_owned(c, user.user_id, institute_id, identifier)
-            job = await one(
+            # Capture, its job and the faculty checks in one statement (this screen is polled).
+            row = await one(
                 c,
-                "SELECT id,state,stage,error_code FROM app.jobs WHERE institute_id=:i AND capture_id=:id",
-                {"i": institute_id, "id": identifier},
+                f"""SELECT cap.*, {ROLES}, {assigned("s.offering_id")},
+                j.id AS job_id, j.state AS job_state, j.stage AS job_stage,
+                j.error_code AS job_error
+                FROM app.captures cap
+                JOIN app.sessions s ON s.institute_id=cap.institute_id AND s.id=cap.session_id
+                LEFT JOIN LATERAL (SELECT id,state,stage,error_code FROM app.jobs
+                    WHERE institute_id=cap.institute_id AND capture_id=cap.id
+                    ORDER BY created_at DESC LIMIT 1) j ON true
+                WHERE cap.institute_id=:i AND cap.id=:id""",
+                {"i": institute_id, "id": identifier, "a": user.user_id},
             )
-            return {**dict(cap), "job": dict(job) if job else None}
+            if not row:
+                raise APIError(404, "NOT_FOUND", "Capture not found.")
+            row = decide(row)
+            job = {
+                "id": row.pop("job_id"),
+                "state": row.pop("job_state"),
+                "stage": row.pop("job_stage"),
+                "error_code": row.pop("job_error"),
+            }
+            return {**row, "job": job if job["id"] else None}
 
     @app.post("/v1/captures/{identifier}/upload-grant")
     async def capture_grant(identifier: UUID, user: User, institute_id: Institute):
@@ -1445,23 +1499,20 @@ def install(app, engine, settings, principal, storage):
                 raise APIError(
                     409, "MEDIA_MISMATCH", "The uploaded capture does not match its reservation."
                 )
-            await c.execute(
-                text(
-                    "UPDATE app.media_assets SET status='uploaded',byte_size=:n,sha256=:h WHERE institute_id=:i AND id=:id"
-                ),
-                {"n": body.byte_size, "h": body.sha256, "i": institute_id, "id": asset["id"]},
-            )
-            await c.execute(
-                text(
-                    "UPDATE app.captures SET status='queued',version=version+1 WHERE institute_id=:i AND id=:id"
-                ),
-                {"i": institute_id, "id": identifier},
-            )
+            # Mark the upload, queue the capture and create its job in one statement.
             job = await one(
                 c,
-                "INSERT INTO app.jobs(institute_id,kind,capture_id,dedup_key,generation) VALUES(:i,'recognition',:id,:key,:g) RETURNING id",
+                """WITH uploaded AS (UPDATE app.media_assets SET status='uploaded',byte_size=:n,sha256=:h
+                    WHERE institute_id=:i AND id=:asset RETURNING id),
+                queued AS (UPDATE app.captures SET status='queued',version=version+1
+                    WHERE institute_id=:i AND id=:id RETURNING id)
+                INSERT INTO app.jobs(institute_id,kind,capture_id,dedup_key,generation)
+                VALUES(:i,'recognition',:id,:key,:g) RETURNING id""",
                 {
+                    "n": body.byte_size,
+                    "h": body.sha256,
                     "i": institute_id,
+                    "asset": asset["id"],
                     "id": identifier,
                     "key": f"capture:{identifier}:{cap['generation']}",
                     "g": cap["generation"],

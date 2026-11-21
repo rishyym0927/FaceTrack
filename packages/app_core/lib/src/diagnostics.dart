@@ -37,6 +37,7 @@ class Diagnostics {
   final _buffer = <Map<String, dynamic>>[];
   DateTime? _lastFlush, _backoffUntil;
   bool _sending = false, _disposed = false;
+  int _epoch = 0;
   int dropped = 0;
 
   /// Problems worth sending immediately, in case the app is about to be closed.
@@ -139,6 +140,13 @@ class Diagnostics {
     _sending = true;
     _lastFlush = _clock();
     final batch = _buffer.take(50).toList();
+    final epoch = _epoch;
+    // [clear] may run while the request is out; what is in the buffer afterwards belongs to
+    // the next account and must not be trimmed by this batch's result.
+    void sent() {
+      if (epoch == _epoch) _buffer.removeRange(0, batch.length);
+    }
+
     try {
       await sender({
         'app': app,
@@ -148,14 +156,14 @@ class Diagnostics {
           'version': version,
         'events': batch,
       });
-      _buffer.removeRange(0, batch.length);
+      sent();
       _backoffUntil = null;
     } on DioException catch (e) {
       final status = e.response?.statusCode;
       if (status != null && status >= 400 && status < 500 && status != 429) {
         // The server will never accept this batch (and a 401 means signed out); drop it so
         // one bad event cannot block everything behind it.
-        _buffer.removeRange(0, batch.length);
+        sent();
       } else {
         _backoffUntil = _clock().add(flushAfter * 6);
       }
@@ -169,7 +177,10 @@ class Diagnostics {
   }
 
   /// Forgets buffered events, so they are never sent under another account.
-  void clear() => _buffer.clear();
+  void clear() {
+    _epoch++;
+    _buffer.clear();
+  }
 
   @visibleForTesting
   List<Map<String, dynamic>> get pending => List.unmodifiable(_buffer);

@@ -39,12 +39,22 @@
     }
     return found;
   }
+  function liveVideo(v) {
+    return Boolean(v && v.isConnected && v.srcObject && v.readyState >= 2 && v.videoWidth > 0 &&
+      (v.srcObject.getVideoTracks?.() ?? []).some(t => t.readyState === 'live'));
+  }
   function findVideo() {
     const all = deepVideos(document);
-    const live = all.filter(v => v.srcObject && v.readyState >= 2 && v.videoWidth > 0 &&
-      (v.srcObject.getVideoTracks?.() ?? []).some(t => t.readyState === 'live'));
+    const live = all.filter(liveVideo);
     live.sort((a, b) => b.videoWidth * b.videoHeight - a.videoWidth * a.videoHeight);
     return live[0] || null;
+  }
+  // The picture is looked up once and kept while it stays live: searching the whole page (and
+  // every shadow root) five times a second cost about 9 ms per call on a 10 000-element page.
+  let cachedVideo = null;
+  function currentVideo() {
+    if (!liveVideo(cachedVideo)) cachedVideo = findVideo();
+    return cachedVideo;
   }
   // Mean luma 0-255 of an RGBA buffer, sampled sparsely; 'dark' below 55, 'bright' above 205.
   function brightness(data) {
@@ -54,8 +64,33 @@
   }
   let detector = null, loading = null, closed = false, lastTime = -1;
   const tracker = new FaceTracker();
-  const canvas = typeof document === 'undefined' ? null : document.createElement('canvas');
-  const context = canvas?.getContext('2d', { willReadFrequently: true });
+  // Overridable clock, so tests need no real time.
+  const clock = { now: () => performance.now() };
+  // Canvases are made on first use, and only resized when the picture size changes: assigning
+  // width/height (even to the same value) reallocates and clears the bitmap.
+  let canvas = null, context = null, lightCanvas = null, lightContext = null;
+  function surfaces() {
+    if (canvas || typeof document === 'undefined') return Boolean(canvas);
+    canvas = document.createElement('canvas');
+    context = canvas.getContext('2d', { willReadFrequently: true });
+    lightCanvas = document.createElement('canvas');
+    lightCanvas.width = 32; lightCanvas.height = 18;
+    lightContext = lightCanvas.getContext('2d', { willReadFrequently: true });
+    return Boolean(context);
+  }
+  // Light changes slowly: it is measured on a 32x18 copy of the picture, at most once a second
+  // (the Dart side smooths it), instead of reading a 640x360 frame back five times a second.
+  const LIGHT_EVERY_MS = 1000;
+  let light = null, lightAt = -Infinity;
+  function measureLight(video, now) {
+    if (now - lightAt < LIGHT_EVERY_MS) return light;
+    lightAt = now;
+    try {
+      lightContext.drawImage(video, 0, 0, lightCanvas.width, lightCanvas.height);
+      light = Math.round(brightness(lightContext.getImageData(0, 0, lightCanvas.width, lightCanvas.height).data));
+    } catch (_) { light = null; }
+    return light;
+  }
   async function startDetector() {
     closed = false;
     if (detector) return true;
@@ -75,32 +110,40 @@
     })();
     return loading;
   }
-  function stopDetector() { closed = true; detector?.close(); detector = null; tracker.clear(); lastTime = -1; }
+  function stopDetector() {
+    closed = true; detector?.close(); detector = null; tracker.clear(); lastTime = -1;
+    cachedVideo = null; light = null; lightAt = -Infinity;
+  }
   // One JSON string: {faces:[{id,x,y,w,h,framed}], light, width, height}, boxes as 0-1 fractions.
   function detect() {
-    const video = findVideo();
-    if (!video || !context) {
+    const video = surfaces() ? currentVideo() : null;
+    if (!video) {
       // A camera that was unplugged or taken by another app leaves a picture whose tracks have ended.
-      const ended = deepVideos(document).some(v => {
+      const ended = typeof document !== 'undefined' && deepVideos(document).some(v => {
         const tracks = v.srcObject?.getVideoTracks?.() ?? [];
         return tracks.length > 0 && tracks.every(t => t.readyState === 'ended');
       });
       return JSON.stringify({ video: false, ended });
     }
-    const ratio = Math.min(1, 640 / video.videoWidth);
-    canvas.width = Math.round(video.videoWidth * ratio); canvas.height = Math.round(video.videoHeight * ratio);
-    context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const out = { video: true, width: video.videoWidth, height: video.videoHeight, faces: [] };
-    try { out.light = Math.round(brightness(context.getImageData(0, 0, canvas.width, canvas.height).data)); } catch (_) {}
+    const now = clock.now();
+    // Nobody sees the boxes in a hidden tab; recording carries on, so only the cheap checks run.
+    if (document.hidden) return JSON.stringify({ ...out, light, faces: null, detector: Boolean(detector) });
+    out.light = measureLight(video, now);
     if (!detector || video.currentTime === lastTime) return JSON.stringify({ ...out, faces: null, detector: Boolean(detector) });
     lastTime = video.currentTime;
+    const ratio = Math.min(1, 640 / video.videoWidth);
+    const width = Math.round(video.videoWidth * ratio), height = Math.round(video.videoHeight * ratio);
+    if (canvas.width !== width) canvas.width = width;
+    if (canvas.height !== height) canvas.height = height;
+    context.drawImage(video, 0, 0, width, height);
     try {
-      const now = performance.now();
-      const found = detector.detectForVideo(canvas, now).detections.map(d => ({
+      const at = performance.now();
+      const found = detector.detectForVideo(canvas, at).detections.map(d => ({
         x: d.boundingBox.originX / ratio, y: d.boundingBox.originY / ratio,
         w: d.boundingBox.width / ratio, h: d.boundingBox.height / ratio,
       }));
-      out.faces = tracker.update(found, now, video.videoWidth, video.videoHeight).map(t => ({
+      out.faces = tracker.update(found, at, video.videoWidth, video.videoHeight).map(t => ({
         id: t.id, framed: t.framed,
         x: t.box.x / video.videoWidth, y: t.box.y / video.videoHeight,
         w: t.box.w / video.videoWidth, h: t.box.h / video.videoHeight,
@@ -115,15 +158,40 @@
     if (on && !guard) { guard = e => { e.preventDefault(); e.returnValue = ''; }; window.addEventListener('beforeunload', guard); }
     else if (!on && guard) { window.removeEventListener('beforeunload', guard); guard = null; }
   }
-  // Called when a camera is plugged in or removed.
+  // Called when a camera is plugged in or removed. The browser also fires `devicechange` for
+  // microphones, headsets and speakers; those must not make the page re-open every camera, so the
+  // callback only runs when the list of video inputs differs from the one seen before.
   function onDeviceChange(callback) {
     const target = navigator.mediaDevices;
     if (!target?.addEventListener) return () => {};
-    const handler = () => callback();
+    let stopped = false;
+    const cameras = async () => {
+      try {
+        const ids = (await target.enumerateDevices()).filter(d => d.kind === 'videoinput')
+          .map(d => d.deviceId || d.groupId || '').sort();
+        return `${ids.length}:${ids.join('|')}`;
+      } catch (_) { return null; }
+    };
+    let known = cameras();
+    const handler = async () => {
+      const before = await known;
+      const current = cameras();
+      known = current;
+      const after = await current;
+      if (stopped) return;
+      if (before === null || after === null || before !== after) callback();
+    };
     target.addEventListener('devicechange', handler);
-    return () => target.removeEventListener('devicechange', handler);
+    return () => { stopped = true; target.removeEventListener('devicechange', handler); };
+  }
+  // Lets tests supply a stand-in for the MediaPipe detector (the real one needs the browser).
+  function useDetector(custom) { detector = custom; closed = false; lastTime = -1; }
+  // Drops cached state (tests; and a clean slate after the page is torn down).
+  function reset() {
+    stopDetector(); canvas = context = lightCanvas = lightContext = null; closed = false;
   }
   globalThis.FaceTrackClassroom = {
     FaceTracker, brightness, findVideo, startDetector, stopDetector, detect, guardUnload, onDeviceChange,
+    clock, reset, useDetector,
   };
 })();

@@ -3,6 +3,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:facetrack_teacher/teacher_classes.dart';
 import 'package:facetrack_teacher/teacher_notifications.dart';
 import 'package:facetrack_teacher/teacher_sessions.dart';
+import 'package:facetrack_teacher/unload_warning.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -252,6 +253,60 @@ void main() {
     await tester.pumpAndSettle();
     expect(tester.widget<FilledButton>(publish).onPressed, isNotNull);
     await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Unsaved marks ask the browser to confirm before the tab is closed or reloaded', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 2400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/sessions/session/attendance') {
+        return jsonResponse({
+          'session': {
+            'id': 'session',
+            'offering_id': 'class',
+            'status': 'no_data',
+            'starts_at': '2026-10-30T05:00:00Z',
+            'version': 1,
+            'attendance_revision': 0,
+          },
+          'items': [_row('1', 'present'), _row('2', 'absent'), _row('3', 'unassessed')],
+        });
+      }
+      return jsonResponse({'items': [], 'next_cursor': null});
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(
+          classesBuilder: (_) => Builder(
+            builder: (context) => TextButton(
+              onPressed: () => context.go('/sessions/session'),
+              child: const Text('Open session fixture'),
+            ),
+          ),
+          sessionBuilder: (_, id) => TeacherSessionDetail(id: id),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Open session fixture'));
+    await tester.pumpAndSettle();
+    expect(unloadWarningActive, isFalse, reason: 'nothing changed yet');
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Absent').at(2));
+    await tester.pumpAndSettle();
+    expect(unloadWarningActive, isTrue);
+    // Leaving the page (after the in-app discard prompt) must not leave the prompt armed.
+    await tester.pumpWidget(const SizedBox());
+    expect(unloadWarningActive, isFalse);
   });
 
   testWidgets('Session steps show the current step and cancelled state', (

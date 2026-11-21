@@ -163,6 +163,8 @@ class _ProductAppState extends ConsumerState<ProductApp> {
   late final GoRouter router;
   NotificationCenter? notifications;
   AppLifecycleListener? lifecycle;
+  VoidCallback? _authWatch;
+  AuthController? _auth;
   (String, String?, String?)? _notificationScope;
 
   void refreshNotifications({bool force = false}) {
@@ -193,6 +195,15 @@ class _ProductAppState extends ConsumerState<ProductApp> {
       lifecycle = AppLifecycleListener(
         onResume: () => refreshNotifications(force: true),
       );
+      // Notices belong to one account: drop them on sign-out so the next person to sign in on
+      // this device never sees them, not even for one frame.
+      _auth = auth;
+      _authWatch = () {
+        if (auth.signedIn) return;
+        notifications?.reset();
+        _notificationScope = null;
+      };
+      auth.addListener(_authWatch!);
     }
     router = GoRouter(
       initialLocation: '/classes',
@@ -427,6 +438,7 @@ class _ProductAppState extends ConsumerState<ProductApp> {
 
   @override
   void dispose() {
+    if (_authWatch != null) _auth?.removeListener(_authWatch!);
     lifecycle?.dispose();
     notifications?.dispose();
     router.dispose();
@@ -1570,7 +1582,12 @@ class AccountPage extends ConsumerWidget {
         header,
         if (statsBuilder != null) ...[
           const SizedBox(height: 20),
-          statsBuilder!(context),
+          // Keyed by user and institute: switching institute on this page keeps the page alive,
+          // so without a new key the previous institute's figures would stay on screen.
+          KeyedSubtree(
+            key: ValueKey('account-stats:${auth.account?.userId}:${auth.institute}'),
+            child: statsBuilder!(context),
+          ),
         ],
         const SizedBox(height: 20),
         LayoutBuilder(

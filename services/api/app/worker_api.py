@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+import os
 import time
 from contextlib import asynccontextmanager
 from datetime import timedelta
@@ -23,6 +24,17 @@ STARTED = time.monotonic()
 RECOGNITION_SEEN: dict[str, float] = {}
 
 
+def max_leases() -> int:
+    """How many jobs one worker identity may hold at once (WORKER_MAX_LEASES, default 2).
+
+    Replicas of the worker share an identity, so this is the number of jobs they can run together.
+    """
+    try:
+        return min(16, max(1, int(os.environ.get("WORKER_MAX_LEASES", "2"))))
+    except ValueError:
+        return 2
+
+
 def worker_idle_seconds(institute) -> float | None:
     """Seconds since a recognition worker last called in; None when it has not since startup."""
     seen = RECOGNITION_SEEN.get(str(institute))
@@ -34,25 +46,26 @@ async def worker_transaction(engine, token):
     if not token or not token.startswith("ftw_") or len(token) > 256:
         raise APIError(401, "WORKER_REQUIRED", "A worker credential is required.")
     hashed = hashlib.sha256(token.encode()).hexdigest()
-    async with transaction(engine, None) as conn:
-        await conn.execute(
-            text("SELECT set_config('app.worker_token_hash',:h,true)"), {"h": hashed}
-        )
+    # The token hash goes in with the transaction's other settings (one statement), and the
+    # credential lookup, the liveness touch and the institute setting are one more statement:
+    # the row-level policies on worker_identities depend only on the token hash.
+    async with transaction(engine, None, worker_hash=hashed) as conn:
+        # last_seen_at is touched at most every 30 s: it only feeds the "worker silent" warnings
+        # (90 s), and a write on every poll is a row version per couple of seconds per worker.
         worker = await one(
             conn,
-            "SELECT * FROM app.worker_identities WHERE token_hash=:h AND status='active' AND expires_at>now()",
+            """WITH w AS (SELECT * FROM app.worker_identities
+                WHERE token_hash=:h AND status='active' AND expires_at>now()),
+            touched AS (UPDATE app.worker_identities t SET last_seen_at=now()
+                FROM w WHERE t.id=w.id
+                AND (w.last_seen_at IS NULL OR w.last_seen_at<now()-interval '30 seconds'))
+            SELECT w.*, set_config('app.institute_id', w.institute_id::text, true) AS institute_setting
+            FROM w""",
             {"h": hashed},
         )
         if not worker:
             raise APIError(401, "WORKER_REQUIRED", "Worker credential is unavailable.")
-        await conn.execute(
-            text("SELECT set_config('app.institute_id',:i,true)"),
-            {"i": str(worker["institute_id"])},
-        )
-        await conn.execute(
-            text("UPDATE app.worker_identities SET last_seen_at=now() WHERE id=:id"),
-            {"id": worker["id"]},
-        )
+        worker = {k: v for k, v in worker.items() if k != "institute_setting"}
         if "recognition" in worker["allowed_kinds"]:
             RECOGNITION_SEEN[str(worker["institute_id"])] = time.monotonic()
         yield conn, worker
@@ -204,19 +217,39 @@ async def claim(conn, worker):
         "delivery",
     }:
         raise APIError(403, "WORKER_CAPABILITY", "Worker lacks enrolment capability.")
-    # One lease per worker prevents retries/agent restarts from oversubscribing the CPU slot.
+    # An idle poll (every couple of seconds per worker) must not pay for locks and four claim
+    # searches. This unlocked look is a superset of every claim below: a job that can be claimed
+    # is always listed here, so an empty answer is final and a stale one only costs a poll.
+    kinds = sorted(
+        set(worker["allowed_kinds"]) & {"enrollment", "recognition", "report", "timetable", "delivery"}
+    )
+    limit = max_leases()
+    state = await one(
+        conn,
+        """SELECT
+        (SELECT count(*) FROM app.jobs WHERE institute_id=:i AND lease_owner=:w
+               AND state IN ('leased','running') AND lease_expires_at>now()) AS live,
+        ARRAY(SELECT DISTINCT kind FROM app.jobs WHERE institute_id=:i AND kind=ANY(CAST(:k AS text[]))
+              AND state IN ('queued','retry_wait') AND available_at<=now() AND attempts<3) AS ready""",
+        {"i": worker["institute_id"], "w": worker["id"], "k": kinds},
+    )
+    if state["live"] >= limit or not state["ready"]:
+        return None
+    worker["ready_kinds"] = set(state["ready"])
+    # The lock serialises one identity's claims, so concurrent polls cannot exceed the limit.
+    # The jobs themselves are taken with SKIP LOCKED, so two claims never get the same job.
     await conn.execute(
         text("SELECT pg_advisory_xact_lock(hashtextextended(:v,0))"),
         {"v": "worker:" + str(worker["id"])},
     )
-    existing = await one(
+    held = await one(
         conn,
-        "SELECT id FROM app.jobs WHERE institute_id=:i AND lease_owner=:w AND state IN ('leased','running') AND lease_expires_at>now()",
+        "SELECT count(*) AS n FROM app.jobs WHERE institute_id=:i AND lease_owner=:w AND state IN ('leased','running') AND lease_expires_at>now()",
         {"i": worker["institute_id"], "w": worker["id"]},
     )
-    if existing:
+    if held["n"] >= limit:
         return None
-    if "enrollment" not in worker["allowed_kinds"]:
+    if "enrollment" not in worker["allowed_kinds"] or "enrollment" not in worker["ready_kinds"]:
         from .recognition_jobs import claim as recognition_claim
 
         return await recognition_claim(conn, worker)
@@ -270,7 +303,7 @@ async def progress(conn, worker, identifier, epoch, *, start=False, step=None, p
             ),
             {"i": worker["institute_id"], "id": job["capture_id"]},
         )
-    if start:
+    if start and job["enrollment_attempt_id"]:
         await conn.execute(
             text(
                 "UPDATE app.enrollment_attempts SET status='processing',version=version+1 WHERE institute_id=:i AND id=:a AND status IN ('queued','processing')"
@@ -280,35 +313,38 @@ async def progress(conn, worker, identifier, epoch, *, start=False, step=None, p
     return {"state": "running"}
 
 
-async def input_data(conn, worker, identifier, epoch):
-    job = await leased(conn, worker, identifier, epoch)
-    a = await bio.get_attempt(conn, worker["institute_id"], job["enrollment_attempt_id"])
-    row = await one(
+async def input_data(conn, worker, identifier, epoch, job=None):
+    """The enrolment input of a leased job; ``job`` is the leased row when the caller has it."""
+    job = job or await leased(conn, worker, identifier, epoch)
+    # Attempt, its media, consent and the enabled model/profile come back in one statement.
+    found = await one(
         conn,
-        """SELECT m.manifest_hash,p.settings_hash,p.settings_json FROM app.model_releases m
-        JOIN app.recognition_profiles p ON p.institute_id=m.institute_id AND p.model_release_id=m.id
-        WHERE m.institute_id=:i AND m.id=:m AND p.id=:p AND m.status='enabled' AND p.status='enabled'""",
-        {"i": worker["institute_id"], "m": a["model_release_id"], "p": a["recognition_profile_id"]},
+        f"""SELECT a.*, {bio.MEDIA_SELECT}, c.withdrawn_at AS consent_withdrawn_at,
+        mr.manifest_hash, p.settings_hash, p.settings_json
+        FROM app.enrollment_attempts a
+        JOIN app.media_assets m ON m.institute_id=a.institute_id AND m.id=a.asset_id
+        LEFT JOIN app.consents c ON c.institute_id=a.institute_id AND c.id=a.consent_id
+        LEFT JOIN app.model_releases mr ON mr.institute_id=a.institute_id
+          AND mr.id=a.model_release_id AND mr.status='enabled'
+        LEFT JOIN app.recognition_profiles p ON p.institute_id=a.institute_id
+          AND p.id=a.recognition_profile_id AND p.model_release_id=mr.id AND p.status='enabled'
+        WHERE a.institute_id=:i AND a.id=:a""",
+        {"i": worker["institute_id"], "a": job["enrollment_attempt_id"]},
     )
-    consent = await one(
-        conn,
-        "SELECT withdrawn_at FROM app.consents WHERE institute_id=:i AND id=:c",
-        {"i": worker["institute_id"], "c": a["consent_id"]},
-    )
-    asset = await one(
-        conn,
-        "SELECT * FROM app.media_assets WHERE institute_id=:i AND id=:id",
-        {"i": worker["institute_id"], "id": a["asset_id"]},
-    )
+    if not found:
+        raise APIError(404, "NOT_FOUND", "Enrolment not found.")
+    found, asset = bio.split_asset(found)
+    row = {k: found.pop(k) for k in ("manifest_hash", "settings_hash", "settings_json")}
+    a = found
     if (
-        not row
+        not row["manifest_hash"]
         or row["manifest_hash"] not in worker["allowed_model_hashes"]
-        or consent["withdrawn_at"]
+        or a["consent_withdrawn_at"]
         or a["status"] not in ("queued", "processing")
         or asset["expires_at"] <= bio.now()
     ):
         raise APIError(409, "JOB_INPUT_REVOKED", "Job input is no longer available.")
-    return a, dict(asset), dict(row)
+    return a, asset, row
 
 
 async def complete(conn, worker, identifier, body, settings):
@@ -334,7 +370,7 @@ async def complete(conn, worker, identifier, body, settings):
         if job["result_hash"] != result_hash:
             raise APIError(409, "RESULT_CONFLICT", "A different result was already committed.")
         return {"state": "succeeded"}
-    a, asset, config = await input_data(conn, worker, identifier, body.epoch)
+    a, asset, config = await input_data(conn, worker, identifier, body.epoch, job)
     active = await one(
         conn, "SELECT app.biometric_student_active(:s) AS active", {"s": a["student_id"]}
     )
@@ -539,30 +575,28 @@ async def audit_worker(conn, worker, job, action):
 
 
 async def lock_job_student(conn, worker, identifier):
+    """Take the locks a job's effects need, in the common order: the student, or the session.
+
+    One lookup finds what the job belongs to, whatever its kind.
+    """
     row = await one(
         conn,
-        "SELECT a.student_id FROM app.jobs j JOIN app.enrollment_attempts a ON a.institute_id=j.institute_id AND a.id=j.enrollment_attempt_id WHERE j.institute_id=:i AND j.id=:id",
+        """SELECT j.kind, a.student_id, c.session_id FROM app.jobs j
+        LEFT JOIN app.enrollment_attempts a
+          ON a.institute_id=j.institute_id AND a.id=j.enrollment_attempt_id
+        LEFT JOIN app.captures c ON c.institute_id=j.institute_id AND c.id=j.capture_id
+        WHERE j.institute_id=:i AND j.id=:id""",
         {"i": worker["institute_id"], "id": identifier},
     )
     if not row:
-        capture = await one(
-            conn,
-            "SELECT c.session_id FROM app.jobs j JOIN app.captures c ON c.institute_id=j.institute_id AND c.id=j.capture_id WHERE j.institute_id=:i AND j.id=:id",
-            {"i": worker["institute_id"], "id": identifier},
-        )
-        if capture:
-            await one(
-                conn,
-                "SELECT id FROM app.sessions WHERE institute_id=:i AND id=:id FOR UPDATE",
-                {"i": worker["institute_id"], "id": capture["session_id"]},
-            )
-            return
-        other = await one(
-            conn,
-            "SELECT id FROM app.jobs WHERE institute_id=:i AND id=:id AND kind IN ('report','timetable','delivery')",
-            {"i": worker["institute_id"], "id": identifier},
-        )
-        if other:
-            return
         raise APIError(404, "NOT_FOUND", "Job not found.")
-    await bio.lock_student(conn, row["student_id"])
+    if row["student_id"]:
+        await bio.lock_student(conn, row["student_id"])
+    elif row["session_id"]:
+        await one(
+            conn,
+            "SELECT id FROM app.sessions WHERE institute_id=:i AND id=:id FOR UPDATE",
+            {"i": worker["institute_id"], "id": row["session_id"]},
+        )
+    elif row["kind"] not in ("report", "timetable", "delivery"):
+        raise APIError(404, "NOT_FOUND", "Job not found.")

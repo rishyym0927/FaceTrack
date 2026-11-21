@@ -6,12 +6,14 @@ import signal
 import tempfile
 import threading
 import time
+from pathlib import Path
 from urllib.parse import urlparse
 
 import httpx
 from celery import Celery
 
 from . import config, log
+from .childproc import child_entry
 from .inference import run_child
 
 app = Celery("facetrack-enrollment", broker=config.REDIS)
@@ -89,18 +91,9 @@ def post_fail(client, job, epoch, code, retryable, stage=None):
     )
 
 
-def _child_entry(target, *args):
-    # Own process group, so ffmpeg and any other grandchild die with the child.
-    try:
-        os.setpgid(0, 0)
-    except (AttributeError, OSError):
-        pass
-    target(*args)
-
-
 def start_child(target, args):
     context = multiprocessing.get_context("spawn")
-    process = context.Process(target=_child_entry, args=(target, *args))
+    process = context.Process(target=child_entry, args=(os.getpid(), target, *args))
     process.start()
     try:
         os.setpgid(process.pid, process.pid)  # Both sides set it, so there is no race.
@@ -136,62 +129,132 @@ def stop_child(process):
     process.join()
 
 
-@app.task(name="facetrack.enroll", ignore_result=True)
-def enroll(job, epoch):
-    config.validate()
-    stop, lost = threading.Event(), threading.Event()
-    closing = threading.Event()  # result is being committed: a late heartbeat 409 is expected
-    started = time.monotonic()
-    stage = "start"
-    log.event("job_start", job_id=job, epoch=epoch)
-    shown = {"stage": None, "percent": None}  # what the teacher's screen should say
-    changed = threading.Event()
+class LeaseLost(Exception):
+    """The API no longer lets this worker finish the job; whoever holds it now owns the result."""
 
-    def show(name, percent=None):
+
+class Heartbeat(threading.Thread):
+    """Renews the job lease and carries the step the teacher's screen shows.
+
+    The lease is 120 s and is renewed every ``interval`` seconds, earlier when the step changes
+    (updates are spaced at least ``spacing`` seconds apart). ``lost`` is set when the API rejects
+    the lease or stays silent for ``silent_after`` seconds. ``end()`` wakes the thread at once
+    instead of leaving it asleep for the rest of its interval.
+    """
+
+    def __init__(self, job, epoch, interval=15, spacing=2, silent_after=100):
+        super().__init__(daemon=True, name=f"heartbeat-{job}")
+        self.job, self.epoch = job, epoch
+        self.interval, self.spacing, self.silent_after = interval, spacing, silent_after
+        self.stopped, self.lost, self.changed = (threading.Event() for _ in range(3))
+        # The result is being committed: a late heartbeat 409 is expected, not a lost lease.
+        self.closing = threading.Event()
+        self._step = None  # (name, percent), replaced as one object so a reader never sees half
+
+    def show(self, name, percent=None):
         """Tell the API which step this job is on; sent with the next heartbeat."""
-        shown.update(stage=name, percent=percent)
-        changed.set()
+        self._step = (name, percent)
+        self.changed.set()
 
-    def heartbeat():
+    def end(self):
+        self.stopped.set()
+        self.changed.set()
+
+    def run(self):
         last = time.monotonic()
         with http_client(10) as client:
-            while not stop.is_set():
-                # Wake early when the step changes so the screen follows along; otherwise renew
-                # the lease every 15 seconds. Step updates are spaced at least 2 seconds apart.
-                changed.wait(15)
-                if stop.is_set():
+            while not self.stopped.is_set():
+                self.changed.wait(self.interval)
+                if self.stopped.is_set():
                     break
-                body = {"epoch": epoch}
-                if changed.is_set() and shown["stage"]:
-                    body.update(stage=shown["stage"])
-                    if shown["percent"] is not None:
-                        body.update(percent=int(shown["percent"]))
-                changed.clear()
+                body, step = {"epoch": self.epoch}, None
+                if self.changed.is_set():
+                    # Cleared before the step is read: a show() after this point sets it again,
+                    # so the newest step is never lost between the read and the clear.
+                    self.changed.clear()
+                    step = self._step
+                if step:
+                    body["stage"] = step[0]
+                    if step[1] is not None:
+                        body["percent"] = int(step[1])
                 try:
-                    api(client, "POST", f"/internal/v1/jobs/{job}/heartbeat", body)
+                    api(client, "POST", f"/internal/v1/jobs/{self.job}/heartbeat", body)
                     last = time.monotonic()
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code in LEASE_LOST:
-                        if closing.is_set():
+                        if self.closing.is_set():
                             return  # the job finished while this heartbeat was in flight
-                        log.event("lease_lost", "warning", job_id=job, reason="heartbeat_rejected",
-                                  status=e.response.status_code)
-                        lost.set()
+                        log.event("lease_lost", "warning", job_id=self.job,
+                                  reason="heartbeat_rejected", status=e.response.status_code)
+                        self.lost.set()
                         return
+                    if step:
+                        self.changed.set()  # not delivered: send the step again
                 except httpx.HTTPError:
-                    pass
-                if time.monotonic() - last > 100:
-                    log.event("lease_lost", "warning", job_id=job, reason="heartbeat_silent")
-                    lost.set()
+                    if step:
+                        self.changed.set()
+                if time.monotonic() - last > self.silent_after:
+                    log.event("lease_lost", "warning", job_id=self.job, reason="heartbeat_silent")
+                    self.lost.set()
                     return
-                stop.wait(2)
+                self.stopped.wait(self.spacing)
 
-    process = None
+
+def fetch_media(client, url, destination, byte_size, sha256, lost):
+    """Stream the signed URL into ``destination``, hashing as it arrives. Returns the byte count.
+
+    Storage errors are about the signed URL, not this worker's API lease.
+    """
+    count = 0
+    checksum = hashlib.sha256()
+    deadline = time.monotonic() + 120
+    try:
+        with client.stream("GET", url) as response:
+            response.raise_for_status()
+            with destination.open("xb") as stream:
+                destination.chmod(0o600)
+                for block in response.iter_bytes(65536):
+                    count += len(block)
+                    if lost.is_set():
+                        raise LeaseLost
+                    if count > 25 * 1024 * 1024 or time.monotonic() > deadline:
+                        raise ValueError("Invalid download")
+                    checksum.update(block)
+                    stream.write(block)
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code < 500 and e.response.status_code not in (408, 429):
+            raise MediaUnavailable from e
+        raise StorageUnavailable from e
+    except httpx.HTTPError as e:
+        raise StorageUnavailable from e
+    if count != byte_size or checksum.hexdigest() != sha256:
+        raise ValueError("Media integrity mismatch")
+    return count
+
+
+def spawn_inference(source, data, wait):
+    """Start the job's child. With ``wait`` it loads the models now and idles until it is sent
+    ("go",), so loading overlaps the download. Returns (process, parent end of the pipe)."""
+    parent, child = multiprocessing.get_context("spawn").Pipe(duplex=True)
+    process = start_child(
+        run_child, (child, str(source), str(config.MANIFEST), str(config.PROFILE), data, wait)
+    )
+    child.close()
+    return process, parent
+
+
+@app.task(name="facetrack.enroll", ignore_result=True)
+def enroll(job, epoch):
+    config.validate()
+    beat = Heartbeat(job, epoch)
+    started = time.monotonic()
+    stage = "start"
+    log.event("job_start", job_id=job, epoch=epoch)
+    process = connection = None
     with http_client(20) as client:
         try:
             api(client, "POST", f"/internal/v1/jobs/{job}/start", {"epoch": epoch})
-            thread = threading.Thread(target=heartbeat, daemon=True)
-            thread.start()
+            beat.start()
             stage = "input"
             data = api(client, "GET", f"/internal/v1/jobs/{job}/input?epoch={epoch}").json()
             if data.get("kind") == "delivery":
@@ -207,57 +270,39 @@ def enroll(job, epoch):
             config.TEMP.mkdir(parents=True, exist_ok=True, mode=0o700)
             config.TEMP.chmod(0o700)
             with tempfile.TemporaryDirectory(prefix="job-", dir=config.TEMP) as tmp:
-                from pathlib import Path
-
                 source = Path(tmp) / "input.video"
-                show("preparing")
+                beat.show("preparing")
+                # Only model jobs: reports and timetables never load a model.
+                if data.get("media_url") and data.get("kind") not in ("report", "timetable"):
+                    stage = "inference"
+                    process, connection = spawn_inference(source, data, wait=True)
                 if data.get("media_url"):
                     stage = "download"
                     download_started = time.monotonic()
-                    download_deadline = time.monotonic() + 120
-                    count = 0
-                    checksum = hashlib.sha256()
-                    # Storage errors are about the signed URL, not this worker's API lease.
-                    try:
-                        with client.stream("GET", data["media_url"]) as response:
-                            response.raise_for_status()
-                            with source.open("xb") as stream:
-                                source.chmod(0o600)
-                                for block in response.iter_bytes(65536):
-                                    count += len(block)
-                                    if (
-                                        count > 25 * 1024 * 1024
-                                        or lost.is_set()
-                                        or time.monotonic() > download_deadline
-                                    ):
-                                        raise ValueError("Invalid download")
-                                    checksum.update(block)
-                                    stream.write(block)
-                    except httpx.HTTPStatusError as e:
-                        if e.response.status_code < 500 and e.response.status_code not in (408, 429):
-                            raise MediaUnavailable from e
-                        raise StorageUnavailable from e
-                    except httpx.HTTPError as e:
-                        raise StorageUnavailable from e
-                    if count != data["byte_size"] or checksum.hexdigest() != data["source_sha256"]:
-                        raise ValueError("Media integrity mismatch")
+                    count = fetch_media(
+                        client, data["media_url"], source, data["byte_size"],
+                        data["source_sha256"], beat.lost,
+                    )
                     log.event("download_done", job_id=job, bytes=count,
                               duration_ms=log.elapsed_ms(download_started))
                 stage = "inference"
                 inference_started = time.monotonic()
-                receive, send = multiprocessing.get_context("spawn").Pipe(duplex=False)
-                process = start_child(
-                    run_child, (send, str(source), str(config.MANIFEST), str(config.PROFILE), data)
-                )
-                send.close()
+                if process is None:
+                    process, connection = spawn_inference(source, data, wait=False)
+                else:
+                    try:
+                        connection.send(("go",))
+                    except (OSError, ValueError):
+                        pass  # the child already ended; its message, if any, is read below
                 deadline = time.monotonic() + 300
                 result = None
                 try:
-                    while time.monotonic() < deadline and not lost.is_set():
-                        if receive.poll(0.5):
-                            message = receive.recv()
+                    while time.monotonic() < deadline and not beat.lost.is_set():
+                        if connection.poll(0.5):
+                            message = connection.recv()
                             if "progress" in message:  # a step update, not the result yet
-                                show(message["progress"]["stage"], message["progress"].get("percent"))
+                                beat.show(message["progress"]["stage"],
+                                          message["progress"].get("percent"))
                                 continue
                             result = message
                             break
@@ -266,12 +311,13 @@ def enroll(job, epoch):
                 finally:
                     # Before the temporary directory is removed.
                     stop_child(process)
-                    receive.close()
-                if lost.is_set():
+                    connection.close()
+                if beat.lost.is_set():
                     return
                 if result is None:
                     result = {"ok": False, "code": "PROCESS_TIMEOUT", "retryable": True}
                     log.event("inference_timeout", "warning", job_id=job,
+                              exitcode=process.exitcode,
                               duration_ms=log.elapsed_ms(inference_started))
                 if result["ok"]:
                     stage = "complete"
@@ -289,8 +335,8 @@ def enroll(job, epoch):
                         proposals=len(found.get("proposals", [])) if "proposals" in found else None,
                         unknown_observations=found.get("unknown_observations"),
                     )
-                    show("finalizing")
-                    closing.set()
+                    beat.show("finalizing")
+                    beat.closing.set()
                     payload = {"epoch": epoch, **found}
                     status = post_with_retry(client, f"/internal/v1/jobs/{job}/complete", payload)
                     if status == 422:
@@ -302,6 +348,8 @@ def enroll(job, epoch):
                     # Lease loss ends here; lease reconciliation owns an unavailable API.
                 else:
                     post_fail(client, job, epoch, result["code"], result["retryable"], "inference")
+        except LeaseLost:
+            pass  # already logged by the heartbeat; the new holder owns the job
         except MediaUnavailable:
             post_fail(client, job, epoch, "MEDIA_UNAVAILABLE", False, stage)
         except StorageUnavailable:
@@ -317,19 +365,28 @@ def enroll(job, epoch):
             else:
                 log.event("lease_lost", "warning", job_id=job, reason="api_rejected",
                           status=e.response.status_code, stage=stage)
-        except (httpx.HTTPError, ValueError, OSError, EOFError) as e:
+        except Exception as e:
+            # Any other failure (a malformed API body, a failed spawn, a bug) must still release
+            # the lease: without this the job sat until its lease expired, two minutes later.
             # The exception class and the stage say what went wrong; its text can hold paths.
             log.event("worker_error", "error", job_id=job, stage=stage, error=type(e).__name__)
             post_fail(client, job, epoch, "WORKER_ERROR", True, stage)
         finally:
-            stop.set()
+            beat.end()
             if process is not None and process.exitcode is None:
                 stop_child(process)
+            if connection is not None:
+                connection.close()
+            if beat.is_alive():
+                beat.join(timeout=2)
 
 
 def clean_abandoned():
     if not config.TEMP.exists() or config.TEMP.is_symlink():
         return
     for path in config.TEMP.glob("job-*"):
-        if not path.is_symlink() and path.is_dir() and time.time() - path.stat().st_mtime > 600:
-            shutil.rmtree(path)
+        try:
+            if not path.is_symlink() and path.is_dir() and time.time() - path.stat().st_mtime > 600:
+                shutil.rmtree(path)
+        except OSError:
+            continue  # one undeletable directory must not keep the rest from being cleaned

@@ -191,3 +191,39 @@ def test_crowded_clips_embed_every_kth_frame_but_small_ones_are_untouched():
     small = [(frame, object()) for frame in range(80) for _ in range(2)]
     assert dense.thin(small, 500) == (small, 1)
     assert dense.thin(crowd, 0) == (crowd, 1)  # 0 turns thinning off
+
+
+def test_timings_keep_embedding_cost_even_if_the_formatter_drops_it(tmp_path):
+    clip = tmp_path / "clip.mp4"
+    clip.write_bytes(b"x")
+    info = MediaInfo(width=640, height=480, duration=15, codec="h264", size=1)
+
+    def frames(path, info, count, timings):
+        for i in range(count):
+            yield round(i * 1000 * info.duration / count), frame(i)
+
+    pipeline = SimpleNamespace(
+        runtime=Runtime({0: [0, 1]}),
+        profile=PROFILE,
+        model_hash="a" * 64,
+        profile_hash="b" * 64,
+        # Mimics a formatter that keeps only some keys, as the monitoring gap report described.
+        _times=lambda timings, started: {
+            "decoding_ms": 1.0,
+            "detection_ms": 2.0,
+            "matching_ms": 3.0,
+            "cold_start_ms": 4.0,
+            "processing_total_ms": 5.0,
+        },
+    )
+    original = dense.probe
+    dense.probe = lambda path, enrollment=False: info
+    try:
+        result = dense.recognize(pipeline, clip, ["s0", "s1", "s2"], Roster(), 4.0, frames)
+    finally:
+        dense.probe = original
+    timings = result["timings"]
+    assert "embedding_ms" in timings and timings["embedding_ms"] >= 0
+    assert timings["embed_every"] >= 1 and timings["embedded_faces"] >= 1
+    assert len(timings) <= 10  # the API's limit on timing keys
+    assert all(isinstance(v, float) for v in timings.values())

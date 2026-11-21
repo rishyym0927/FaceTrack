@@ -161,3 +161,196 @@ def test_conflict_code_reads_api_error_envelope():
     assert executor.conflict_code(err(500, {"error": {"code": "JOB_INPUT_REVOKED"}})) is None
     assert executor.conflict_code(err(409, {"oops": 1})) is None
     assert "STALE_LEASE" not in executor.TERMINAL_CONFLICTS
+
+
+# ---- audit regressions -------------------------------------------------------------------
+
+
+def heartbeat_threads():
+    import threading
+
+    return [t for t in threading.enumerate() if t.name.startswith("heartbeat-") and t.is_alive()]
+
+
+def test_heartbeat_thread_is_gone_when_the_job_returns(mocked, monkeypatch):
+    # It used to sleep out the rest of its 15 s interval after every job.
+    monkeypatch.setattr(executor, "run_child", ok_child)
+    mocked({"kind": "report", "snapshot": {}})
+    executor.enroll(JOB, 1)
+    assert heartbeat_threads() == []
+
+
+def test_unexpected_exception_still_releases_the_lease(mocked):
+    # A malformed input body (no byte_size) is a KeyError, not an httpx/OSError/ValueError. It
+    # used to escape and leave the job leased until it expired two minutes later.
+    fake = mocked({"media_url": MEDIA, "source_sha256": "x"})
+    executor.enroll(JOB, 1)
+    assert fake.fails() == [{"epoch": 1, "code": "WORKER_ERROR", "retryable": True}]
+
+
+def test_heartbeat_resends_a_step_the_api_did_not_receive(monkeypatch):
+    seen = []
+
+    def handler(request):
+        seen.append(json.loads(request.content))
+        return httpx.Response(500 if len(seen) == 1 else 200, json={})
+
+    beat = executor.Heartbeat(JOB, 1, interval=0.05, spacing=0.01)
+    monkeypatch.setattr(
+        executor, "http_client", lambda timeout: httpx.Client(transport=httpx.MockTransport(handler))
+    )
+    monkeypatch.setattr(config, "API", "http://api.test")
+    try:
+        beat.show("recognizing", 40)
+        beat.start()
+        deadline = time.monotonic() + 5
+        while len(seen) < 2 and time.monotonic() < deadline:
+            time.sleep(0.01)
+    finally:
+        beat.end()
+        beat.join(timeout=5)
+    assert seen[0]["stage"] == seen[1]["stage"] == "recognizing" and seen[1]["percent"] == 40
+
+
+def test_heartbeat_end_wakes_it_immediately(monkeypatch):
+    beat = executor.Heartbeat(JOB, 1, interval=60)
+    monkeypatch.setattr(
+        executor,
+        "http_client",
+        lambda timeout: httpx.Client(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, json={}))
+        ),
+    )
+    beat.start()
+    started = time.monotonic()
+    beat.end()
+    beat.join(timeout=5)
+    assert not beat.is_alive() and time.monotonic() - started < 2
+
+
+def test_lease_lost_during_download_is_not_reported_as_a_worker_error(tmp_path):
+    import threading
+
+    lost = threading.Event()
+    lost.set()
+    transport = httpx.MockTransport(lambda r: httpx.Response(200, content=b"x" * 10))
+    with httpx.Client(transport=transport) as client:
+        with pytest.raises(executor.LeaseLost):
+            executor.fetch_media(client, MEDIA, tmp_path / "in", 10, "0" * 64, lost)
+
+
+def test_model_child_is_started_before_the_download_and_told_when_media_is_ready(
+    mocked, monkeypatch
+):
+    import hashlib
+
+    body = b"video-bytes"
+    started = []
+    real_start = executor.start_child
+
+    def recording_start(target, args):
+        started.append((time.monotonic(), args[-1]))  # the `wait` flag
+        return real_start(target, args)
+
+    monkeypatch.setattr(executor, "start_child", recording_start)
+    monkeypatch.setattr(executor, "run_child", go_child)
+    fake = mocked(
+        {"media_url": MEDIA, "byte_size": len(body), "source_sha256": hashlib.sha256(body).hexdigest()}
+    )
+    transport = httpx.MockTransport(
+        lambda r: httpx.Response(200, content=body) if r.url.host == "storage.test" else fake(r)
+    )
+    monkeypatch.setattr(
+        executor, "http_client", lambda t: httpx.Client(transport=transport, follow_redirects=False)
+    )
+    executor.enroll(JOB, 1)
+    assert [wait for _, wait in started] == [True]  # spawned once, in wait-for-media mode
+    complete = [b for _, p, b in fake.calls if p.endswith("/complete")]
+    assert complete and complete[0]["size_seen"] == len(body)  # the file was there on "go"
+
+
+def go_child(pipe, source, manifest, profile, expected, wait):
+    from pathlib import Path
+
+    assert wait is True
+    assert pipe.recv() == ("go",)
+    pipe.send({"ok": True, "result": {"size_seen": Path(source).stat().st_size}})
+    pipe.close()
+
+
+def waiting_child(pipe, *args):
+    pipe.recv()
+    time.sleep(60)
+
+
+def test_preloaded_child_is_stopped_when_the_download_fails(mocked, monkeypatch):
+    started = []
+    real_start = executor.start_child
+
+    def recording_start(target, args):
+        process = real_start(target, args)
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(executor, "start_child", recording_start)
+    monkeypatch.setattr(executor, "run_child", waiting_child)
+    fake = mocked({"media_url": MEDIA, "byte_size": 1, "source_sha256": "x"}, {"media": [404]})
+    executor.enroll(JOB, 1)
+    assert fake.fails()[0]["code"] == "MEDIA_UNAVAILABLE"
+    assert len(started) == 1 and not started[0].is_alive()
+
+
+def test_report_jobs_do_not_preload_a_model_child(mocked, monkeypatch):
+    waits = []
+    real_start = executor.start_child
+    monkeypatch.setattr(
+        executor, "start_child", lambda t, a: waits.append(a[-1]) or real_start(t, a)
+    )
+    monkeypatch.setattr(executor, "run_child", ok_child)
+    mocked({"kind": "report", "snapshot": {}})
+    executor.enroll(JOB, 1)
+    assert waits == [False]
+
+
+def test_cleanup_continues_past_a_directory_it_cannot_remove(tmp_path, monkeypatch):
+    import shutil
+
+    monkeypatch.setattr(config, "TEMP", tmp_path)
+    old = time.time() - 3600
+    for name in ("job-a", "job-b"):
+        (tmp_path / name).mkdir()
+        os.utime(tmp_path / name, (old, old))
+    real = shutil.rmtree
+    calls = []
+
+    def flaky(path, *args, **kwargs):
+        calls.append(path.name)
+        if path.name == min(("job-a", "job-b")):
+            raise PermissionError
+        return real(path, *args, **kwargs)
+
+    monkeypatch.setattr(executor.shutil, "rmtree", flaky)
+    executor.clean_abandoned()
+    assert sorted(calls) == ["job-a", "job-b"]
+
+
+def test_child_bootstrap_is_light_and_exits_when_its_parent_dies():
+    code = (
+        "import os, sys, time\n"
+        "from facetrack_worker import childproc\n"
+        "assert 'celery' not in sys.modules and 'httpx' not in sys.modules\n"
+        "childproc.watch_parent(os.getpid() + 100000, interval=0.05, exit_code=7)\n"
+        "time.sleep(10)\n"
+    )
+    started = time.monotonic()
+    result = subprocess.run([__import__("sys").executable, "-c", code], timeout=20)
+    assert result.returncode == 7 and time.monotonic() - started < 8
+
+
+def test_report_child_does_not_import_the_vision_stack():
+    code = (
+        "import sys\n"
+        "import facetrack_worker.inference\n"
+        "assert 'cv2' not in sys.modules and 'onnxruntime' not in sys.modules, 'heavy import'\n"
+    )
+    subprocess.run([__import__("sys").executable, "-c", code], check=True, timeout=30)

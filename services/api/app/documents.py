@@ -14,12 +14,13 @@ from pydantic import Field
 from sqlalchemy import text
 
 from . import biometrics as bio
+from .access import teacher_access
 from .attendance import remember, session
 from .biometric_types import Epoch
 from .db import many, one, transaction
 from .errors import APIError
 from .schemas import DEFAULT_GROUP_SECTION, Strict
-from .security import audit, idempotent, roles, teacher_access
+from .security import audit, idempotent, roles
 
 CSV_COLUMNS = [
     "entry_key",
@@ -129,6 +130,8 @@ async def enqueue_report(
 
 async def claim(conn, worker):
     allowed = set(worker["allowed_kinds"]) & {"report", "timetable", "delivery"}
+    if "ready_kinds" in worker:
+        allowed &= worker["ready_kinds"]
     if not allowed:
         return None
     job = await one(

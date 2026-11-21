@@ -75,6 +75,33 @@ class FakeScanCamera extends GuidedCamera {
   }
 }
 
+/// Behaves like the real camera where it matters for races: starting takes time and keeps the
+/// camera busy, a busy or recording camera refuses to be swapped, and starting a segment
+/// discards a clip nobody has taken yet.
+class SlowScanCamera extends FakeScanCamera {
+  /// While set, [start] stays busy until this completes.
+  Completer<void>? startGate;
+
+  @override
+  Future<void> start(List<String> order) async {
+    if (busy || recording || !ready) return;
+    starts++;
+    busy = true;
+    clip = null;
+    emit();
+    await startGate?.future;
+    recording = true;
+    busy = false;
+    emit();
+  }
+
+  @override
+  Future<void> selectCamera(CameraDescription choice) async {
+    if (busy || recording || clip != null || selectedCamera == choice) return;
+    await super.selectCamera(choice);
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   var cache = '/test-private-cache';
@@ -296,6 +323,137 @@ void main() {
     expect(camera.ready, false);
     expect(scan.pending, 0);
     expect(scan.canLeave, true);
+  });
+
+  test('upload progress repaints the page by whole percents, not once per KiB', () {
+    final scan = ClassroomScan(FakeScanCamera(), (_) async {});
+    addTearDown(scan.dispose);
+    var notices = 0;
+    scan.addListener(() => notices++);
+    // One 6 MiB chunk is reported about 6 000 times by the transport.
+    for (var i = 0; i <= 6000; i++) {
+      scan.reportUpload('Uploading recording…', i / 6000);
+    }
+    // ignore: avoid_print
+    print('6001 progress reports -> $notices page notifications');
+    expect(scan.uploadProgress, 1.0);
+    expect(notices, lessThan(110));
+    expect(notices, greaterThan(50));
+    final before = notices;
+    scan.reportUpload('Verifying upload…');
+    expect(notices, before + 1, reason: 'a new status is shown at once');
+    scan.reportUpload('Verifying upload…');
+    expect(notices, before + 1);
+  });
+
+  test('the next upload does not wait for the camera to open the next segment', () async {
+    final camera = SlowScanCamera();
+    final firstUpload = Completer<void>();
+    final calls = <String>[];
+    final scan = ClassroomScan(camera, (file) async {
+      calls.add(file.path);
+      if (calls.length == 1) await firstUpload.future;
+    }, maxQueued: 2);
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('a');
+    await Future<void>.delayed(Duration.zero);
+    camera.finish('b'); // two waiting: the camera pauses
+    await Future<void>.delayed(Duration.zero);
+    expect(scan.pending, 2);
+    expect(camera.starts, 2);
+    camera.startGate = Completer<void>(); // the next segment will take "forever" to open
+    firstUpload.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(camera.starts, 3, reason: 'recording is asked to resume');
+    expect(calls, ['a', 'b'], reason: 'and the link is not left idle meanwhile');
+  });
+
+  test('one oversize segment is skipped; the rest of the scan carries on', () async {
+    final camera = FakeScanCamera();
+    final sent = <String>[];
+    final events = <String>[];
+    final scan = ClassroomScan(
+      camera,
+      (file) async {
+        if (file.path == 'big') {
+          throw const AppFailure('Captured segment is empty or exceeds 25 MiB.', code: 'CAPTURE_SIZE');
+        }
+        sent.add(file.path);
+      },
+      onEvent: (name, {code, attempt, bytes, count, durationMs}) => events.add('$name:${code ?? ''}'),
+    );
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('big');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    camera.finish('ok');
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(sent, ['ok']);
+    expect(scan.skipped, 1);
+    expect(scan.error, isNull, reason: 'not a reason to stop recording');
+    expect(scan.scanning, isTrue);
+    expect(scan.pending, 0);
+    expect(scan.submitted, 1);
+    expect(events, contains('upload_failed:CAPTURE_SIZE'));
+    expect(events.where((e) => e.startsWith('upload_retry')), isEmpty);
+  });
+
+  test('a segment that finishes while the previous one is being saved is not lost', () async {
+    final camera = SlowScanCamera();
+    final firstSave = Completer<void>();
+    var saves = 0;
+    final sent = <String>[];
+    final scan = ClassroomScan(
+      camera,
+      (file) async => sent.add(file.path),
+      retain: (file) async {
+        if (saves++ == 0) await firstSave.future;
+        return file;
+      },
+    );
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('a'); // being saved (slowly)
+    await Future<void>.delayed(Duration.zero);
+    camera.finish('b'); // finished in the meantime
+    await Future<void>.delayed(Duration.zero);
+    firstSave.complete();
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(scan.recorded, 2);
+    expect(sent, ['a', 'b']);
+  });
+
+  test('flip pressed while the next segment is still opening still switches, and says so honestly', () async {
+    final camera = SlowScanCamera();
+    final events = <String>[];
+    final scan = ClassroomScan(
+      camera,
+      (file) async {},
+      onEvent: (name, {code, attempt, bytes, count, durationMs}) => events.add('$name:${code ?? ''}'),
+    );
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.elapsed = 12;
+    camera.startGate = Completer<void>(); // the next segment opens slowly
+    camera.finish('a'); // segment boundary: the camera is busy starting the next one
+    await Future<void>.delayed(const Duration(milliseconds: 30));
+    expect(camera.busy, isTrue);
+    final switching = scan.switchCamera();
+    await Future<void>.delayed(const Duration(milliseconds: 150));
+    camera.startGate = null;
+    // The slow start is released the way a real one finishes.
+    camera.recording = true;
+    camera.busy = false;
+    camera.emit();
+    await switching;
+    await Future<void>.delayed(const Duration(milliseconds: 50));
+    expect(camera.selections, ['front']);
+    expect(camera.selectedCamera, frontCamera);
+    expect(scan.cameraError, isNull);
+    expect(events, contains('camera_switched:front'));
+    expect(scan.scanning, isTrue);
+    expect(camera.recording, isTrue, reason: 'recording carries on with the new camera');
   });
 
   group('switching between the front and rear camera', () {

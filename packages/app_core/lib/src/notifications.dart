@@ -195,25 +195,55 @@ class NotificationCenter extends ChangeNotifier {
       failed = [];
       note = null;
       loadedAt = null;
-      _seen = await _readSeen(key);
+      // Cleared first and merged after the read: a switch to another account while the read is
+      // pending must not leave this account's read state behind.
+      _seen = {};
+      final stored = await _readSeen(key);
+      if (_key == key) _seen = {..._seen, ...stored};
     }
     loading = true;
     notifyListeners();
-    NoticeBatch batch;
+    NoticeBatch? batch;
     try {
       batch = await fetch();
     } catch (_) {
-      batch = NoticeBatch(const [], failed: const ['notifications']);
+      batch = null;
     }
     if (generation != _generation) return;
+    loading = false;
+    loadedAt = DateTime.now();
+    if (batch == null) {
+      // The whole refresh failed: keep what was shown and what was read, and say so.
+      failed = const ['notifications'];
+      notifyListeners();
+      return;
+    }
     items = sortNotices(batch.items);
     failed = batch.failed;
     note = batch.note;
+    // Forget ids that no longer exist so the stored set cannot grow forever. A source that
+    // failed to load contributes no notices, so pruning then would mark them unread again
+    // once it recovers.
+    if (batch.failed.isEmpty) {
+      _seen = _seen.intersection({for (final n in items) n.id});
+      await _writeSeen();
+    }
+    notifyListeners();
+  }
+
+  /// Forgets everything shown, so another user never sees this one's notices.
+  void reset() {
+    ++_generation;
+    _key = null;
+    _seen = {};
+    items = [];
+    failed = [];
+    note = null;
     loading = false;
-    loadedAt = DateTime.now();
-    // Forget ids that no longer exist so the stored set cannot grow forever.
-    _seen = _seen.intersection({for (final n in items) n.id});
-    await _writeSeen();
+    loadedAt = null;
+    inFlight = null;
+    _inFlightKey = null;
+    _refreshAfterFlight = false;
     notifyListeners();
   }
 

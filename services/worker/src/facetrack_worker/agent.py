@@ -66,17 +66,32 @@ def maintain(client):
 SLOTS = max(1, int(os.environ.get("WORKER_SLOTS", "1")))
 
 
+# A job runs at most about 7 minutes (120 s download + 300 s inference + completion). Messages
+# delivered longer ago than this belong to a worker that was killed mid-job; Celery only
+# redelivers them after the 900 s visibility timeout.
+STALE_UNACKED_SECONDS = 600
+
+
 def backlog():
     """Jobs already handed to Celery and not finished: waiting in Redis or being run.
 
     A lease starts ticking when it is claimed, so claiming ahead of a busy worker lets queued
     leases expire (120 s) and burns their attempts. Claim only when a slot is free. On any
     error this returns 0, which keeps the previous claim-always behaviour.
+
+    Unacknowledged messages older than ``STALE_UNACKED_SECONDS`` are not counted: after a worker
+    container was killed (OOM, ``docker kill``, host reboot) its message stayed in ``unacked``
+    for 15 minutes, and with WORKER_SLOTS of them the agent stopped claiming for that long.
     """
     try:
         with app.connection_for_read() as connection:
             client = connection.default_channel.client
-            return int(client.llen("enrollment")) + int(client.hlen("unacked"))
+            queued = int(client.llen("enrollment"))
+            try:
+                running = int(client.zcount("unacked_index", time.time() - STALE_UNACKED_SECONDS, "+inf"))
+            except Exception:
+                running = int(client.hlen("unacked"))
+            return queued + running
     except Exception:
         return 0
 
@@ -125,6 +140,8 @@ def cycle(client, maintenance):
         recovered()
         if response.status_code != 204:
             dispatch(response.json())
+            # Another slot is still free: claim again at once instead of after the idle pause.
+            return maintenance, 0.2 if waiting + 1 < SLOTS else 2
         return maintenance, 2
     except OperationalError:
         # The claimed lease stays in PostgreSQL and is recovered after it expires.
@@ -139,6 +156,11 @@ def cycle(client, maintenance):
         status = getattr(getattr(error, "response", None), "status_code", None)
         notice(message, "error", status=status, error=type(error).__name__)
         return maintenance, delay
+    except Exception as error:
+        # A bug or an unforeseen error must not kill the agent: it would restart in a loop and
+        # drop every pending hand-off. Log it (class only) and carry on.
+        notice("Unexpected agent error; will retry.", "error", error=type(error).__name__)
+        return maintenance, 5
 
 
 def main():

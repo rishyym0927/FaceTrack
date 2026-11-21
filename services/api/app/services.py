@@ -4,6 +4,7 @@ from zoneinfo import ZoneInfo
 
 from sqlalchemy import text
 
+from .access import teacher_access
 from .biometrics import COMPATIBLE_FACE_SET, CURRENT_RECOGNITION_PROFILE
 from .db import many, one
 from .errors import APIError
@@ -18,7 +19,6 @@ from .security import (
     remember,
     reveal_code,
     roles,
-    teacher_access,
 )
 
 OFFERING_FIELDS = "o.id,o.course_id,o.term_id,o.class_group_id,o.title,o.status,o.roster_version,o.version,c.code AS course_code,t.code AS term_code,g.branch,g.semester,g.section"

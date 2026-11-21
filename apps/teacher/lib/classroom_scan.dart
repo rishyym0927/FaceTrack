@@ -40,6 +40,11 @@ typedef ScanEvent =
       int? durationMs,
     });
 
+/// One segment the server can never accept (empty, or over the 25 MiB limit). Unlike the other
+/// terminal failures this says nothing about the rest of the scan, so only that segment is
+/// skipped.
+bool isUnusableSegment(Object error) => error is AppFailure && error.code == 'CAPTURE_SIZE';
+
 String _codeOf(Object error) =>
     error is AppFailure && error.code != null
     ? error.code!
@@ -85,6 +90,9 @@ class ClassroomScan extends ChangeNotifier {
   double? uploadProgress;
   String? uploadStatus;
   int submitted = 0, recorded = 0;
+
+  /// Segments dropped because they were empty or too large to upload.
+  int skipped = 0;
   bool reconnecting = false;
   static int backoffSeconds(int failures) =>
       const [2, 4, 8, 15, 30][(failures - 1).clamp(0, 4)];
@@ -173,17 +181,16 @@ class ClassroomScan extends ChangeNotifier {
     cameraError = null;
     _emit();
     try {
-      if (camera.recording) await camera.stop(minimumSeconds: switchMinimumSeconds);
-      // Wait until the finished segment has been taken into the queue.
-      for (var i = 0; i < 50 && (collecting || camera.clip != null || camera.busy); i++) {
-        await Future<void>.delayed(const Duration(milliseconds: 100));
-      }
+      await _quiesce();
       if (closed) return;
       await camera.selectCamera(target);
       if (!camera.ready && previous != null && !closed) {
         onEvent?.call('camera_failed', code: 'switch');
         await camera.selectCamera(previous);
         cameraError = 'Could not switch cameras. Went back to the previous one.';
+      } else if (camera.selectedCamera != target) {
+        // The camera was still busy and refused the swap: say so rather than claim success.
+        cameraError = 'Could not switch cameras right now. Try again.';
       } else {
         onEvent?.call(
           'camera_switched',
@@ -196,6 +203,22 @@ class ClassroomScan extends ChangeNotifier {
       _emit();
     }
     if (!closed && !ended && wasScanning && camera.ready) await _next();
+  }
+
+  /// Brings the camera to rest before it is swapped: waits for an operation in flight (a segment
+  /// that is starting or stopping, a clip being saved), then ends a segment that is recording.
+  /// A press on "flip" that lands while the next segment is still starting (every segment
+  /// boundary) used to find the camera busy, so the swap was refused yet reported as done.
+  Future<void> _quiesce() async {
+    for (var i = 0; i < 100 && !closed; i++) {
+      if (camera.busy || collecting || camera.clip != null) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      } else if (camera.recording) {
+        await camera.stop(minimumSeconds: switchMinimumSeconds);
+      } else {
+        return;
+      }
+    }
   }
 
   /// The open camera disappeared (a USB webcam was unplugged, or another app took it). Keep
@@ -254,6 +277,10 @@ class ClassroomScan extends ChangeNotifier {
     }
     collecting = false;
     _emit();
+    // A segment that finished while this one was still being saved was ignored by
+    // _cameraChanged (collecting was set). Take it now: starting the next segment would
+    // otherwise discard it.
+    if (camera.clip != null && !camera.busy) unawaited(_collect());
     if (ended) await _finishCamera();
     unawaited(_send());
     await _next();
@@ -289,6 +316,20 @@ class ClassroomScan extends ChangeNotifier {
           reconnecting = false;
         } catch (failure) {
           if (closed) return;
+          if (isUnusableSegment(failure)) {
+            // Retrying cannot help, and it must not cost the other segments: a single oversize
+            // segment (a busy minute at a high bitrate) used to stop the whole scan and force
+            // the teacher to discard everything still waiting.
+            onEvent?.call('upload_failed', code: 'CAPTURE_SIZE', attempt: failures);
+            _queue.removeAt(0);
+            skipped++;
+            failures = 0;
+            reconnecting = false;
+            await _remove(file);
+            _emit();
+            unawaited(_next());
+            continue;
+          }
           final terminalMessage = terminalClassroomUploadMessage(failure);
           if (terminalMessage != null) {
             onEvent?.call('upload_failed', code: _codeOf(failure), attempt: failures);
@@ -321,7 +362,9 @@ class ClassroomScan extends ChangeNotifier {
         submitted++;
         await _remove(file);
         _emit();
-        await _next();
+        // Resume recording in the background: waiting for the camera to start would leave the
+        // link idle between two uploads for as long as the camera takes to open a segment.
+        unawaited(_next());
       }
     } finally {
       sending = false;
@@ -354,9 +397,24 @@ class ClassroomScan extends ChangeNotifier {
     }
   }
 
+  String? _shownStatus;
+  double? _shownProgress;
+
+  /// Upload progress arrives about once per KiB written (6 000+ times for one 6 MiB chunk), and
+  /// every notification rebuilds the whole scan page. The latest value is always kept, but the
+  /// page is only told when the text changes or the bar has moved by a whole percent.
   void reportUpload(String status, [double? progress]) {
     uploadStatus = status;
     uploadProgress = progress;
+    final shown = _shownProgress;
+    final moved = status != _shownStatus ||
+        (progress == null) != (shown == null) ||
+        (progress != null &&
+            shown != null &&
+            ((progress >= 1 && shown < 1) || (progress - shown).abs() >= .01));
+    if (!moved) return;
+    _shownStatus = status;
+    _shownProgress = progress;
     _emit();
   }
 
@@ -909,6 +967,17 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
         ),
       );
     }
+    if (scan.skipped > 0) {
+      banners.add(
+        _Banner(
+          key: const ValueKey('scan-skipped'),
+          icon: Icons.info_outline,
+          color: Colors.amber,
+          text: '${scan.skipped} segment${scan.skipped == 1 ? ' was' : 's were'} too large to upload and '
+              '${scan.skipped == 1 ? 'was' : 'were'} skipped. Choose a shorter segment length.',
+        ),
+      );
+    }
     final cameraProblem = scan.cameraError ?? (camera.controller == null ? null : camera.error);
     if (cameraProblem != null) {
       banners.add(
@@ -1117,8 +1186,11 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
     final message = scan.error ??
         (scan.canLeave
             ? scan.submitted == 0
-                  ? 'No clip was saved. Record at least 10 seconds per segment.'
+                  ? (scan.skipped > 0
+                        ? 'Nothing was uploaded: the recorded segments were too large. Choose a shorter segment length.'
+                        : 'No clip was saved. Record at least 10 seconds per segment.')
                   : '${scan.submitted} segment${scan.submitted == 1 ? '' : 's'} uploaded. Results appear below as they are processed.'
+                      '${scan.skipped > 0 ? ' ${scan.skipped} too large to upload ${scan.skipped == 1 ? 'was' : 'were'} skipped.' : ''}'
             : scan.uploadStatus ?? 'Saving the last segment…');
     return PopScope(
       canPop: scan.canLeave,

@@ -152,6 +152,21 @@ class _TeacherReportsState extends State<TeacherReports> {
     }
   }
 
+  /// One idempotency key per report action: a retry after a lost response reuses it, so the
+  /// server does not repeat the action; renewed once the action has succeeded.
+  final _mutations = <String, Mutation>{};
+
+  Future<void> _post(String path) async {
+    final mutation = _mutations.putIfAbsent(path, Mutation.new);
+    await widget.api.send(
+      'POST',
+      path,
+      institute: widget.institute,
+      mutation: mutation,
+    );
+    mutation.reset();
+  }
+
   Future<void> run(Future<void> Function() job) async {
     if (busy) return;
     setState(() {
@@ -232,14 +247,7 @@ class _TeacherReportsState extends State<TeacherReports> {
       ),
     );
     if (confirmed != true) return;
-    await run(() async {
-      await widget.api.send(
-        'POST',
-        '/v1/reports/$id/deliveries',
-        institute: widget.institute,
-        mutation: Mutation(),
-      );
-    });
+    await run(() => _post('/v1/reports/$id/deliveries'));
   }
 
   @override
@@ -411,14 +419,9 @@ class _TeacherReportsState extends State<TeacherReports> {
                       OutlinedButton.icon(
                         onPressed: busy
                             ? null
-                            : () => run(() async {
-                                await widget.api.send(
-                                  'POST',
-                                  '/v1/reports/${report['id']}/retry',
-                                  institute: widget.institute,
-                                  mutation: Mutation(),
-                                );
-                              }),
+                            : () => run(
+                                () => _post('/v1/reports/${report['id']}/retry'),
+                              ),
                         icon: const Icon(Icons.refresh),
                         label: const Text('Retry report generation'),
                       ),

@@ -81,25 +81,21 @@ def install(app, engine, settings, principal, storage):
         async with transaction(engine, user.user_id, institute_id) as conn:
             s = await bio.student(conn, user.user_id, institute_id)
             await bio.lock_student(conn, s["id"])
-            _, asset = await bio.owned_asset(conn, user.user_id, institute_id, identifier)
+            a, asset = await bio.owned_asset(conn, user.user_id, institute_id, identifier, s=s)
             if asset["grant_expires_at"] and (
                 body.expected_bytes != asset["expected_bytes"]
                 or body.mime_type != asset["mime_type"]
             ):
                 raise APIError(409, "MEDIA_CHANGED", "Start a new recording for a changed file.")
-            await conn.execute(
-                text(
-                    "UPDATE app.media_assets SET expected_bytes=:n,mime_type=:m WHERE institute_id=:i AND id=:id"
-                ),
-                {
-                    "n": body.expected_bytes,
-                    "m": body.mime_type,
-                    "i": institute_id,
-                    "id": asset["id"],
-                },
-            )
-            _, asset = await bio.owned_asset(
-                conn, user.user_id, institute_id, identifier, grant=True
+            # Validation and the new metadata and grant are one statement; a rejected request
+            # changes nothing, as the transaction rolls back.
+            await bio.open_upload_window(
+                conn,
+                institute_id,
+                a,
+                asset,
+                expected_bytes=body.expected_bytes,
+                mime_type=body.mime_type,
             )
         return await storage.upload(asset)
 
@@ -326,7 +322,7 @@ def install(app, engine, settings, principal, storage):
             elif job["kind"] == "recognition":
                 data, asset = await recognition.input_data(conn, worker, job, settings)
             else:
-                a, asset, config = await work.input_data(conn, worker, identifier, epoch)
+                a, asset, config = await work.input_data(conn, worker, identifier, epoch, job)
                 data = None
         if data is not None:
             return {**data, **({"media_url": await storage.download(asset)} if asset else {})}

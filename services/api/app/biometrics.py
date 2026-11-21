@@ -8,9 +8,10 @@ from uuid import uuid4
 
 from sqlalchemy import text
 
+from .access import ROLES, teacher_access
 from .db import many, one
 from .errors import APIError
-from .security import audit, check_cursor, idempotent, page, remember, roles, teacher_access
+from .security import audit, check_cursor, idempotent, page, remember, roles
 
 NOTICE_VERSION = "academic-demo-v1"
 NOTICE = (
@@ -62,13 +63,21 @@ async def lock_student(conn, student):
 
 
 async def student(conn, actor, institute):
-    permissions = await roles(conn, actor, institute)
+    """The approved student row of the actor; membership and identity are checked in one statement."""
     row = await one(
         conn,
-        "SELECT * FROM app.students WHERE institute_id=:i AND auth_user_id=:a AND status='approved'",
+        f"""SELECT s.*, {ROLES} FROM app.students s
+        WHERE s.institute_id=:i AND s.auth_user_id=:a AND s.status='approved'""",
         {"i": institute, "a": actor},
     )
-    if "student" not in permissions or not row:
+    if not row:
+        await roles(conn, actor, institute)  # no membership is reported first
+        raise APIError(403, "STUDENT_REQUIRED", "An approved linked student identity is required.")
+    row = dict(row)
+    found = row.pop("_roles") or ()
+    if not found:
+        raise APIError(403, "MEMBERSHIP_REQUIRED", "Active institute membership is required.")
+    if "student" not in found:
         raise APIError(403, "STUDENT_REQUIRED", "An approved linked student identity is required.")
     return row
 
@@ -295,74 +304,106 @@ async def create(conn, actor, institute, body, key, settings, request_id):
     return await attempt_view(conn, institute, attempt)
 
 
-async def owned_asset(conn, actor, institute, identifier, *, grant=False):
-    s = await student(conn, actor, institute)
-    a = await get_attempt(conn, institute, identifier)
+MEDIA_COLUMNS = (
+    "id institute_id owner_user_id purpose bucket object_key mime_type expected_bytes byte_size "
+    "sha256 expires_at reservation_expires_at grant_expires_at deleted_at status created_at "
+    "updated_at version"
+).split()
+# media_assets columns under a prefix, so an owner row and its asset can be read together.
+MEDIA_SELECT = ",".join(f"m.{c} AS m_{c}" for c in MEDIA_COLUMNS)
+
+
+def split_asset(row):
+    """Split a row carrying MEDIA_SELECT columns into (the rest, the media asset)."""
+    row = dict(row)
+    return row, {c: row.pop("m_" + c) for c in MEDIA_COLUMNS}
+
+
+async def owned_asset(conn, actor, institute, identifier, *, grant=False, s=None):
+    """The student's own attempt and its media asset, from one statement.
+
+    ``s`` is the student row when the caller already has it. With ``grant`` the upload window
+    is validated and renewed. The attempt carries ``consent_withdrawn_at``.
+    """
+    s = s or await student(conn, actor, institute)
+    row = await one(
+        conn,
+        f"""SELECT a.*, {MEDIA_SELECT}, c.withdrawn_at AS consent_withdrawn_at
+        FROM app.enrollment_attempts a
+        JOIN app.media_assets m ON m.institute_id=a.institute_id AND m.id=a.asset_id
+        LEFT JOIN app.consents c ON c.institute_id=a.institute_id AND c.id=a.consent_id
+        WHERE a.institute_id=:i AND a.id=:id""",
+        {"i": institute, "id": identifier},
+    )
+    if not row:
+        raise APIError(404, "NOT_FOUND", "Enrolment not found.")
+    a, asset = split_asset(row)
     if a["student_id"] != s["id"]:
         raise APIError(404, "NOT_FOUND", "Enrolment not found.")
-    asset = await one(
-        conn,
-        "SELECT * FROM app.media_assets WHERE institute_id=:i AND id=:id",
-        {"i": institute, "id": a["asset_id"]},
-    )
     if grant:
-        consent = await one(
-            conn,
-            "SELECT withdrawn_at FROM app.consents WHERE institute_id=:i AND id=:c",
-            {"i": institute, "c": a["consent_id"]},
-        )
-        if (
-            a["status"] != "awaiting_upload"
-            or asset["reservation_expires_at"] <= now()
-            or consent["withdrawn_at"]
-        ):
-            raise APIError(409, "UPLOAD_EXPIRED", "This upload is closed. Start a new recording.")
-        await conn.execute(
-            text(
-                "UPDATE app.media_assets SET grant_expires_at=now()+interval '2 hours' WHERE institute_id=:i AND id=:id"
-            ),
-            {"i": institute, "id": asset["id"]},
-        )
-    return a, dict(asset)
+        await open_upload_window(conn, institute, a, asset)
+    return a, asset
+
+
+def require_open_upload(a, asset):
+    if (
+        a["status"] != "awaiting_upload"
+        or asset["reservation_expires_at"] <= now()
+        or a["consent_withdrawn_at"]
+    ):
+        raise APIError(409, "UPLOAD_EXPIRED", "This upload is closed. Start a new recording.")
+
+
+async def open_upload_window(conn, institute, a, asset, **fields):
+    """Validate the reservation, then renew the two-hour grant (and set ``fields`` with it)."""
+    require_open_upload(a, asset)
+    assignments = "".join(f",{name}=:{name}" for name in fields)
+    await conn.execute(
+        text(
+            "UPDATE app.media_assets SET grant_expires_at=now()+interval '2 hours'"
+            + assignments
+            + " WHERE institute_id=:i AND id=:id"
+        ),
+        {"i": institute, "id": asset["id"], **fields},
+    )
+    asset.update(fields)
 
 
 async def upload_complete(conn, actor, institute, identifier, body, info, key, request_id):
     s = await student(conn, actor, institute)
     await lock_student(conn, s["id"])
-    a, asset = await owned_asset(conn, actor, institute, identifier)
+    a, asset = await owned_asset(conn, actor, institute, identifier, s=s)
     route = f"/v1/biometric-enrollments/{identifier}/upload-complete"
     cached, fingerprint = await idempotent(conn, actor, institute, route, key, body.model_dump())
     if cached:
         return cached
     if body.asset_id != asset["id"]:
         raise APIError(404, "NOT_FOUND", "Video not found.")
-    await owned_asset(conn, actor, institute, identifier, grant=True)
+    # Held under the student lock since the read above, so no second read is needed.
+    await open_upload_window(conn, institute, a, asset)
     if (
         body.byte_size != asset["expected_bytes"]
         or info["size"] != body.byte_size
         or info["mime_type"].split(";")[0] != asset["mime_type"]
     ):
         raise APIError(409, "MEDIA_MISMATCH", "Video metadata differs from its reservation.")
-    await conn.execute(
-        text(
-            "UPDATE app.media_assets SET status='uploaded',byte_size=:n,sha256=:h WHERE institute_id=:i AND id=:id"
-        ),
-        {"n": body.byte_size, "h": body.sha256, "i": institute, "id": asset["id"]},
-    )
-    await conn.execute(
-        text(
-            "UPDATE app.enrollment_attempts SET status='queued',version=version+1 WHERE institute_id=:i AND id=:id"
-        ),
-        {"i": institute, "id": identifier},
-    )
     job = uuid4()
+    # Mark the upload, queue the attempt and create its job in one statement.
     await conn.execute(
         text(
-            "INSERT INTO app.jobs(id,institute_id,kind,enrollment_attempt_id,dedup_key,generation) VALUES(:id,:i,'enrollment',:a,:key,:g)"
+            """WITH uploaded AS (UPDATE app.media_assets SET status='uploaded',byte_size=:n,sha256=:h
+                WHERE institute_id=:i AND id=:asset RETURNING id),
+            queued AS (UPDATE app.enrollment_attempts SET status='queued',version=version+1
+                WHERE institute_id=:i AND id=:a RETURNING id)
+            INSERT INTO app.jobs(id,institute_id,kind,enrollment_attempt_id,dedup_key,generation)
+            VALUES(:id,:i,'enrollment',:a,:key,:g)"""
         ),
         {
-            "id": job,
+            "n": body.byte_size,
+            "h": body.sha256,
             "i": institute,
+            "asset": asset["id"],
+            "id": job,
             "a": identifier,
             "key": f"enroll:{identifier}:{a['generation']}",
             "g": a["generation"],
@@ -382,7 +423,7 @@ async def upload_complete(conn, actor, institute, identifier, body, info, key, r
 async def cancel(conn, actor, institute, identifier, version, request_id):
     s = await student(conn, actor, institute)
     await lock_student(conn, s["id"])
-    a, asset = await owned_asset(conn, actor, institute, identifier)
+    a, asset = await owned_asset(conn, actor, institute, identifier, s=s)
     if a["version"] != version or a["status"] not in UNFINISHED:
         raise APIError(409, "VERSION_CONFLICT", "Refresh this enrolment before cancelling.")
     await conn.execute(
@@ -455,6 +496,13 @@ async def decision(
 ):
     a = await get_attempt(conn, institute, identifier)
     await review_access(conn, actor, institute, a["student_id"])
+    # Nobody approves or rejects their own face enrolment, even if they also hold a staff role.
+    if await one(
+        conn,
+        "SELECT 1 AS own FROM app.students WHERE institute_id=:i AND id=:s AND auth_user_id=:a",
+        {"i": institute, "s": a["student_id"], "a": actor},
+    ):
+        raise APIError(403, "SELF_REVIEW", "You cannot review your own face enrolment.")
     await lock_student(conn, a["student_id"])
     a = await get_attempt(conn, institute, identifier)
     route = f"/v1/biometric-enrollments/{identifier}/" + ("approve" if approve else "reject")

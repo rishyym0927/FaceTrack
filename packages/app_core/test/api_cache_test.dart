@@ -74,6 +74,47 @@ void main() {
       expect(calls, 5);
     },
   );
+  test('concurrent identical account reads share one request but are never reused afterwards', () async {
+    final h = await harness();
+    addTearDown(h.dispose);
+    final api = h.services.api;
+    final calls = <String, int>{};
+    var gate = Completer<void>();
+    api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      calls[r.path] = (calls[r.path] ?? 0) + 1;
+      await gate.future;
+      return jsonResponse({'n': calls[r.path]});
+    });
+    const paths = [
+      '/v1/me',
+      '/v1/me/enrollments',
+      '/v1/me/attendance',
+      '/v1/me/attendance-disputes',
+    ];
+    final first = [for (final p in paths) api.send('GET', p, institute: 'a')];
+    final second = [for (final p in paths) api.send('GET', p, institute: 'a')];
+    // A different institute or query is a different request.
+    final other = api.send('GET', '/v1/me/attendance', institute: 'b');
+    final paged = api.send('GET', '/v1/me/attendance', institute: 'a', query: {'cursor': 'x'});
+    await Future<void>.delayed(Duration.zero);
+    gate.complete();
+    await Future.wait([...first, ...second, other, paged]);
+    for (final p in paths) {
+      expect(calls[p], p == '/v1/me/attendance' ? 3 : 1, reason: p);
+    }
+    // Once complete, a later read goes to the network again (these are live data).
+    gate = Completer<void>()..complete();
+    await api.send('GET', '/v1/me/attendance', institute: 'a');
+    expect(calls['/v1/me/attendance'], 4);
+    // The face enrolment state is polled and refreshed on demand, so it is never shared.
+    gate = Completer<void>();
+    final a = api.send('GET', '/v1/me/biometric-enrollment', institute: 'a');
+    final b = api.send('GET', '/v1/me/biometric-enrollment', institute: 'a');
+    await Future<void>.delayed(Duration.zero);
+    gate.complete();
+    await Future.wait([a, b]);
+    expect(calls['/v1/me/biometric-enrollment'], 2);
+  });
   test('live sensitive reads never reuse completed responses and errors are not cached', () async {
     final h = await harness();
     addTearDown(h.dispose);

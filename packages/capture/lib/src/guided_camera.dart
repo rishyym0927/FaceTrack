@@ -86,7 +86,16 @@ class LiveFaceTracker extends ChangeNotifier {
     DateTime now,
   ) {
     _last = now;
-    faces = [for (final f in found) (bounds: f.bounds, framed: f.framed)];
+    final next = [for (final f in found) (bounds: f.bounds, framed: f.framed)];
+    // The browser reports five times a second; a steady picture repaints nothing.
+    if (next.length == faces.length) {
+      var same = true;
+      for (var i = 0; same && i < next.length; i++) {
+        same = next[i].bounds == faces[i].bounds && next[i].framed == faces[i].framed;
+      }
+      if (same) return;
+    }
+    faces = next;
     notifyListeners();
   }
 
@@ -346,8 +355,11 @@ class GuidedCamera extends ChangeNotifier {
     _framingTimer?.cancel();
     framingAvailable = false;
     framingFailed = false;
+    final generation = epoch;
     unawaited(
       web.startWebFraming().then((ok) {
+        // The camera was closed or swapped while the detector loaded: not a failure to report.
+        if (disposed || generation != epoch) return;
         framingAvailable = ok;
         framingFailed = !ok;
         emit();
@@ -356,7 +368,10 @@ class GuidedCamera extends ChangeNotifier {
     _framingTimer = Timer.periodic(const Duration(milliseconds: 200), (_) => _webTick());
     _stopDeviceWatch ??= web.watchWebDevices(() {
       _deviceDebounce?.cancel();
-      _deviceDebounce = Timer(const Duration(milliseconds: 600), () => unawaited(refreshCameras()));
+      _deviceDebounce = Timer(const Duration(milliseconds: 600), () {
+        // Re-reading the list opens every camera, so only do it while one is open.
+        if (ready && !disposed) unawaited(refreshCameras());
+      });
     });
   }
 
@@ -364,7 +379,14 @@ class GuidedCamera extends ChangeNotifier {
     _framingTimer?.cancel();
     _framingTimer = null;
     // Keep the loaded detector while only swapping cameras: loading it takes about a second.
-    if (framesFaces && release) web.stopWebFraming();
+    if (framesFaces && release) {
+      web.stopWebFraming();
+      // The hot-plug listener belongs to an open camera. It used to live until the page was
+      // disposed, so a headset plugged in while no scan was running re-opened every camera.
+      _deviceDebounce?.cancel();
+      _stopDeviceWatch?.call();
+      _stopDeviceWatch = null;
+    }
     faceTracker.clear();
     light = null;
     lighting = Lighting.unknown;
@@ -372,7 +394,13 @@ class GuidedCamera extends ChangeNotifier {
 
   void _webTick() {
     if (disposed || !ready || busy && !recording) return;
-    final reading = web.readWebFraming();
+    applyFraming(web.readWebFraming());
+  }
+
+  /// Folds one look at the browser preview into the camera state. Split from [_webTick] so the
+  /// notification rules can be tested without a browser.
+  @visibleForTesting
+  void applyFraming(FramingReading reading) {
     if (!reading.video) {
       // The browser fires no error when a webcam is unplugged, so a picture that has ended for
       // a moment (not a single missed frame) is treated as the camera being lost.
@@ -380,7 +408,10 @@ class GuidedCamera extends ChangeNotifier {
       return;
     }
     _endedTicks = 0;
-    final before = (lighting, faceTracker.faces.length, framingAvailable);
+    // Faces are announced by [faceTracker] to the widgets that draw them. The camera itself
+    // only notifies when the light advice or detector state changes: notifying on every change
+    // of the face count rebuilt the whole scan page several times a second.
+    final before = (lighting, framingAvailable);
     // Smooth the light reading so a passing hand does not flicker the advice.
     final value = reading.light;
     if (value != null) {
@@ -394,7 +425,7 @@ class GuidedCamera extends ChangeNotifier {
       faceTracker.expire(DateTime.now());
     }
     if (reading.detector != framingAvailable) framingAvailable = reading.detector;
-    if (before != (lighting, faceTracker.faces.length, framingAvailable)) emit();
+    if (before != (lighting, framingAvailable)) emit();
   }
 
   /// Re-reads the list of cameras after one is plugged in or removed.
@@ -440,8 +471,18 @@ class GuidedCamera extends ChangeNotifier {
     }());
   }
 
+  Future<void>? _previewStarting;
+
   /// Framing feedback before recording never completes challenge poses.
-  Future<void> startPreviewAnalysis() async {
+  Future<void> startPreviewAnalysis() {
+    final starting = _startPreviewAnalysis();
+    _previewStarting = starting;
+    return starting.whenComplete(() {
+      if (identical(_previewStarting, starting)) _previewStarting = null;
+    });
+  }
+
+  Future<void> _startPreviewAnalysis() async {
     final current = controller;
     if (kIsWeb ||
         current == null ||
@@ -462,22 +503,45 @@ class GuidedCamera extends ChangeNotifier {
       _lastAnalysis = null;
       await current.startImageStream(_analyzeFrame);
       if (generation != epoch || disposed) return;
+      _previewExpiry?.cancel();
       _previewExpiry = Timer.periodic(const Duration(milliseconds: 500), (_) {
         guidance?.unavailable(DateTime.now());
         faceTracker.expire(DateTime.now());
       });
     } catch (_) {
       if (generation == epoch) {
-        await _stopPreviewAnalysis(current);
+        await _teardownPreviewAnalysis(current);
         guidance?.unavailable(DateTime.now());
       }
     }
   }
 
+  /// True while the preview analysis timer runs (exposed for tests: it must never outlive the
+  /// preview stream, or it leaks once per segment).
+  @visibleForTesting
+  bool get previewTimerActive => _previewExpiry?.isActive ?? false;
+
   Future<void> _stopPreviewAnalysis(CameraController? current) async {
+    // A preview that is still opening its image stream must finish first. Stopping before the
+    // stream existed skipped stopImageStream, so the stream then started under the recording
+    // that was about to begin (blocking its frame analysis) and its expiry timer was never
+    // cancelled. This is the segment-boundary path: stop() restarts the preview, the saved
+    // clip triggers the next start() within the same few milliseconds.
+    final starting = _previewStarting;
+    if (starting != null) {
+      try {
+        // Bounded: a stream that never opens must not stop the camera being released.
+        await starting.timeout(const Duration(seconds: 3));
+      } catch (_) {}
+    }
+    await _teardownPreviewAnalysis(current);
+  }
+
+  Future<void> _teardownPreviewAnalysis(CameraController? current) async {
     if (!_previewAnalyzing) return;
     _previewAnalyzing = false;
     _previewExpiry?.cancel();
+    _previewExpiry = null;
     final old = analyzer;
     analyzer = null;
     try {

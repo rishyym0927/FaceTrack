@@ -111,10 +111,17 @@ class ApiClient {
       }
     }
     final cacheable = _cacheable(path);
+    // Concurrent identical reads share one request. Only [cacheable] paths are also kept for
+    // a few seconds; the rest are never reused once they have completed. The face enrolment
+    // state is deliberately not shared: its page polls it and a person pressing Refresh must
+    // get a new request, not the one that is still hanging.
     final share =
         cacheable ||
         RegExp(
           r'^/v1/offerings/[^/]+/(roster|biometric-enrollments|attendance-disputes)$',
+        ).hasMatch(path) ||
+        RegExp(
+          r'^/v1/me(/(enrollments|attendance|attendance-disputes))?$',
         ).hasMatch(path) ||
         path == '/v1/sessions';
     if (!share) return request();
