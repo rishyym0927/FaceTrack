@@ -972,6 +972,10 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       if (ok != true) return;
     }
     await action(() async {
+      // Recordings and their results keep bumping the session's version in the background. A
+      // version read before the last segment finished made "close" fail with VERSION_CONFLICT,
+      // so ask for the current one first.
+      if (name == 'close') await load(keepDecisions: true);
       await services.api.send(
         'POST',
         '/v1/sessions/${widget.id}/$name',
