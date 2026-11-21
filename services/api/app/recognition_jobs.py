@@ -3,6 +3,7 @@
 import json
 import math
 from itertools import groupby
+from typing import Literal
 from uuid import UUID
 
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -26,6 +27,17 @@ class Proposal(Strict):
     similarity: float = Field(ge=-1, le=1, allow_inf_nan=False)
 
 
+REASONS = Literal["recognized", "not_seen", "look_alike", "weak_match", "seen_too_briefly"]
+REJECT_GATES = {"edge", "small", "landmarks", "brightness", "blur"}
+
+
+class Diagnostic(Strict):
+    student_id: UUID
+    reason: REASONS
+    observations: int = Field(ge=0, le=100000)
+    best_similarity: float | None = Field(default=None, ge=-1, le=1)
+
+
 class RecognitionComplete(Epoch):
     generation: int = Field(gt=0)
     source_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
@@ -37,8 +49,20 @@ class RecognitionComplete(Epoch):
     unknown_observations: int = Field(ge=0, le=100000)
     quality: dict[str, int] = Field(max_length=10)
     timings: dict[str, float] = Field(max_length=10)
+    # Optional explanations from newer workers; older workers simply omit them.
+    diagnostics: list[Diagnostic] = Field(default_factory=list, max_length=500)
+    reject_reasons: dict[str, int] = Field(default_factory=dict, max_length=5)
+    face_px_median: int = Field(default=0, ge=0, le=10000)
+    sample_fps: float = Field(default=0, ge=0, le=100)
     _quality = field_validator("quality")(WorkerComplete.quality_bounds.__func__)
     _timings = field_validator("timings")(WorkerComplete.timings_finite.__func__)
+
+    @field_validator("reject_reasons")
+    @classmethod
+    def known_gates(cls, v):
+        if not set(v) <= REJECT_GATES or not all(0 <= n <= 100000 for n in v.values()):
+            raise ValueError("Invalid rejection reasons.")
+        return v
 
     @field_validator("proposals")
     @classmethod
@@ -248,6 +272,7 @@ async def complete(conn, worker, job_id, body, settings):
             },
         )
     proposed = {str(p.student_id) for p in body.proposals}
+    why = {str(d.student_id): d for d in body.diagnostics}
     usable = max(0, body.quality.get("detections", 0) - body.quality.get("quality_rejects", 0))
     sufficient_capture = body.quality.get("sampled_frames", 0) >= 2 and usable >= 2
     for r in roster:
@@ -274,7 +299,20 @@ async def complete(conn, worker, job_id, body, settings):
                     else "limited_capture"
                 ),
                 "sufficient": sufficient_capture,
-                "summary": json.dumps({"usable_observations": usable}),
+                "summary": json.dumps(
+                    {
+                        "usable_observations": usable,
+                        **(
+                            {
+                                "reason": why[student_id].reason,
+                                "observations": why[student_id].observations,
+                                "best_similarity": why[student_id].best_similarity,
+                            }
+                            if student_id in why
+                            else {}
+                        ),
+                    }
+                ),
                 "i": i,
                 "s": s["id"],
                 "student": r["student_id"],
@@ -285,6 +323,9 @@ async def complete(conn, worker, job_id, body, settings):
         "timings": body.timings,
         "unknown_observations": body.unknown_observations,
         "processed_sha256": body.processed_sha256,
+        "reject_reasons": body.reject_reasons,
+        "face_px_median": body.face_px_median,
+        "sample_fps": body.sample_fps,
     }
     await conn.execute(
         text(

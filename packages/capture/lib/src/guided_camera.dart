@@ -79,6 +79,18 @@ class GuidedCamera extends ChangeNotifier {
   static const enrollmentMaximumSeconds = 25;
 
   final bool enrollmentGuidance;
+
+  /// Classroom segment length. The default bitrate of the phone made 15 s clips 12-23 MB,
+  /// so a fixed rate (below) is what makes longer segments fit the 25 MiB upload limit.
+  static const classroomBitrate = 6000000;
+  static const classroomFps = 15;
+  static const minSegmentSeconds = 10, maxSegmentSeconds = 30;
+  int _segmentSeconds = 20;
+  int get segmentSeconds => _segmentSeconds;
+  set segmentSeconds(int value) {
+    _segmentSeconds = value.clamp(minSegmentSeconds, maxSegmentSeconds);
+    emit();
+  }
   final PoseFrameAnalyzer Function(CameraController)? analyzerFactory;
   CameraController? controller;
   List<CameraDescription> cameras = [];
@@ -159,10 +171,16 @@ class GuidedCamera extends ChangeNotifier {
         await old.setFlashMode(FlashMode.off);
       } catch (_) {}
     }
-    await old.dispose();
+    try {
+      await old.dispose();
+    } catch (_) {
+      // A controller that fails to dispose must not leave the camera dead for the next open.
+    }
   }
 
   bool recording = false, busy = false, disposed = false, ready = false;
+  /// True when the camera was open or opening when the app was paused.
+  bool interrupted = false;
   bool _analysisBusy = false, _previewAnalyzing = false;
   Future<void>? _pendingAnalysis;
   Timer? _previewExpiry;
@@ -179,8 +197,21 @@ class GuidedCamera extends ChangeNotifier {
     if (!disposed) notifyListeners();
   }
 
+  /// Reopens the camera after the app returns from the background or a permission dialog.
+  Future<void> resumeIfInterrupted() async {
+    if (!interrupted || disposed) return;
+    // interrupt() may still be releasing the old controller.
+    for (var i = 0; busy && i < 25 && !disposed; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 200));
+    }
+    if (busy || disposed || !interrupted) return;
+    interrupted = false;
+    await initialize();
+  }
+
   Future<void> initialize() async {
     if (busy || ready) return;
+    interrupted = false;
     final generation = ++epoch;
     busy = true;
     error = null;
@@ -204,8 +235,8 @@ class GuidedCamera extends ChangeNotifier {
         selectedCamera!,
         ResolutionPreset.high,
         enableAudio: false,
-        fps: enrollmentGuidance ? 24 : null,
-        videoBitrate: enrollmentGuidance ? 4000000 : null,
+        fps: enrollmentGuidance ? 24 : classroomFps,
+        videoBitrate: enrollmentGuidance ? 4000000 : classroomBitrate,
         imageFormatGroup: analyzerFactory != null && !kIsWeb
             ? (defaultTargetPlatform == TargetPlatform.iOS
                   ? ImageFormatGroup.bgra8888
@@ -381,7 +412,7 @@ class GuidedCamera extends ChangeNotifier {
           elapsed = seconds;
           if (elapsed >= 2) guidance?.unavailable(DateTime.now());
           emit();
-          if (elapsed >= (enrollmentGuidance ? enrollmentMaximumSeconds : 15) ||
+          if (elapsed >= (enrollmentGuidance ? enrollmentMaximumSeconds : segmentSeconds) ||
               (enrollmentGuidance &&
                   elapsed >= enrollmentStopSeconds &&
                   (guidance?.allCaptured ?? false))) {
@@ -508,6 +539,7 @@ class GuidedCamera extends ChangeNotifier {
   }
 
   Future<void> discard() async {
+    interrupted = false;
     final old = clip;
     clip = null;
     if (old != null) await files.remove(old.path);
@@ -523,7 +555,9 @@ class GuidedCamera extends ChangeNotifier {
     if (!disposed) await initialize();
   }
 
-  Future<void> interrupt() async {
+  /// Releases the camera. Only a [lifecycle] pause (app backgrounded) asks to be reopened
+  /// on return; every other caller leaves the camera closed on purpose.
+  Future<void> interrupt({bool lifecycle = false}) async {
     final generation = ++epoch;
     timer?.cancel();
     _recordingClock.stop();
@@ -531,6 +565,10 @@ class GuidedCamera extends ChangeNotifier {
     faceTracker.clear();
     final old = controller;
     final wasRecording = recording;
+    interrupted = lifecycle && !disposed && (ready || busy);
+    if (lifecycle && wasRecording && !disposed) {
+      error = 'The recording was interrupted when the app left the screen. Record again.';
+    }
     busy = true;
     ready = false;
     recording = false;

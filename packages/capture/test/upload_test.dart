@@ -29,6 +29,55 @@ Map<String, dynamic> grant() => {
   'mime_type': 'video/webm',
 };
 void main() {
+  test('A dropped chunk is retried from the server offset without surfacing an error', () async {
+    final upload = ResumableUpload()..pause = (_) async {};
+    var patches = 0;
+    final delays = <int>[];
+    upload.pause = (d) async => delays.add(d.inMilliseconds);
+    upload.dio.httpClientAdapter = UploadAdapter((r, stream) async {
+      if (r.method == 'HEAD') {
+        return ResponseBody.fromString('', 200, headers: {'upload-offset': ['0']});
+      }
+      patches++;
+      if (patches <= 2) {
+        throw DioException(requestOptions: r, type: DioExceptionType.connectionError);
+      }
+      return ResponseBody.fromString('', 204, headers: {'upload-offset': ['10']});
+    });
+    await upload.upload(
+      XFile.fromData(Uint8List.fromList(List.generate(10, (n) => n))),
+      grant(),
+      'public-fixture',
+      resumeUrl: resource,
+      progress: (_) {},
+      checkpoint: (_) async {},
+    );
+    expect(patches, 3);
+    expect(delays, [1000, 2000]); // growing delay between attempts
+  });
+  test('A permanent rejection is not retried', () async {
+    final upload = ResumableUpload()..pause = (_) async {};
+    var patches = 0;
+    upload.dio.httpClientAdapter = UploadAdapter((r, stream) async {
+      if (r.method == 'HEAD') {
+        return ResponseBody.fromString('', 200, headers: {'upload-offset': ['0']});
+      }
+      patches++;
+      return ResponseBody.fromString('', 403);
+    });
+    await expectLater(
+      upload.upload(
+        XFile.fromData(Uint8List.fromList(List.generate(10, (n) => n))),
+        grant(),
+        'public-fixture',
+        resumeUrl: resource,
+        progress: (_) {},
+        checkpoint: (_) async {},
+      ),
+      throwsA(isA<DioException>()),
+    );
+    expect(patches, 1);
+  });
   test('Interrupted upload resumes from server offset with capability-only headers', () async {
     final upload = ResumableUpload();
     var patched = false;

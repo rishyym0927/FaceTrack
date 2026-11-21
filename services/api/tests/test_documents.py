@@ -75,6 +75,14 @@ async def test_report_job_snapshot_private_artifacts_and_retry(bio):
             (b.ids["institute"],),
         ).fetchall()
     assert sorted(states) == [("deleted", 2), ("uploaded", 2)]
+    with connect(b.urls["owner"]) as c:
+        buckets = c.execute(
+            "SELECT DISTINCT bucket FROM app.media_assets WHERE purpose='report' AND institute_id=%s",
+            (b.ids["institute"],),
+        ).fetchall()
+    from app import documents
+
+    assert buckets == [(documents.REPORT_BUCKET["name"],)]  # follows settings.documents_bucket
     for label in ("student1", "unassigned", "other_teacher"):
         assert (
             await b.client.get(f"/v1/reports/{rid}/download", headers=b.headers(label))

@@ -1,5 +1,6 @@
 """Outbound-only local dispatcher. PostgreSQL leases recover lost Redis messages."""
 
+import os
 import time
 
 import httpx
@@ -31,9 +32,47 @@ def maintain(client):
     clean_abandoned()
 
 
+SLOTS = max(1, int(os.environ.get("WORKER_SLOTS", "1")))
+
+
+def backlog():
+    """Jobs already handed to Celery and not finished: waiting in Redis or being run.
+
+    A lease starts ticking when it is claimed, so claiming ahead of a busy worker lets queued
+    leases expire (120 s) and burns their attempts. Claim only when a slot is free. On any
+    error this returns 0, which keeps the previous claim-always behaviour.
+    """
+    try:
+        with app.connection_for_read() as connection:
+            client = connection.default_channel.client
+            return int(client.llen("enrollment")) + int(client.hlen("unacked"))
+    except Exception:
+        return 0
+
+
+# A claimed lease whose hand-off to the broker failed. Retried while the lease is
+# still valid, so a short Redis outage does not burn one of the job's attempts.
+PENDING = {}
+HANDOFF_WINDOW = 90
+
+
+def dispatch(lease):
+    lease = {"id": lease["id"], "lease_epoch": lease["lease_epoch"]}  # validate before remembering
+    PENDING["lease"] = (lease, time.monotonic())
+    app.send_task("facetrack.enroll", args=[lease["id"], lease["lease_epoch"]])
+    PENDING.clear()
+
+
 def cycle(client, maintenance):
     """One claim round. Returns (last maintenance time, seconds to sleep)."""
     try:
+        if PENDING:
+            lease, claimed_at = PENDING["lease"]
+            if time.monotonic() - claimed_at > HANDOFF_WINDOW:
+                PENDING.clear()  # the lease is about to expire; reconcile re-queues it
+            else:
+                dispatch(lease)
+                return maintenance, 2
         if time.monotonic() - maintenance > 60:
             # Isolated: a failing reconcile must never stop job claiming. Retried next minute.
             maintenance = time.monotonic()
@@ -41,14 +80,18 @@ def cycle(client, maintenance):
                 maintain(client)
             except (httpx.HTTPError, ConnectionError, OSError, ValueError):
                 print(MAINTENANCE_FAILED, flush=True)
+        if backlog() >= SLOTS:
+            return maintenance, 1
         response = api(client, "POST", "/internal/v1/jobs/claim")
         if response.status_code != 204:
-            lease = response.json()
-            app.send_task("facetrack.enroll", args=[lease["id"], lease["lease_epoch"]])
+            dispatch(response.json())
         return maintenance, 2
     except OperationalError:
         # The claimed lease stays in PostgreSQL and is recovered after it expires.
         print(BROKER_WAITING, flush=True)
+        return maintenance, 5
+    except (ValueError, KeyError, TypeError):
+        print("Unexpected claim response from the API; will retry.", flush=True)
         return maintenance, 5
     except (httpx.HTTPError, ConnectionError) as error:
         message, delay = failure_notice(error)

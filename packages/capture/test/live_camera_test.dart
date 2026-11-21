@@ -63,6 +63,34 @@ void main() {
   );
 
   test(
+    'Interrupting a recording explains the loss and marks the camera for reopening',
+    () async {
+      final controller = _RecordingOnlyCamera(back);
+      final camera = GuidedCamera()
+        ..controller = controller
+        ..ready = true;
+      addTearDown(camera.dispose);
+      await camera.start(const []);
+      await camera.interrupt(lifecycle: true);
+      expect(camera.error, contains('interrupted'));
+      expect(camera.interrupted, true);
+      expect(camera.ready, false);
+      expect(camera.busy, false);
+    },
+  );
+
+  test('A deliberate stop never asks to be reopened or blames the app', () async {
+    final camera = GuidedCamera()
+      ..controller = _RecordingOnlyCamera(back)
+      ..ready = true;
+    addTearDown(camera.dispose);
+    await camera.start(const []);
+    await camera.interrupt();
+    expect(camera.interrupted, false);
+    expect(camera.error, isNull);
+  });
+
+  test(
     'Cancelling a classroom recording releases the camera and torch',
     () async {
       final controller = _RecordingOnlyCamera(back, torchSupported: true);

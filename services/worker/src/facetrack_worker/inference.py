@@ -12,6 +12,8 @@ from facetrack_ml.media import executable, probe
 from facetrack_ml.pipeline import Pipeline
 from facetrack_ml.runtime import Runtime
 
+from . import dense
+
 
 class Collector:
     def save(self, person, vectors, model_hash, profile_hash):
@@ -124,9 +126,12 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
                         if p["student_id"] in people
                     }
 
-            result = pipeline.recognize(
-                processed, [p["student_id"] for p in expected["roster"]], Roster()
-            )
+            people = [p["student_id"] for p in expected["roster"]]
+            fps = dense.sample_fps()
+            if fps > 0:
+                result = dense.recognize(pipeline, processed, people, Roster(), fps)
+            else:
+                result = pipeline.recognize(processed, people, Roster())
             identities = {p["student_id"]: p for p in expected["roster"]}
             proposals = []
             for p in result["proposals"]:
@@ -155,6 +160,11 @@ def run_child(pipe, source, manifest_path, profile_path, expected):
                         "unknown_observations": result["unknown_observations"],
                         "quality": result["quality"],
                         "timings": result["timings"],
+                        **{
+                            k: result[k]
+                            for k in ("diagnostics", "reject_reasons", "face_px_median", "sample_fps")
+                            if k in result
+                        },
                     },
                 }
             )

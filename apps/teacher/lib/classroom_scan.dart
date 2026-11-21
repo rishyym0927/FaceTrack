@@ -20,15 +20,22 @@ String? terminalClassroomUploadMessage(Object error) {
   return null;
 }
 
-/// At most two complete segments are retained, including the active upload.
-/// Camera capture pauses under backpressure; it never grows an unbounded queue.
+/// Recording is continuous: the camera stays open while finished segments upload in the
+/// background. At most [maxQueued] complete segments are retained, including the active
+/// upload; capture pauses (camera still open) only when that many are waiting, so the queue
+/// never grows without bound. A flaky connection is retried automatically with a growing
+/// delay and never closes the camera.
 class ClassroomScan extends ChangeNotifier {
   ClassroomScan(this.camera, this.upload, {
     Future<XFile> Function(XFile)? retain,
     Future<void> Function(XFile)? remove,
     List<XFile> recovered = const [],
+    this.maxQueued = 4,
+    this.maxUploadRetries = 12,
+    Future<void> Function(Duration)? wait,
   }) : retain = retain ?? _unchanged,
-       remove = remove ?? _removeOwned {
+       remove = remove ?? _removeOwned,
+       wait = wait ?? Future.delayed {
     camera.addListener(_cameraChanged);
     if (recovered.isNotEmpty) {
       _queue.addAll(recovered);
@@ -37,6 +44,8 @@ class ClassroomScan extends ChangeNotifier {
     }
   }
   final GuidedCamera camera;
+  final int maxQueued, maxUploadRetries;
+  final Future<void> Function(Duration) wait;
   final Future<void> Function(XFile) upload;
   final Future<XFile> Function(XFile) retain;
   final Future<void> Function(XFile) remove;
@@ -49,7 +58,10 @@ class ClassroomScan extends ChangeNotifier {
   bool retryable = true;
   double? uploadProgress;
   String? uploadStatus;
-  int submitted = 0;
+  int submitted = 0, recorded = 0;
+  bool reconnecting = false;
+  static int backoffSeconds(int failures) =>
+      const [2, 4, 8, 15, 30][(failures - 1).clamp(0, 4)];
   int get pending => _queue.length;
   bool get finishing => ended && !canLeave;
   bool get canLeave =>
@@ -83,7 +95,7 @@ class ClassroomScan extends ChangeNotifier {
     if (closed ||
         !scanning ||
         error != null ||
-        pending >= 2 ||
+        pending >= maxQueued ||
         camera.recording ||
         camera.busy) {
       return;
@@ -118,6 +130,7 @@ class ClassroomScan extends ChangeNotifier {
       try {
         final saved = await retain(file);
         _queue.add(saved);
+        recorded++;
         if (saved.path != file.path) await removeOwnedClip(file.path);
       } catch (_) {
         _queue.add(file);
@@ -137,11 +150,41 @@ class ClassroomScan extends ChangeNotifier {
     if (sending || closed || error != null || _queue.isEmpty) return;
     sending = true;
     _emit();
+    var failures = 0;
     try {
       while (_queue.isNotEmpty && !closed) {
         final file = _queue.first;
-        reportUpload('Preparing upload…');
-        await upload(file);
+        try {
+          reportUpload('Preparing upload…');
+          await upload(file);
+          failures = 0;
+          reconnecting = false;
+        } catch (failure) {
+          if (closed) return;
+          final terminalMessage = terminalClassroomUploadMessage(failure);
+          if (terminalMessage != null) {
+            retryable = false;
+            error = terminalMessage;
+            reconnecting = false;
+            await stop();
+            return;
+          }
+          failures++;
+          if (failures > maxUploadRetries) {
+            retryable = true;
+            reconnecting = false;
+            error =
+                'Upload paused. Your captured segments are kept here. Check your connection and retry.';
+            await stop();
+            return;
+          }
+          // Transient: keep the camera recording and try the same segment again.
+          reconnecting = true;
+          final seconds = backoffSeconds(failures);
+          reportUpload('Connection problem. Retrying in $seconds s…');
+          await wait(Duration(seconds: seconds));
+          continue;
+        }
         if (closed) return;
         _queue.removeAt(0);
         submitted++;
@@ -149,12 +192,6 @@ class ClassroomScan extends ChangeNotifier {
         _emit();
         await _next();
       }
-    } catch (failure) {
-      if (closed) return;
-      final terminalMessage = terminalClassroomUploadMessage(failure);
-      retryable = terminalMessage == null;
-      error = terminalMessage ?? 'Upload paused. Your captured segment is kept here. Check your connection and retry.';
-      await stop();
     } finally {
       sending = false;
       _emit();
@@ -423,7 +460,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                                     ? Icons.videocam_outlined
                                     : Icons.videocam_off_outlined,
                                 label: camera.recording
-                                    ? 'Recording · ${camera.elapsed} / 15 sec segment'
+                                    ? 'Recording · ${camera.elapsed} / ${camera.segmentSeconds} sec segment'
                                     : scan.scanning
                                     ? 'Waiting for uploads'
                                     : scan.finishing
@@ -438,10 +475,40 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                               ),
                             ],
                           ),
-                          if (scan.pending > 0)
+                          if (scan.recorded > 0 || camera.recording)
                             Text(
-                              '${scan.pending} segments uploading or waiting',
+                              'Segment ${scan.recorded + (camera.recording ? 1 : 0)} · '
+                              '${scan.submitted} uploaded · ${scan.pending} waiting '
+                              '(room for ${scan.maxQueued - scan.pending} more)',
+                              key: const ValueKey('scan-progress'),
                               style: const TextStyle(color: Colors.white70),
+                            ),
+                          if (scan.reconnecting && scan.uploadStatus != null)
+                            Text(
+                              scan.uploadStatus!,
+                              key: const ValueKey('scan-reconnecting'),
+                              style: const TextStyle(color: Colors.amber),
+                            ),
+                          if (!scan.scanning && !scan.finishing && scan.recorded == 0)
+                            Wrap(
+                              alignment: WrapAlignment.center,
+                              spacing: 8,
+                              children: [
+                                for (final seconds in const [15, 20, 30])
+                                  ChoiceChip(
+                                    key: ValueKey('segment-$seconds'),
+                                    label: Text('$seconds s segments'),
+                                    selected: camera.segmentSeconds == seconds,
+                                    onSelected: (_) =>
+                                        camera.segmentSeconds = seconds,
+                                  ),
+                              ],
+                            ),
+                          if (!scan.scanning && scan.recorded == 0)
+                            const Text(
+                              'Starting point: about 6 to 8 students per segment, about 3 seconds on each group. Not yet field-tested.',
+                              textAlign: TextAlign.center,
+                              style: TextStyle(color: Colors.white54),
                             ),
                           if (scan.finishing)
                             const Text(

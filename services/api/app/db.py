@@ -13,7 +13,12 @@ pool_wait_ms: ContextVar[list[float] | None] = ContextVar("pool_wait_ms", defaul
 
 def make_engine(url: str):
     return create_async_engine(
-        url, pool_size=5, max_overflow=0, pool_pre_ping=True, connect_args={"connect_timeout": 5}
+        url,
+        pool_size=5,
+        max_overflow=0,
+        pool_timeout=10,
+        pool_pre_ping=True,
+        connect_args={"connect_timeout": 5},
     )
 
 

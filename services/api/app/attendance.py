@@ -1237,8 +1237,8 @@ def install(app, engine, settings, principal, storage):
                 {"i": institute_id, "s": identifier, "u": user.user_id},
             )
             if (
-                quotas["session_pending"] >= 3
-                or quotas["teacher_uploads"] >= 2
+                quotas["session_pending"] >= 8
+                or quotas["teacher_uploads"] >= 4
                 or quotas["institute_pending"] >= 100
             ):
                 raise APIError(

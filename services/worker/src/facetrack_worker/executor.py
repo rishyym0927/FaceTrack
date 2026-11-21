@@ -41,6 +41,17 @@ def http_client(timeout):
 
 
 LEASE_LOST = (401, 403, 404, 409)
+TERMINAL_CONFLICTS = ("JOB_INPUT_REVOKED", "INPUT_CHANGED", "RESULT_CONFLICT")
+
+
+def conflict_code(error):
+    """API error code of a 409 response, or None."""
+    if error.response.status_code != 409:
+        return None
+    try:
+        return error.response.json()["error"]["code"]
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 class MediaUnavailable(Exception):
@@ -232,7 +243,12 @@ def enroll(job, epoch):
         except StorageUnavailable:
             post_fail(client, job, epoch, "DOWNLOAD_UNAVAILABLE", True)
         except httpx.HTTPStatusError as e:
-            if e.response.status_code not in LEASE_LOST:
+            code = conflict_code(e)
+            if code in TERMINAL_CONFLICTS:
+                # The input is gone or changed: release the lease now instead of blocking
+                # finalisation until it expires.
+                post_fail(client, job, epoch, code, False)
+            elif e.response.status_code not in LEASE_LOST:
                 post_fail(client, job, epoch, "DOWNLOAD_UNAVAILABLE", True)
         except (httpx.HTTPError, ValueError, OSError, EOFError):
             post_fail(client, job, epoch, "WORKER_ERROR", True)

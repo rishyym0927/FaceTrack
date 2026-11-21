@@ -39,7 +39,7 @@ class FakeScanCamera extends GuidedCamera {
   }
 
   @override
-  Future<void> interrupt() async {
+  Future<void> interrupt({bool lifecycle = false}) async {
     recording = false;
     ready = false;
   }
@@ -54,7 +54,7 @@ void main() {
         (_) async => cache,
       );
   test(
-    'bounded scan continues during upload then pauses when two segments wait',
+    'bounded scan continues during upload then pauses when the queue is full',
     () async {
       final camera = FakeScanCamera();
       final first = Completer<void>();
@@ -62,7 +62,7 @@ void main() {
       final scan = ClassroomScan(camera, (file) async {
         calls.add(file.path);
         if (calls.length == 1) await first.future;
-      });
+      }, maxQueued: 2);
       // Test-owned fake paths are outside the private cache and never deleted.
       addTearDown(scan.dispose);
       await scan.start();
@@ -90,10 +90,11 @@ void main() {
     final camera = FakeScanCamera();
     final calls = <String>[];
     var fail = true;
+    // No automatic retries here: exercises the manual path once automatic ones give up.
     final scan = ClassroomScan(camera, (file) async {
       calls.add(file.path);
       if (fail) throw StateError('offline');
-    });
+    }, maxUploadRetries: 0);
     addTearDown(scan.dispose);
     await scan.start();
     camera.finish('retained');
@@ -104,6 +105,52 @@ void main() {
     await scan.retry();
     expect(calls, ['retained', 'retained']);
     expect(scan.pending, 0);
+  });
+  test('a flaky connection is retried automatically and the camera stays open', () async {
+    final camera = FakeScanCamera();
+    final waits = <Duration>[];
+    var failures = 3;
+    final calls = <String>[];
+    final scan = ClassroomScan(camera, (file) async {
+      calls.add(file.path);
+      if (failures-- > 0) throw StateError('offline');
+    }, wait: (d) async => waits.add(d));
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('flaky');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(calls, ['flaky', 'flaky', 'flaky', 'flaky']);
+    expect(waits.map((d) => d.inSeconds), [2, 4, 8]); // growing delay, no tight loop
+    expect(scan.error, isNull);
+    expect(scan.submitted, 1);
+    expect(camera.ready, true); // never released
+    expect(scan.reconnecting, false);
+  });
+  test('recording continues past two waiting segments up to the larger queue', () async {
+    final camera = FakeScanCamera();
+    final release = Completer<void>();
+    final scan = ClassroomScan(camera, (file) => release.future);
+    addTearDown(scan.dispose);
+    await scan.start();
+    for (final name in ['a', 'b', 'c']) {
+      camera.finish(name);
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(scan.pending, 3);
+    expect(camera.starts, 4); // still recording a fourth segment
+    expect(scan.recorded, 3);
+    release.complete();
+  });
+  test('after the retry budget the scan pauses with the segments kept', () async {
+    final camera = FakeScanCamera();
+    final scan = ClassroomScan(camera, (file) async => throw StateError('offline'),
+        maxUploadRetries: 2, wait: (_) async {});
+    addTearDown(scan.dispose);
+    await scan.start();
+    camera.finish('kept');
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    expect(scan.error, contains('Upload paused'));
+    expect(scan.pending, 1);
   });
   test('camera failure can restart without an upload retry', () async {
     final camera = FakeScanCamera()..available = false;

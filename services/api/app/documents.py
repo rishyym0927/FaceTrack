@@ -73,6 +73,10 @@ class RoomCreate(Strict):
     capacity: int | None = Field(default=None, gt=0, le=1000)
 
 
+# Set from settings.documents_bucket when the routes are installed.
+REPORT_BUCKET = {"name": "facetrack-documents-dev"}
+
+
 async def enqueue_report(
     conn, actor, institute, snapshot, session_id, source_version, publication_id=None
 ):
@@ -99,10 +103,11 @@ async def enqueue_report(
         asset = await one(
             conn,
             """INSERT INTO app.media_assets(institute_id,owner_user_id,purpose,bucket,object_key,mime_type,expected_bytes,expires_at)
-        VALUES(:i,:u,'report','facetrack-documents-dev',:key,:mime,1,now()+interval '30 days') RETURNING id""",
+        VALUES(:i,:u,'report',:bucket,:key,:mime,1,now()+interval '30 days') RETURNING id""",
             {
                 "i": institute,
                 "u": actor,
+                "bucket": REPORT_BUCKET["name"],
                 "key": f"reports/{row['id']}/{uuid4().hex}.{extension}",
                 "mime": mime,
             },
@@ -183,8 +188,7 @@ async def normalized_rows(conn, institute, term, actor, rows):
     keys = set()
     for raw in rows:
         if set(raw) != set(CSV_COLUMNS) or any(
-            len(value) > 254 or (not value and column != "section")
-            for column, value in raw.items()
+            len(value) > 254 or (not value and column != "section") for column, value in raw.items()
         ):
             raise APIError(
                 422,
@@ -541,6 +545,7 @@ async def deliver(engine, token, identifier, epoch, settings):
 
 
 def install(app, engine, settings, principal, storage, auth):
+    REPORT_BUCKET["name"] = settings.documents_bucket
     User = Annotated[object, Depends(principal)]
     Institute = Annotated[UUID, Header(alias="X-Institute-ID")]
     Key = Annotated[str, Header(alias="Idempotency-Key", min_length=1, max_length=128)]

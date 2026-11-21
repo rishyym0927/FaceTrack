@@ -2,6 +2,27 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:flutter/material.dart';
 
+/// Plain-language reason a student was not matched, from the worker's diagnostics.
+/// Null when there is nothing useful to say (recognised, or an older result).
+String? recognitionNote(Json row) {
+  if (row['assessment_code'] == 'template_ineligible') {
+    return 'No approved face enrolment, so mark this student by hand.';
+  }
+  final summary = row['evidence_summary'];
+  final reason = summary is Map ? summary['reason'] : null;
+  return switch (reason) {
+    'not_seen' =>
+      'Not seen clearly enough. Record this student closer, facing the camera.',
+    'seen_too_briefly' =>
+      'Seen only briefly. Pause on this student for about 3 seconds.',
+    'weak_match' =>
+      'A face was seen but did not match well. Check lighting and angle.',
+    'look_alike' =>
+      'Looks similar to another student, so it was left for you to confirm.',
+    _ => null,
+  };
+}
+
 /// Prefill marks after a recording has produced a recognition result.
 Map<String, String> draftScanDecisions(List<Json> rows) {
   final processed = rows.any(
@@ -140,6 +161,14 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
             mark == null &&
             row['status'] == 'proposed_present')
           const Text('Suggested Present'),
+        if (widget.editable &&
+            row['status'] != 'proposed_present' &&
+            recognitionNote(row) != null)
+          Text(
+            recognitionNote(row)!,
+            key: ValueKey('why-$id'),
+            style: Theme.of(context).textTheme.bodySmall,
+          ),
       ],
     );
     final controls = widget.editable

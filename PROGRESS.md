@@ -341,6 +341,15 @@ The root suite's expected failure records the frozen baseline's degenerate-landm
 9. Later: inspect the latest release web bundles and APKs on an idle phone (carried over from the 25 October review).
 10. Later, before institute scale: benchmark recognition input, which fetches templates one roster member at a time (`services/api/app/recognition_jobs.py`), before batching it.
 
+## 2026-11-21 audit follow-up: recognition coverage, continuous recording, uploads (not deployed)
+
+- **Evidence (hosted DB, read-only, aggregate only).** In the 24-student session, 4 clips x 12 sampled frames gave 152 detections, 75 of them rejected by quality gates; 14 students recognised and 8 more marked present by hand. All 24 had templates, so missing enrolment was not the cause. Per-clip processing on the VM was 4.3-5.8 s. Which gate rejected each face was not recorded and the raw clips are deleted, so the split is unknown. Real clips were 11.6-23 MB per 15 s (about 8-12 Mbps), close to the 25 MiB limit.
+- **Recognition.** `facetrack_worker/dense.py` runs the unchanged frozen detector, gates, model, thresholds and corroboration on about 4 fps instead of a fixed 12 frames per clip (`RECOGNITION_SAMPLE_FPS=0` restores the frozen path). It also reports per-student reasons and rejection gates. Measured on the local calibration clips: about 3x more usable faces for about 2.5x processing time on this Mac. **Real classroom accuracy and VM timings with the new sampling are not measured yet.** `facetrack_ml` is untouched (freeze 16/16).
+- **Recording and upload.** Larger queue, automatic retry with backoff that keeps the camera open, configurable 15/20/30 s segments, fixed 6 Mbps / 15 fps classroom recording, chunk-level upload retry, server capture limits raised 3 to 8 and 2 to 4. **Camera bitrate, fps and the continuous flow are untested on a real phone.**
+- **Agent.** Claims a job only when the worker has a free slot, so queued leases no longer expire during a burst.
+- **VM (read-only).** 2 vCPU (one core, 2 threads), 7.9 GiB RAM, idle, 1,211 burst credits with almost none consumed this week. A stale second agent and worker (`facetrack-project-enrolment-*`) are still running there.
+- Not done: commit, push, deploy, VM resize, load tests at 50 and 100 students.
+
 ## Setup and privacy notes
 
 - The public repository cannot run real inference by itself. Private `.env`, model, profile and demo credentials must be provisioned or securely transferred.

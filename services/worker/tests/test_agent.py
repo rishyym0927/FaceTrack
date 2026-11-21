@@ -1,4 +1,5 @@
 import httpx
+import pytest
 
 from facetrack_worker.agent import CREDENTIAL_REJECTED, WAITING, failure_notice
 
@@ -27,6 +28,24 @@ class FakeResponse:
 
     def json(self):
         return self.body
+
+
+@pytest.fixture(autouse=True)
+def idle_worker(monkeypatch):
+    from facetrack_worker import agent
+
+    monkeypatch.setattr(agent, "backlog", lambda: 0)
+
+
+def test_busy_worker_is_not_given_more_leases(monkeypatch):
+    from facetrack_worker import agent
+
+    agent.PENDING.clear()
+    calls = []
+    monkeypatch.setattr(agent, "backlog", lambda: 1)
+    monkeypatch.setattr(agent, "api", lambda c, m, p: calls.append(p) or FakeResponse(204))
+    assert agent.cycle(None, 1e18) == (1e18, 1)
+    assert calls == []  # no claim while a job is queued or running
 
 
 def test_failing_reconcile_does_not_block_claiming(monkeypatch, capsys):
@@ -64,3 +83,47 @@ def test_broker_outage_waits_instead_of_crashing(monkeypatch, capsys):
     monkeypatch.setattr(agent.app, "send_task", refuse)
     assert agent.cycle(None, 1e18)[1] == 5
     assert agent.BROKER_WAITING in capsys.readouterr().out
+
+
+def test_failed_handoff_is_retried_on_the_same_lease(monkeypatch):
+    from kombu.exceptions import OperationalError
+
+    from facetrack_worker import agent
+
+    agent.PENDING.clear()
+    claims, sent, down = [], [], [True]
+
+    def api(client, method, path):
+        claims.append(path)
+        return FakeResponse(200, {"id": "j", "lease_epoch": 1})
+
+    def send(name, args):
+        if down[0]:
+            raise OperationalError("refused")
+        sent.append(args)
+
+    monkeypatch.setattr(agent, "api", api)
+    monkeypatch.setattr(agent.app, "send_task", send)
+    agent.cycle(None, 1e18)
+    down[0] = False
+    agent.cycle(None, 1e18)
+    assert sent == [["j", 1]] and len(claims) == 1  # no second claim, no extra attempt
+    assert not agent.PENDING
+
+
+def test_malformed_claim_body_does_not_crash(monkeypatch, capsys):
+    from facetrack_worker import agent
+
+    agent.PENDING.clear()
+    monkeypatch.setattr(agent, "api", lambda c, m, p: FakeResponse(200, {"unexpected": 1}))
+    assert agent.cycle(None, 1e18)[1] == 5
+    assert "Unexpected claim response" in capsys.readouterr().out
+
+
+def test_lease_missing_fields_is_not_remembered(monkeypatch):
+    from facetrack_worker import agent
+
+    agent.PENDING.clear()
+    monkeypatch.setattr(agent, "api", lambda c, m, p: FakeResponse(200, {"id": "j"}))
+    assert agent.cycle(None, 1e18)[1] == 5
+    assert not agent.PENDING  # the next round claims normally instead of stalling 90 s

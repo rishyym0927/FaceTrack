@@ -219,7 +219,10 @@ class ApiClient {
         );
         if (auth.auth.currentUser?.id != actor || cancel.isCancelled)
           throw const AppFailure('Your account changed. Please retry.');
-        return response.data!;
+        final data = response.data;
+        if (data != null) return data;
+        if (response.statusCode == 204) return <String, dynamic>{};
+        throw const AppFailure('The server sent an empty response. Please retry.');
       } on DioException catch (e) {
         if (e.response?.statusCode == 401 && attempt == 0) {
           try {
@@ -235,7 +238,8 @@ class ApiClient {
             );
           }
         }
-        if (e.response?.statusCode == 401) onSessionLost?.call();
+        // A 401 after a successful token refresh is a server or clock problem, not a
+        // lost session. Signing out here would also discard unsent private recordings.
         final host = Uri.parse(dio.options.baseUrl).host;
         if (!kIsWeb &&
             !kReleaseMode &&

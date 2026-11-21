@@ -49,8 +49,11 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
     owner = services.client.auth.currentUser!.id;
     camera.addListener(cameraChanged);
     lifecycle = AppLifecycleListener(
-      onPause: () => camera.interrupt(),
-      onResume: () => load(),
+      onPause: () => camera.interrupt(lifecycle: true),
+      onResume: () {
+        load();
+        unawaited(camera.resumeIfInterrupted());
+      },
     );
     load();
   }

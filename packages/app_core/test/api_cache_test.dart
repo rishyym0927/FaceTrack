@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:dio/dio.dart' show ResponseBody;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 
 import 'harness.dart';
 
 void main() {
+  authAndEmptyBodyTests();
   test(
     'cache expires, is isolated by query and tenant, returns independent data',
     () async {
@@ -137,5 +139,40 @@ void main() {
     }
     await api.send('GET', '/v1/offerings', query: {'cursor': '0'});
     expect(calls, 102);
+  });
+}
+
+void authAndEmptyBodyTests() {
+  test('a 401 after a successful refresh does not sign the user out', () async {
+    final h = await harness();
+    addTearDown(h.dispose);
+    final api = h.services.api;
+    var lost = 0, calls = 0;
+    api.onSessionLost = () => lost++;
+    api.dio.httpClientAdapter = RoutesAdapter((_) async {
+      calls++;
+      return jsonResponse({'error': {'code': 'UNAUTHORIZED'}}, 401);
+    });
+    Object? failure;
+    try {
+      await api.send('GET', '/v1/offerings');
+    } catch (e) {
+      failure = e;
+    }
+    expect(failure, isA<AppFailure>());
+    expect(calls, 2); // original request plus exactly one retry
+    expect(lost, 0, reason: 'private recordings must survive a stray 401');
+  });
+  test('an empty response body is a typed failure, not a TypeError', () async {
+    final h = await harness();
+    addTearDown(h.dispose);
+    final api = h.services.api;
+    api.dio.httpClientAdapter = RoutesAdapter(
+      (_) async => ResponseBody.fromString('', 200),
+    );
+    expect(
+      () => api.send('POST', '/v1/example', body: {}),
+      throwsA(isA<AppFailure>()),
+    );
   });
 }

@@ -1034,7 +1034,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     final bytes = await file.length();
     if (bytes == 0 || bytes > 26214400) {
       throw const AppFailure(
-        'Captured segment is empty or exceeds 25 MiB. Record again at a lower resolution.',
+        'Captured segment is empty or exceeds 25 MiB. Choose a shorter segment length and record again.',
         code: 'CAPTURE_SIZE',
       );
     }

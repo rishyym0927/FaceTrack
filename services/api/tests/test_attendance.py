@@ -515,10 +515,31 @@ async def test_teacher_confirms_absence_and_student_disputes_latest_publication(
         unknown_observations=2,
         quality={"sampled_frames": 12, "detections": 5, "quality_rejects": 1},
         timings={"processing_total_ms": 5},
+        diagnostics=[
+            {
+                "student_id": data["roster"][1]["student_id"],
+                "reason": "seen_too_briefly",
+                "observations": 1,
+                "best_similarity": 0.52,
+            }
+        ],
+        reject_reasons={"small": 1},
+        face_px_median=64,
+        sample_fps=4.0,
     )
     assert (
         await b.client.post(f"/internal/v1/jobs/{jid}/complete", headers=b.wh, json=body)
     ).status_code == 200
+    with connect(b.urls["owner"]) as c:
+        summary = c.execute(
+            "SELECT evidence_summary FROM app.attendance_records WHERE session_id=%s AND student_id=%s",
+            (s["id"], data["roster"][1]["student_id"]),
+        ).fetchone()[0]
+        stored = c.execute(
+            "SELECT quality_json FROM app.captures WHERE session_id=%s", (s["id"],)
+        ).fetchone()[0]
+    assert summary["reason"] == "seen_too_briefly" and summary["observations"] == 1
+    assert stored["reject_reasons"] == {"small": 1} and stored["face_px_median"] == 64
     attendance = (
         await b.client.get(f"/v1/sessions/{s['id']}/attendance", headers=b.headers("teacher"))
     ).json()

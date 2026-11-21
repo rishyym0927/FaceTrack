@@ -145,3 +145,19 @@ def test_stop_child_kills_the_whole_process_group():
         time.sleep(0.1)
     else:
         pytest.fail("grandchild survived its process group")
+
+
+def test_conflict_code_reads_api_error_envelope():
+    import httpx
+
+    from facetrack_worker import executor
+
+    def err(status, body):
+        request = httpx.Request("POST", "https://x/y")
+        return httpx.HTTPStatusError("e", request=request, response=httpx.Response(status, json=body, request=request))
+
+    assert executor.conflict_code(err(409, {"error": {"code": "JOB_INPUT_REVOKED"}})) == "JOB_INPUT_REVOKED"
+    assert executor.conflict_code(err(409, {"error": {"code": "STALE_LEASE"}})) == "STALE_LEASE"
+    assert executor.conflict_code(err(500, {"error": {"code": "JOB_INPUT_REVOKED"}})) is None
+    assert executor.conflict_code(err(409, {"oops": 1})) is None
+    assert "STALE_LEASE" not in executor.TERMINAL_CONFLICTS

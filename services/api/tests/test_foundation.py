@@ -586,7 +586,45 @@ async def test_subject_work_summary_has_exact_counts_and_checks_assignment(backe
     assert [(item["id"], item["sessions_to_review"]) for item in result.json()["items"]] == [
         (b.ids["offering"], 0)
     ]
-    assert (await b.client.get(url, headers=b.headers("unassigned"), params=params)).status_code == 404
     assert (
-        await b.client.get(url, headers=b.headers(), params={"offering_id": b.ids["other_offering"]})
+        await b.client.get(url, headers=b.headers("unassigned"), params=params)
     ).status_code == 404
+    assert (
+        await b.client.get(
+            url, headers=b.headers(), params={"offering_id": b.ids["other_offering"]}
+        )
+    ).status_code == 404
+
+
+async def test_readiness_is_cached_so_probe_floods_do_not_hit_the_database(backend):
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    b = backend
+    statements = []
+
+    def count(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    assert (await b.client.get("/health/ready")).status_code == 200  # warms the cache
+    event.listen(Engine, "before_cursor_execute", count)
+    try:
+        for _ in range(5):
+            assert (await b.client.get("/health/ready")).status_code == 200
+    finally:
+        event.remove(Engine, "before_cursor_execute", count)
+    assert statements == []
+
+
+async def test_exhausted_connection_pool_is_a_retryable_503(backend):
+    from sqlalchemy.exc import TimeoutError as PoolTimeout
+
+    b = backend
+
+    @b.app.get("/v1/_pool_probe")
+    async def pool_probe():
+        raise PoolTimeout("QueuePool limit reached")
+
+    r = await b.client.get("/v1/_pool_probe")
+    assert r.status_code == 503, r.text
+    assert r.json()["error"]["code"] == "DATABASE_UNAVAILABLE" and r.json()["error"]["retryable"]

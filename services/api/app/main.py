@@ -12,6 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.exc import DBAPIError, IntegrityError
+from sqlalchemy.exc import TimeoutError as PoolTimeout
 from starlette.exceptions import HTTPException
 
 from . import schemas, services
@@ -168,6 +169,27 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
 
     @app.exception_handler(DBAPIError)
     async def database_error(request, error):
+        logger.error(
+            json.dumps(
+                {
+                    "request_id": request.state.request_id,
+                    "status": 503,
+                    "error": type(error.orig).__name__ if error.orig else type(error).__name__,
+                    "sqlstate": getattr(error.orig, "sqlstate", None),
+                }
+            )
+        )
+        return error_response(
+            request, 503, "DATABASE_UNAVAILABLE", "Database operation unavailable.", True
+        )
+
+    @app.exception_handler(PoolTimeout)
+    async def pool_exhausted(request, error):
+        logger.error(
+            json.dumps(
+                {"request_id": request.state.request_id, "status": 503, "error": "PoolTimeout"}
+            )
+        )
         return error_response(
             request, 503, "DATABASE_UNAVAILABLE", "Database operation unavailable.", True
         )
@@ -175,7 +197,15 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     @app.exception_handler(Exception)
     async def unexpected_error(request, error):
         # Starlette sends this from outside the middleware stack, so add its headers here.
-        logger.error(json.dumps({"request_id": request.state.request_id, "status": 500}))
+        logger.error(
+            json.dumps(
+                {
+                    "request_id": request.state.request_id,
+                    "status": 500,
+                    "error": type(error).__name__,
+                }
+            )
+        )
         return finalize(
             request,
             error_response(request, 500, "INTERNAL_ERROR", "The request could not be completed."),
@@ -194,8 +224,14 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     async def live():
         return {"status": "live"}
 
+    readiness = {"until": 0.0}
+
     @app.get("/health/ready")
     async def ready(request: Request):
+        # Unauthenticated and four queries deep: answer repeats from a short cache so a
+        # probe flood cannot exhaust the small connection pool.
+        if time.monotonic() < readiness["until"]:
+            return {"status": "ready"}
         try:
             async with engine.connect() as conn:
                 row = await one(
@@ -223,6 +259,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 or not configured
             ):
                 raise ValueError()
+            readiness["until"] = time.monotonic() + 5
             return {"status": "ready"}
         except Exception:
             return error_response(
@@ -289,8 +326,14 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
                 conn, user.user_id, institute_id, body, key, request.state.request_id
             )
 
-    @app.get("/v1/teacher/work-summary", response_model=schemas.TeacherWorkSummary, response_model_exclude_none=True)
-    async def teacher_work_summary(user: User, institute_id: Institute, offering_id: UUID | None = None):
+    @app.get(
+        "/v1/teacher/work-summary",
+        response_model=schemas.TeacherWorkSummary,
+        response_model_exclude_none=True,
+    )
+    async def teacher_work_summary(
+        user: User, institute_id: Institute, offering_id: UUID | None = None
+    ):
         async with transaction(engine, user.user_id, institute_id) as conn:
             return await services.work_summary(conn, user.user_id, institute_id, offering_id)
 
