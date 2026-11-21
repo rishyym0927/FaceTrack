@@ -27,7 +27,7 @@ For local Android use, run `../../scripts/android-connect` after connecting or r
 
 ## Capture and publish
 
-1. Open the session to freeze its approved roster. Scanning requires at least two roster members with compatible, approved face enrolments. Select **Scan classroom**, then **Start scan** with only consenting participants in view. The scanner captures short segments with audio off. Green boxes indicate good framing. Recognition suggestions appear after processing.
+1. Open the session to freeze its approved roster. Scanning requires at least two roster members with compatible, approved face enrolments. Select **Scan classroom**, then **Start scan** with only consenting participants in view. The scanner captures short segments with audio off. Grey boxes mark detected faces and amber means move closer; they never mean a student is recognised. After each segment is processed, the recognition list shows each student as green (recognised, with their name), yellow (checking or unsure), red (not matched) or grey (not covered yet).
 2. Select **Stop scan** to release the camera and finish any uploads. Retry an interrupted upload from the recovery screen. If the reservation has expired, discard the unsent segment and record again while the session is open or continue to manual review.
 3. Select **Go to review**. A usable capture defaults matched students to **Present** and other approved roster members to **Absent**, including those outside the footage. Without usable footage, select a mark for each student manually.
 4. Review or change the marks, then select **Publish attendance**. Published results are immutable. A later correction requires a reason and creates another revision.

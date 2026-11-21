@@ -166,6 +166,22 @@ void main() {
     },
   );
 
+  test('Live detection boxes are grey or amber and never green', () {
+    expect(FaceBoxColors.forFace(framed: true), FaceBoxColors.detected);
+    expect(FaceBoxColors.forFace(framed: false), FaceBoxColors.needsFraming);
+    for (final color in [
+      FaceBoxColors.detected,
+      FaceBoxColors.needsFraming,
+      FaceBoxColors.ready,
+    ]) {
+      expect(color, isNot(Colors.greenAccent));
+      expect(color, isNot(Colors.green));
+      // Green dominates the channel mix only for green-ish colours.
+      expect(color.g > color.r && color.g > color.b && color.g > 0.6, isFalse,
+          reason: '$color must not read as green');
+    }
+  });
+
   test('Classroom prefers the rear camera and falls back when absent', () {
     expect(preferredCamera([front, back], enrollment: false), back);
     expect(preferredCamera([front], enrollment: false), front);

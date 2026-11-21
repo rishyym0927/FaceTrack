@@ -5,6 +5,8 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:flutter/material.dart';
 
+import 'recognition_board.dart';
+
 String? terminalClassroomUploadMessage(Object error) {
   if (error is! AppFailure) return null;
   if (const {
@@ -272,17 +274,17 @@ class ClassroomScanPage extends StatefulWidget {
   const ClassroomScanPage({
     super.key,
     required this.scan,
-    required this.suggestions,
+    required this.results,
   });
   final ClassroomScan scan;
-  final Future<List<String>> Function() suggestions;
+  final Future<RecognitionSnapshot> Function() results;
   @override
   State<ClassroomScanPage> createState() => _ClassroomScanPageState();
 }
 
 class _ClassroomScanPageState extends State<ClassroomScanPage> {
   Timer? poll;
-  List<String> names = [];
+  RecognitionSnapshot snapshot = const RecognitionSnapshot([]);
   AppLifecycleListener? lifecycle;
   bool fetching = false;
   ClassroomScan get scan => widget.scan;
@@ -303,10 +305,10 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
     if (fetching) return;
     fetching = true;
     try {
-      final value = await widget.suggestions();
-      if (mounted) setState(() => names = value);
+      final value = await widget.results();
+      if (mounted) setState(() => snapshot = value);
     } catch (_) {
-      /* Keep the last confirmed server suggestions. */
+      /* Keep the last confirmed server results. */
     } finally {
       fetching = false;
     }
@@ -425,11 +427,9 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                             ),
                           ),
                           Text(
-                            names.isEmpty
-                                ? scan.scanning
-                                      ? 'Scanning the room'
-                                      : 'Ready to scan your classroom'
-                                : '${names.length} students suggested',
+                            scan.scanning
+                                ? 'Scanning the room'
+                                : 'Ready to scan your classroom',
                             style: const TextStyle(
                               color: Colors.white,
                               fontSize: 21,
@@ -437,15 +437,18 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                             ),
                           ),
                           const SizedBox(height: 6),
-                          if (names.isNotEmpty)
-                            Text(
-                              names.join(', '),
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white),
+                          RecognitionBoard(
+                            entries: boardEntries(
+                              snapshot.rows,
+                              processing:
+                                  snapshot.processing ||
+                                  scan.pending > 0 ||
+                                  scan.sending,
                             ),
+                          ),
+                          const SizedBox(height: 6),
                           const Text(
-                            'Move slowly and pause on each group. A green box means a face is well framed. When you finish, tap Stop scan and wait for uploads.',
+                            'Move slowly and pause on each group. Grey boxes are detected faces and amber means move closer. A student turns green on the list only after the server recognises them. When you finish, tap Stop scan and wait for uploads.',
                             textAlign: TextAlign.center,
                             style: TextStyle(color: Colors.white70),
                           ),
@@ -688,6 +691,20 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                     Text(
                       '${scan.submitted} uploaded · ${scan.pending} remaining',
                     ),
+                  if (snapshot.rows.isNotEmpty) ...[
+                    const SizedBox(height: 12),
+                    RecognitionBoard(
+                      onDark: false,
+                      maxHeight: 320,
+                      entries: boardEntries(
+                        snapshot.rows,
+                        processing:
+                            snapshot.processing ||
+                            scan.pending > 0 ||
+                            scan.sending,
+                      ),
+                    ),
+                  ],
                   if (scan.error != null && !scan.sending) ...[
                     if (scan.retryable)
                       FilledButton(

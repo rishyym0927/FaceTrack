@@ -13,6 +13,26 @@ Rect previewFaceRect(Rect bounds, Size size, {required bool mirrored}) =>
       bounds.height * size.height,
     );
 
+/// Colours of the live boxes drawn from on-device face detection.
+///
+/// Detection says nothing about *who* a face is, so these are never green: green is kept for
+/// a student the server has actually recognised (see the Teacher recognition board).
+class FaceBoxColors {
+  const FaceBoxColors._();
+
+  /// A face is detected and fully in view.
+  static const detected = Color(0xFFB4BBC6);
+
+  /// A face is detected but too small, cut off or not yet steady. Move closer.
+  static const needsFraming = Colors.amber;
+
+  /// Enrolment only: the student's own face sits in the guide, ready to record.
+  static const ready = Colors.lightBlueAccent;
+
+  static Color forFace({required bool framed}) =>
+      framed ? detected : needsFraming;
+}
+
 class LiveCameraPreview extends StatelessWidget {
   const LiveCameraPreview({
     super.key,
@@ -58,7 +78,7 @@ class LiveCameraPreview extends StatelessWidget {
                       decoration: BoxDecoration(
                         border: Border.all(
                           color: guideAligned
-                              ? Colors.greenAccent
+                              ? FaceBoxColors.ready
                               : Colors.white,
                           width: 3,
                         ),
@@ -74,9 +94,7 @@ class LiveCameraPreview extends StatelessWidget {
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         border: Border.all(
-                          color: face.framed
-                              ? Colors.greenAccent
-                              : Colors.white,
+                          color: FaceBoxColors.forFace(framed: face.framed),
                           width: 3,
                         ),
                         borderRadius: BorderRadius.circular(10),

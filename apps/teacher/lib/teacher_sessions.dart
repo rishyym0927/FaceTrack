@@ -13,6 +13,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'attendance_table.dart';
 import 'classroom_scan.dart';
 import 'classroom_pending.dart';
+import 'recognition_board.dart';
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
 
@@ -1012,17 +1013,16 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     }
   }
 
-  Future<List<String>> scanSuggestions() async {
+  Future<RecognitionSnapshot> scanResults() async {
     final result = await services.api.send(
       'GET',
       '/v1/sessions/${widget.id}/attendance',
       institute: institute,
     );
-    return [
-      for (final row in (result['items'] as List).cast<Json>())
-        if (row['status'] == 'proposed_present')
-          row['official_name'] as String? ?? 'Enrolled student',
-    ];
+    return RecognitionSnapshot(
+      (result['items'] as List).cast<Json>(),
+      processing: result['processing_pending'] == true,
+    );
   }
 
   Future<void> uploadScanSegment(
@@ -1177,7 +1177,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           MaterialPageRoute(
             fullscreenDialog: true,
             builder: (_) =>
-                ClassroomScanPage(scan: scan!, suggestions: scanSuggestions),
+                ClassroomScanPage(scan: scan!, results: scanResults),
           ),
         );
       }
@@ -1657,7 +1657,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                             camera.faceTracker.available
                                 ? camera.faceTracker.faces.isEmpty
                                       ? 'No faces in view. Aim the camera toward the class.'
-                                      : 'Green outlines show faces that are well framed.'
+                                      : 'Grey outlines are detected faces; amber means move closer. Names turn green only after the server recognises them.'
                                 : 'Live face guidance is currently unavailable. Recording continues.',
                           ),
                         ),
