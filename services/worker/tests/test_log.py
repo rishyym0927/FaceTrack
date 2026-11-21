@@ -125,3 +125,11 @@ def test_a_pending_lease_survives_an_unrelated_value_error(monkeypatch):
     agent.cycle(None, 1e18)
     assert agent.PENDING  # kept, so the hand-off is retried within its window
     agent.PENDING.clear()
+
+
+def test_timing_fields_are_logged_even_when_their_name_mentions_a_banned_word(capsys):
+    # "embedding_ms" is a duration, not an embedding; the redaction used to drop it.
+    log.event("t", timings={"embedding_ms": 12.5, "embedding": 3, "decoding_ms": 1.0}, embedding_ms=7)
+    line = capsys.readouterr().out
+    assert '"embedding_ms":12.5' in line.replace(" ", "") and '"embedding_ms":7' in line.replace(" ", "")
+    assert '"embedding":3' not in line.replace(" ", "")

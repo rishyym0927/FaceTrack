@@ -57,7 +57,7 @@ def clean(fields: dict) -> dict:
     out = {}
     for key, value in fields.items():
         lowered = key.lower()
-        if value is None or any(part in lowered for part in BANNED_PARTS):
+        if value is None or (not lowered.endswith('_ms') and any(part in lowered for part in BANNED_PARTS)):
             continue
         if isinstance(value, bool | int):
             out[key] = value
@@ -70,7 +70,7 @@ def clean(fields: dict) -> dict:
                 for k, v in value.items()
                 if isinstance(v, bool | int)
                 or (isinstance(v, float) and math.isfinite(v))
-                if not any(p in str(k).lower() for p in BANNED_PARTS)
+                if (str(k).lower().endswith('_ms') or not any(p in str(k).lower() for p in BANNED_PARTS))
             }
         elif isinstance(value, list | tuple):
             continue  # lists are never logged: they could carry per-student values
