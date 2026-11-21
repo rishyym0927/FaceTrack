@@ -11,7 +11,7 @@ FaceTrack runs online on a single Azure virtual machine. Data stays in the hoste
 
 ## The server
 
-- Azure for Students subscription, resource group `facetrack-rg`, VM `facetrack-vm`, Central India, `Standard_B2as_v2` (2 vCPU, 8 GB, burstable), Ubuntu 24.04, 64 GB Standard SSD, static public IP with DNS label `facetrack`. Check actual spend and credit in the Azure portal.
+- Azure for Students subscription, resource group `facetrack-rg`, VM `facetrack-vm`, Central India, `Standard_B4as_v2` (4 vCPU, 16 GB, burstable; resized from `Standard_B2as_v2` on 2026-11-21, about 72 USD/month at retail if running all month), Ubuntu 24.04, 64 GB Standard SSD, static public IP with DNS label `facetrack`. Check actual spend and credit in the Azure portal.
 - Firewall: 80 and 443 open; SSH (22) only from the operator's IP. Port 8000 is never opened: the API listens on `127.0.0.1` and Caddy fronts it.
 - Login: `ssh -i ~/.ssh/facetrack_azure azureuser@facetrack.centralindia.cloudapp.azure.com`. Use the operator's authorized SSH key.
 - Layout: code in `/opt/facetrack` (from `git archive origin/main`), web builds served at `/srv/facetrack/{teacher,student}`, Caddy config in `/etc/caddy/Caddyfile` (copy of [deploy/azure/Caddyfile](../deploy/azure/Caddyfile)).
