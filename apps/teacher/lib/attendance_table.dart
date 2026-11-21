@@ -103,10 +103,20 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
             widget.finalised ? 'Published attendance' : 'Review attendance',
             style: Theme.of(context).textTheme.titleLarge,
           ),
-          if (widget.editable)
-            const Text(
+          if (widget.editable) ...[
+            const SizedBox(height: 4),
+            Text(
               'Choose Present or Absent for each student. Check the suggested marks before publishing.',
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
+            const SizedBox(height: 14),
+            _ReviewProgress(
+              marked: widget.rows.where((r) => _mark(r) != null).length,
+              total: widget.rows.length,
+            ),
+          ],
           const SizedBox(height: 12),
           TextField(
             onChanged: (text) =>
@@ -160,7 +170,13 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
         if (widget.editable &&
             mark == null &&
             row['status'] == 'proposed_present')
-          const Text('Suggested Present'),
+          Text(
+            'Suggested Present',
+            style: TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Theme.of(context).colorScheme.primary,
+            ),
+          ),
         if (widget.editable &&
             row['status'] != 'proposed_present' &&
             recognitionNote(row) != null)
@@ -212,6 +228,38 @@ class _AttendanceReviewTableState extends State<AttendanceReviewTable> {
                   controls,
                 ],
               ),
+      ),
+    );
+  }
+}
+
+/// How much of the roster has a Present or Absent mark so far.
+class _ReviewProgress extends StatelessWidget {
+  const _ReviewProgress({required this.marked, required this.total});
+  final int marked, total;
+  @override
+  Widget build(BuildContext context) {
+    final done = total > 0 && marked == total;
+    return Semantics(
+      label: '$marked of $total students marked',
+      child: ExcludeSemantics(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              done
+                  ? 'All $total students marked. Ready to publish.'
+                  : '$marked of $total students marked',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            TrackBar(
+              value: total == 0 ? 0 : marked / total,
+              color: done ? const Color(0xff176451) : null,
+              height: 8,
+            ),
+          ],
+        ),
       ),
     );
   }

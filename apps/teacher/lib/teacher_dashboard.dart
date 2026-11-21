@@ -232,7 +232,11 @@ class _TeacherAttendancePageState extends ConsumerState<TeacherAttendancePage>
     return ContentPage(
       onRefresh: () async => setState(() => refreshTick++),
       children: [
-        const PageHeader(title: 'Attendance'),
+        const PageHeader(
+          title: 'Attendance',
+          subtitle:
+              'Published results across your subjects, with the students who need attention.',
+        ),
         TeacherDashboard(
           api: api,
           institute: institute,
@@ -438,27 +442,25 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _subjects.isEmpty) {
-      return Panel(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            children: [
-              const CircularProgressIndicator(),
-              const SizedBox(height: 12),
-              const Text('Loading your attendance overview…'),
-            ],
-          ),
+      return Semantics(
+        label: 'Loading your attendance overview',
+        child: const Column(
+          children: [SkeletonCard(), SizedBox(height: 16), SkeletonList()],
         ),
       );
     }
     if (_error != null && _subjects.isEmpty) {
-      return Panel(child: ErrorView(_error!, retry: _load));
+      return ErrorView(_error!, retry: _load);
     }
     if (_subjects.isEmpty) {
-      return const Panel(
-        child: MessageView(
-          title: 'No published attendance yet',
-          message: 'Publish attendance in a subject to see its overview here.',
+      return MessageView(
+        icon: Icons.insights_outlined,
+        title: 'No published attendance yet',
+        message: 'Publish attendance in a subject to see its overview here.',
+        action: FilledButton.icon(
+          onPressed: () => context.go('/classes'),
+          icon: const Icon(Icons.menu_book_outlined),
+          label: const Text('Go to subjects'),
         ),
       );
     }
@@ -501,14 +503,26 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
                 const LinearProgressIndicator(semanticsLabel: 'Refreshing attendance'),
               ],
               Text(
-                'Faculty-published attendance across '
+                'Across '
                 '${visible.length} subject${visible.length == 1 ? '' : 's'}'
                 '${_group == null ? '' : ' · ${groups.firstWhere((g) => g.key == _group).label}'}.',
                 style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
               ),
-              if (_error != null) ErrorView(_error!, retry: _load),
+              if (_error != null) ...[
+                const SizedBox(height: 12),
+                _Notice(
+                  '${_error!.message} Showing the last loaded figures.',
+                  onRetry: _load,
+                ),
+              ],
               if (_hasMore)
-                const Text('Totals cover only the subjects loaded.'),
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text(
+                    'Totals cover only the subjects loaded.',
+                    style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                ),
               if (groups.length > 1) ...[
                 const SizedBox(height: 14),
                 Wrap(
@@ -758,7 +772,12 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
         ),
         const SizedBox(height: 12),
         if (months.isEmpty)
-          const Text('Monthly trend will appear after attendance is published.')
+          Text(
+            'Monthly trend will appear after attendance is published.',
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
+          )
         else ...[
           for (final month in visibleMonths)
             InkWell(
@@ -871,9 +890,17 @@ class _TeacherDashboardState extends State<TeacherDashboard> {
       ),
       const SizedBox(height: 6),
       if (t.lowest.isEmpty)
-        const Padding(
-          padding: EdgeInsets.symmetric(vertical: 10),
-          child: Text('No student is below the threshold.'),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.check_circle_outline, color: _green, size: 20),
+              const SizedBox(width: 8),
+              Expanded(
+                child: const Text('No student is below the threshold.'),
+              ),
+            ],
+          ),
         )
       else
         for (final r in t.lowest.take(6))

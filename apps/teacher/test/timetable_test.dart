@@ -68,4 +68,48 @@ void main() {
     await tester.pump(const Duration(seconds: 3));
     expect(polls, 1);
   });
+
+  testWidgets('Timetable steps stay usable at 360 px and 200% text', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/offerings/class') {
+        return jsonResponse({'term_id': 'term'});
+      }
+      return jsonResponse({'schedule_revision': 1});
+    });
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      MaterialApp(
+        builder: (context, child) => MediaQuery(
+          data: MediaQuery.of(context).copyWith(
+            textScaler: const TextScaler.linear(2),
+          ),
+          child: child!,
+        ),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TeacherTimetable(
+              api: h.services.api,
+              institute: institute,
+              offering: 'class',
+              publishableKey: 'fixture-key',
+              changed: () {},
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Prepare your CSV'), findsOneWidget);
+    expect(find.text('Upload and validate'), findsOneWidget);
+    expect(find.text('Choose CSV'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

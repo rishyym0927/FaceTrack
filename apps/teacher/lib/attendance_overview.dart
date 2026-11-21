@@ -5,7 +5,7 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import 'teacher_dashboard.dart' show belowAttendanceThreshold;
+import 'teacher_dashboard.dart' show attendanceThreshold, belowAttendanceThreshold;
 
 /// Cumulative semester attendance for one class: per-student totals and %,
 /// with search, a below-threshold filter, sort and CSV export. Read-only --
@@ -28,7 +28,9 @@ class AttendanceOverview extends StatefulWidget {
   State<AttendanceOverview> createState() => _AttendanceOverviewState();
 }
 
-const _nameW = 200.0, _enrolW = 120.0, _numW = 90.0, _pctW = 90.0;
+/// Fixed widths for the numeric columns; name and enrolment share the rest,
+/// so the table fills a wide desktop page and scrolls sideways on a phone.
+const _numW = 90.0, _pctW = 110.0, _tableMin = 620.0;
 
 class _AttendanceOverviewState extends State<AttendanceOverview> {
   final _search = TextEditingController();
@@ -165,17 +167,10 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _data == null) {
-      return const Panel(
-        child: Center(
-          child: Padding(
-            padding: EdgeInsets.all(24),
-            child: CircularProgressIndicator(),
-          ),
-        ),
-      );
+      return const Column(children: [SkeletonCard(), SizedBox(height: 12), SkeletonList()]);
     }
     if (_error != null && _data == null) {
-      return Panel(child: ErrorView(_error!, retry: _load));
+      return ErrorView(_error!, retry: _load);
     }
     final conducted = _data?['sessions_conducted'] ?? 0;
     final students = _students;
@@ -211,6 +206,12 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
               ),
             ],
           ),
+          if (_loading) ...[
+            const SizedBox(height: 8),
+            const LinearProgressIndicator(
+              semanticsLabel: 'Refreshing attendance',
+            ),
+          ],
           const SizedBox(height: 4),
           Text(
             '$conducted classes conducted · ${all.length} students',
@@ -220,7 +221,10 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),
-            ErrorView(_error!, retry: () => ApiClient.freshReads(_load)),
+            _InlineError(
+              message: '${_error!.message} Showing the last loaded figures.',
+              onRetry: () => ApiClient.freshReads(_load),
+            ),
           ],
           if (all.isNotEmpty) ...[
             const SizedBox(height: 16),
@@ -237,13 +241,13 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
                     caption: avg == null ? 'No data yet' : 'across assessed',
                   ),
                   StatTile(
-                    label: 'At or above 75%',
+                    label: 'At or above $attendanceThreshold%',
                     value: above,
                     accent: const Color(0xff176451),
                     icon: Icons.trending_up,
                   ),
                   StatTile(
-                    label: 'Below 75%',
+                    label: 'Below $attendanceThreshold%',
                     value: below,
                     accent: const Color(0xffa22f2f),
                     icon: Icons.trending_down,
@@ -311,7 +315,7 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
                 ),
               ),
               FilterChip(
-                label: const Text('Below 75%'),
+                label: Text('Below $attendanceThreshold%'),
                 selected: _belowOnly,
                 onSelected: (v) => setState(() => _belowOnly = v),
               ),
@@ -325,28 +329,36 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           const SizedBox(height: 12),
           if (students.isEmpty)
             Padding(
-              padding: const EdgeInsets.symmetric(vertical: 16),
-              child: Text(
-                conducted == 0
-                    ? 'No published sessions yet. Publish attendance to build the overview.'
-                    : 'No students match the current search or filter.',
+              padding: const EdgeInsets.only(top: 4),
+              child: _EmptyHint(
+                icon: conducted == 0
+                    ? Icons.insights_outlined
+                    : Icons.search_off_outlined,
+                title: conducted == 0
+                    ? 'No published sessions yet'
+                    : 'No students match',
+                message: conducted == 0
+                    ? 'Publish attendance for a session and the semester overview builds up here.'
+                    : 'Try a different name or clear the Below $attendanceThreshold% filter.',
               ),
             )
           else
-            SingleChildScrollView(
-              scrollDirection: Axis.horizontal,
-              child: SizedBox(
-                width: _nameW + _enrolW + _numW * 2 + _pctW,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    _headerRow(),
-                    const Divider(height: 1),
-                    for (final s in students) ...[
-                      _studentRow(context, s),
+            LayoutBuilder(
+              builder: (context, box) => SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: SizedBox(
+                  width: box.maxWidth < _tableMin ? _tableMin : box.maxWidth,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      _headerRow(),
                       const Divider(height: 1),
+                      for (final s in students) ...[
+                        _studentRow(context, s),
+                        const Divider(height: 1),
+                      ],
                     ],
-                  ],
+                  ),
                 ),
               ),
             ),
@@ -355,15 +367,22 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     );
   }
 
+  static Widget _cell(double? width, int flex, Widget child) =>
+      width == null
+      ? Expanded(flex: flex, child: child)
+      : SizedBox(width: width, child: child);
+
   Widget _headerRow() {
     Widget h(
       String label,
       int? col,
-      double w, {
+      double? w, {
+      int flex = 1,
       bool right = false,
-    }) => SizedBox(
-      width: w,
-      child: Semantics(
+    }) => _cell(
+      w,
+      flex,
+      Semantics(
         button: col != null,
         label: col == null
             ? label
@@ -398,8 +417,8 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     );
     return Row(
       children: [
-        h('Student', 0, _nameW),
-        h('Enrolment', 1, _enrolW),
+        h('Student', 0, null, flex: 3),
+        h('Enrolment', 1, null, flex: 2),
         h('Present', 2, _numW, right: true),
         h('Absent', null, _numW, right: true),
         h('%', 3, _pctW, right: true),
@@ -408,21 +427,23 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   }
 
   Widget _studentRow(BuildContext context, Json s) {
-    Widget cell(double w, String text, {bool right = false}) => SizedBox(
-      width: w,
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
-        child: Align(
-          alignment: right ? Alignment.centerRight : Alignment.centerLeft,
-          child: Text(text),
-        ),
-      ),
-    );
+    Widget cell(double? w, String text, {int flex = 1, bool right = false}) =>
+        _cell(
+          w,
+          flex,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 4),
+            child: Align(
+              alignment: right ? Alignment.centerRight : Alignment.centerLeft,
+              child: Text(text),
+            ),
+          ),
+        );
     final pct = s['percentage'];
     return Row(
       children: [
-        cell(_nameW, '${s['official_name']}'),
-        cell(_enrolW, '${s['enrollment_number']}'),
+        cell(null, '${s['official_name']}', flex: 3),
+        cell(null, '${s['enrollment_number']}', flex: 2),
         cell(_numW, '${s['attended']}', right: true),
         cell(_numW, '${s['absent']}', right: true),
         SizedBox(
@@ -455,6 +476,67 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _InlineError extends StatelessWidget {
+  const _InlineError({required this.message, required this.onRetry});
+  final String message;
+  final VoidCallback onRetry;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(
+        color: scheme.error.withValues(alpha: .07),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.error.withValues(alpha: .25)),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.error_outline, color: scheme.error, size: 20),
+          const SizedBox(width: 10),
+          Expanded(child: Text(message)),
+          TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    );
+  }
+}
+
+/// A quiet empty state for use inside a panel (no nested card).
+class _EmptyHint extends StatelessWidget {
+  const _EmptyHint({
+    required this.icon,
+    required this.title,
+    required this.message,
+  });
+  final IconData icon;
+  final String title, message;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 20),
+      child: Column(
+        children: [
+          Icon(icon, size: 32, color: scheme.onSurfaceVariant),
+          const SizedBox(height: 10),
+          Text(
+            title,
+            textAlign: TextAlign.center,
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            message,
+            textAlign: TextAlign.center,
+            style: TextStyle(color: scheme.onSurfaceVariant),
+          ),
+        ],
+      ),
     );
   }
 }

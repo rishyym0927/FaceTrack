@@ -142,4 +142,57 @@ void main() {
     expect(details, 2);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('A failed load shows a plain message with a Retry action', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(() => harness()))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    var fail = true;
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (fail) {
+        return jsonResponse({
+          'error': {
+            'code': 'UNAVAILABLE',
+            'message': 'Reports are temporarily unavailable.',
+          },
+        }, 503);
+      }
+      return jsonResponse({
+        'items': [
+          {
+            'id': 'r1',
+            'kind': 'draft',
+            'source_version': 3,
+            'status': 'ready',
+          },
+        ],
+      });
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: appTheme(),
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: TeacherReports(
+              api: h.services.api,
+              institute: institute,
+              sessionId: 'session',
+              supabaseUrl: 'https://fixture.supabase.invalid',
+              sessionVersion: 1,
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Instance of'), findsNothing);
+    expect(find.text('Retry'), findsOneWidget);
+    fail = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Draft report · version 3'), findsOneWidget);
+    expect(find.text('Retry'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

@@ -47,7 +47,7 @@ class _Heading extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.only(bottom: AppSpace.lg),
       child: Wrap(
         alignment: WrapAlignment.spaceBetween,
         crossAxisAlignment: WrapCrossAlignment.center,
@@ -69,9 +69,15 @@ class _Heading extends StatelessWidget {
                   ],
                 ),
                 if (subtitle != null)
-                  Text(
-                    subtitle!,
-                    style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+                  Padding(
+                    padding: const EdgeInsets.only(top: 2),
+                    child: Text(
+                      subtitle!,
+                      style: TextStyle(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.4,
+                      ),
+                    ),
                   ),
               ],
             ),
@@ -84,39 +90,19 @@ class _Heading extends StatelessWidget {
 }
 
 class _EmptyHint extends StatelessWidget {
-  const _EmptyHint({required this.icon, required this.text});
+  const _EmptyHint({required this.icon, required this.title, this.text});
   final IconData icon;
-  final String text;
+  final String title;
+  final String? text;
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: scheme.onSurfaceVariant),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(text, style: TextStyle(color: scheme.onSurfaceVariant)),
-          ),
-        ],
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      EmptyState(compact: true, icon: icon, title: title, message: text);
 }
 
 /// Opens [form] in a dialog: a centred card on wide screens, full screen on
 /// phones so the keyboard never hides the fields.
 Future<void> _showFormDialog(BuildContext context, Widget form) {
   final narrow = MediaQuery.sizeOf(context).width < 600;
-  final body = SingleChildScrollView(
-    padding: const EdgeInsets.all(24),
-    child: form,
-  );
   return showDialog<void>(
     context: context,
     builder: (context) => narrow
@@ -129,13 +115,27 @@ Future<void> _showFormDialog(BuildContext context, Widget form) {
                   onPressed: () => Navigator.pop(context),
                 ),
               ),
-              body: body,
+              body: SingleChildScrollView(
+                padding: const EdgeInsets.all(AppSpace.xl),
+                child: form,
+              ),
             ),
           )
         : Dialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppRadius.xl),
+            ),
             child: ConstrainedBox(
               constraints: const BoxConstraints(maxWidth: 560),
-              child: body,
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpace.xxl,
+                  AppSpace.xl + 4,
+                  AppSpace.xxl,
+                  AppSpace.xl,
+                ),
+                child: form,
+              ),
             ),
           ),
   );
@@ -206,4 +206,12 @@ class _ListDialogState extends State<_ListDialog> {
       ],
     );
   }
+}
+
+/// "CSE · 3rd Semester" or "CSE · 3rd Semester · Section CSE1". A section with
+/// no section letter is just branch and semester.
+String _sectionLabel(Academic g) {
+  final letter = g.section;
+  if (g.semester == null || (letter != null && letter != 'ALL')) return g.label;
+  return '${g.branch} · ${semesterLabel(g.semester!)}';
 }

@@ -76,7 +76,7 @@ Iterable<AppNotice> enrolmentNotices(List<Enrollment> rows) sync* {
         yield AppNotice(
           id: 'enrol:${e.id}:active',
           title: 'Enrolled in $title',
-          body: 'Your request was approved. Attendance for this subject now appears in History.',
+          body: 'Your request was approved. Attendance for this subject now appears under Attendance.',
           tone: NoticeTone.success,
           icon: Icons.check_circle_outline,
           route: '/classes/${e.offeringId}',
@@ -120,7 +120,7 @@ Iterable<AppNotice> faceNotices(Json state) sync* {
       id: 'face:${attempt!['id']}:processing',
       title: 'Face enrolment in progress',
       body: status == 'awaiting_upload'
-          ? 'Finish uploading your recording on the Enrolment page.'
+          ? 'Open Face enrolment to finish uploading your recording.'
           : 'Your recording is being checked. This usually takes a few minutes.',
       tone: status == 'awaiting_upload' ? NoticeTone.action : NoticeTone.info,
       icon: Icons.cloud_upload_outlined,
@@ -152,8 +152,8 @@ Iterable<AppNotice> faceNotices(Json state) sync* {
       body:
           attempt['reason'] is String &&
               (attempt['reason'] as String).isNotEmpty
-          ? 'Reason: ${attempt['reason']}. Record again on the Enrolment page.'
-          : 'Record again on the Enrolment page.',
+          ? 'Reason: ${attempt['reason']}. Open Face enrolment to record again.'
+          : 'Open Face enrolment to record again.',
       tone: NoticeTone.action,
       icon: Icons.replay,
       route: '/enrolment',

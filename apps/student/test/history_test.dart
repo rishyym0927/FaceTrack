@@ -69,10 +69,8 @@ void main() {
       // reflect the accepted newer response.
       unawaited(first);
       await tester.pumpAndSettle();
-      final summary = find.text('Attendance summary');
-      await tester.ensureVisible(summary);
-      await tester.tap(summary);
-      await tester.pumpAndSettle();
+      // The summary is shown up front, not behind an expander.
+      expect(find.text('Attendance summary'), findsOneWidget);
       expect(find.text('75%'), findsOneWidget);
       expect(find.text('25%'), findsNothing);
       final denied = controller.load();
@@ -157,6 +155,7 @@ void main() {
       expect(disputeCalls, 2);
       final loadMore = find.text('Load more');
       await tester.ensureVisible(loadMore);
+      await tester.pumpAndSettle();
       await tester.tap(loadMore);
       await tester.pumpAndSettle();
       expect(disputeCalls, 2);
@@ -164,4 +163,72 @@ void main() {
       await tester.pumpWidget(const SizedBox());
     },
   );
+
+  testWidgets('Subject history shows summary first and lays out at 200% text', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(320, 1200);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final h = (await tester.runAsync(() => harness()))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/me/attendance-disputes') {
+        return jsonResponse({'items': [], 'next_cursor': null});
+      }
+      if (r.path == '/v1/me/attendance') {
+        return jsonResponse({
+          'items': [
+            {
+              'id': 'p1',
+              'session_id': 's1',
+              'status': 'absent',
+              'revision': 2,
+              'reason': 'Left early',
+              'starts_at': '2026-10-20T09:00:00Z',
+            },
+            {
+              'id': 'p2',
+              'session_id': 's2',
+              'status': 'present',
+              'revision': 1,
+              'starts_at': '2026-10-21T09:00:00Z',
+            },
+          ],
+          'next_cursor': null,
+          'summary': {
+            'percentage': 50,
+            'present_or_late': 1,
+            'assessed': 2,
+            'unassessed': 0,
+          },
+        });
+      }
+      return jsonResponse({}, 404);
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(
+          classesBuilder: (_) => const StudentHistory(offering: 'class'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Attendance summary'), findsOneWidget);
+    expect(find.text('50%'), findsOneWidget);
+    expect(find.text('Corrected by faculty'), findsOneWidget);
+    expect(find.text('Faculty note: Left early'), findsOneWidget);
+    // Only a published Absent result can be queried.
+    await tester.ensureVisible(find.text('Raise query'));
+    await tester.pumpAndSettle();
+    expect(find.text('Raise query'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

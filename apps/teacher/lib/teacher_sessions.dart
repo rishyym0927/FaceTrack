@@ -340,7 +340,9 @@ class _TeacherSessionsState extends State<TeacherSessions> {
       list = MessageView(
         icon: Icons.event_note_outlined,
         title: filter == null ? 'No sessions yet' : 'No sessions in this group',
-        message: 'Create a session for your next class or import a timetable.',
+        message: filter == null
+            ? 'Use Create session above to start taking attendance for your next class, or import your timetable to schedule sessions in bulk.'
+            : 'Choose All to see every session for this subject.',
       );
     } else {
       final shown = [
@@ -414,38 +416,35 @@ class _TeacherSessionsState extends State<TeacherSessions> {
               icon: const Icon(Icons.upload_file_outlined),
               label: const Text('Import timetable'),
             ),
-            IconButton(
-              tooltip: 'Refresh sessions',
-              onPressed: loading ? null : load,
-              icon: loading
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.refresh),
-            ),
           ],
         ),
-        const SizedBox(height: 14),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            ChoiceChip(
-              label: const Text('All'),
-              selected: filter == null,
-              onSelected: (_) => selectGroup(null),
-            ),
-            for (final g in SessionGroup.values)
+        // Nothing to filter until the subject has at least one session.
+        if (filter != null || all.isNotEmpty || cursor != null) ...[
+          const SizedBox(height: 14),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
               ChoiceChip(
-                label: Text(_groupInfo[g]!.$1),
-                selected: filter == g,
-                onSelected: (_) => selectGroup(g),
+                label: const Text('All'),
+                selected: filter == null,
+                onSelected: (_) => selectGroup(null),
               ),
-          ],
-        ),
+              for (final g in SessionGroup.values)
+                ChoiceChip(
+                  label: Text(_groupInfo[g]!.$1),
+                  selected: filter == g,
+                  onSelected: (_) => selectGroup(g),
+                ),
+            ],
+          ),
+        ],
         const SizedBox(height: 8),
+        if (loading && sessions != null)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: LinearProgressIndicator(semanticsLabel: 'Refreshing sessions'),
+          ),
         if (error != null && sessions != null) ErrorView(error!, retry: load),
         list,
         if (cursor != null)
@@ -1409,8 +1408,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         children: [
           if (error != null)
             ErrorView(error!, retry: load)
-          else
-            const Center(child: CircularProgressIndicator()),
+          else ...const [SkeletonCard(), SkeletonList()],
         ],
       );
     }
@@ -1469,6 +1467,8 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              SessionSteps(status: status, captured: captured),
+              const SizedBox(height: 10),
               Text(
                 sessionStepHint(status, captured: captured),
                 style: TextStyle(
@@ -1501,6 +1501,9 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                         label: const Text('Go to review'),
                       ),
                     TextButton(
+                      style: TextButton.styleFrom(
+                        foregroundColor: Theme.of(context).colorScheme.error,
+                      ),
                       onPressed: busy || camera.busy || camera.recording
                           ? null
                           : cancel,
@@ -1773,10 +1776,11 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           const SizedBox(height: 16),
         ],
         if ((editable || finalised) && rows.isEmpty)
-          const Panel(
-            child: Text(
-              'No students on this roster. Approve subject membership before opening a new session.',
-            ),
+          const MessageView(
+            icon: Icons.groups_outlined,
+            title: 'No students on this roster',
+            message:
+                'Approve subject membership in the Students tab before opening a new session.',
           )
         else if (editable || finalised)
           AttendanceReviewTable(
@@ -1801,7 +1805,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           ),
         if (finalised) ...[
           const SizedBox(height: 16),
-          Panel(
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: const Color(0xff176451).withValues(alpha: .07),
+              borderRadius: BorderRadius.circular(18),
+              border: Border.all(
+                color: const Color(0xff176451).withValues(alpha: .25),
+              ),
+            ),
             child: Row(
               children: [
                 const Icon(Icons.verified_outlined, color: Color(0xff176451)),
@@ -1819,7 +1831,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         if (!['scheduled', 'open', 'cancelled'].contains(status)) ...[
           const SectionTitle('Reports'),
           Text(
-            'A draft report follows a closed session; the final report uses the published attendance. Download it as CSV or PDF.',
+            'Download the attendance report as PDF or CSV. The final report is ready once attendance is published.',
             style: TextStyle(
               color: Theme.of(context).colorScheme.onSurfaceVariant,
             ),
@@ -1922,12 +1934,48 @@ class SessionSteps extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final at = current(status, captured);
+    final scheme = Theme.of(context).colorScheme;
     final label = at < 0
         ? 'Cancelled'
         : at == steps.length
         ? 'Published'
         : 'Step ${at + 1} of ${steps.length} · ${steps[at]}';
-    return Text(label, style: Theme.of(context).textTheme.titleMedium);
+    return Semantics(
+      label: label,
+      child: ExcludeSemantics(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            if (at >= 0)
+              Row(
+                children: [
+                  for (var i = 0; i < steps.length; i++)
+                    Expanded(
+                      child: Padding(
+                        padding: EdgeInsets.only(
+                          right: i == steps.length - 1 ? 0 : 6,
+                        ),
+                        child: Container(
+                          height: 6,
+                          decoration: BoxDecoration(
+                            borderRadius: BorderRadius.circular(99),
+                            color: i < at
+                                ? scheme.primary
+                                : i == at
+                                ? scheme.primary.withValues(alpha: .55)
+                                : scheme.outlineVariant,
+                          ),
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+            if (at >= 0) const SizedBox(height: 10),
+            Text(label, style: Theme.of(context).textTheme.titleMedium),
+          ],
+        ),
+      ),
+    );
   }
 }
 

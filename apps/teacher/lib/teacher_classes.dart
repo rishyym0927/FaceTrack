@@ -181,6 +181,8 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
       children: [
         PageHeader(
           title: 'Subjects',
+          subtitle:
+              'Open a subject to start a class session, review attendance and manage students.',
           action: Wrap(
             spacing: 8,
             children: [
@@ -197,10 +199,12 @@ class _TeacherClassesState extends ConsumerState<TeacherClasses>
             ],
           ),
         ),
+        const _AttentionSlot(),
         PagedList(
           controller: controller,
-          emptyTitle: 'No assigned subjects',
-          emptyMessage: 'Add a subject or ask your institute to assign one.',
+          emptyTitle: 'No subjects yet',
+          emptyMessage:
+              'Add a subject to start taking attendance, or ask your institute to assign one to you.',
           item: (Offering o) => SubjectTile(
             icon: Icons.class_outlined,
             title: o.title,
@@ -855,13 +859,30 @@ class _TeacherClassDetailState extends ConsumerState<TeacherClassDetail>
             _PersonRow(enrollment: e, trailing: const StatusBadge('active')),
       ),
       const SectionTitle('Pending face enrolment'),
-      PagedList(
-        controller: pendingFaces,
-        emptyTitle: 'No students pending face enrolment',
-        emptyMessage:
-            'Everyone with subject approval has completed face enrolment.',
-        item: (entry) =>
-            _PersonRow(enrollment: entry, trailing: const SizedBox.shrink()),
+      ListenableBuilder(
+        listenable: pendingFaces,
+        builder: (context, _) =>
+            pendingFaces.items.isEmpty &&
+                !pendingFaces.loading &&
+                pendingFaces.error == null
+            ? const _InlineNote(
+                icon: Icons.check_circle_outline,
+                text:
+                    'Everyone with subject approval has completed face enrolment.',
+              )
+            : PagedList(
+                controller: pendingFaces,
+                emptyTitle: 'No students pending face enrolment',
+                emptyMessage:
+                    'Everyone with subject approval has completed face enrolment.',
+                item: (entry) => _PersonRow(
+                  enrollment: entry,
+                  trailing: const _Pill(
+                    Icons.face_outlined,
+                    'Face enrolment pending',
+                  ),
+                ),
+              ),
       ),
     ],
   );
@@ -1290,6 +1311,62 @@ class SubjectWorkChips extends StatelessWidget {
             Theme.of(context).colorScheme.primary,
           ),
       ],
+    );
+  }
+}
+
+/// Work waiting across every subject, from the notifications already loaded.
+/// Takes no space when there is nothing to do.
+class _AttentionSlot extends StatelessWidget {
+  const _AttentionSlot();
+  @override
+  Widget build(BuildContext context) {
+    final center = NotificationScope.of(context);
+    if (center == null) return const SizedBox.shrink();
+    final waiting = center.items.any(
+      (n) =>
+          n.tone == NoticeTone.action ||
+          n.tone == NoticeTone.warning ||
+          center.isUnread(n),
+    );
+    if (!waiting) return const SizedBox.shrink();
+    return const Padding(
+      padding: EdgeInsets.only(bottom: 16),
+      child: AttentionCard(hideWhenIdle: true),
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill(this.icon, this.text);
+  final IconData icon;
+  final String text;
+  @override
+  Widget build(BuildContext context) {
+    const color = Color(0xff9a6a00);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: .10),
+        borderRadius: BorderRadius.circular(99),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(
+              text,
+              style: const TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 }

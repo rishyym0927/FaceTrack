@@ -7,6 +7,10 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+/// A failure in words a faculty member can act on, never a raw exception.
+String friendlyError(Object e, [String fallback = 'Something went wrong. Please retry.']) =>
+    e is AppFailure && e.message.trim().isNotEmpty ? e.message : fallback;
+
 class TeacherReports extends StatefulWidget {
   const TeacherReports({
     super.key,
@@ -133,7 +137,10 @@ class _TeacherReportsState extends State<TeacherReports> {
     } catch (e) {
       if (mounted && current == generation) {
         setState(() {
-          error = e.toString();
+          error = friendlyError(
+            e,
+            'Could not load the reports. Check your connection and retry.',
+          );
           if (e is AppFailure && [401, 403, 404].contains(e.status)) {
             reports = [];
             details.clear();
@@ -155,7 +162,14 @@ class _TeacherReportsState extends State<TeacherReports> {
       await job();
       await refreshAfterCurrent();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) {
+        setState(
+          () => error = friendlyError(
+            e,
+            'That did not work. Please retry in a moment.',
+          ),
+        );
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -245,9 +259,29 @@ class _TeacherReportsState extends State<TeacherReports> {
         if (error != null)
           Semantics(
             liveRegion: true,
-            child: Text(error!, style: TextStyle(color: scheme.error)),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+              decoration: BoxDecoration(
+                color: scheme.error.withValues(alpha: .07),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: scheme.error.withValues(alpha: .25)),
+              ),
+              child: Row(
+                children: [
+                  Icon(Icons.error_outline, color: scheme.error, size: 20),
+                  const SizedBox(width: 10),
+                  Expanded(child: Text(error!)),
+                  TextButton(
+                    onPressed: busy || loading ? null : refresh,
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
           ),
-        if (loading)
+        if (loading && reports.isEmpty && error == null)
+          const SkeletonCard()
+        else if (loading)
           const LinearProgressIndicator(semanticsLabel: 'Loading reports'),
         if (reports.isEmpty && error == null && !loading)
           Panel(
@@ -261,7 +295,7 @@ class _TeacherReportsState extends State<TeacherReports> {
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
-                    'No reports yet. Close a session or publish attendance.',
+                    'No reports yet. A draft appears once the session is closed; the final report follows publishing.',
                   ),
                 ),
               ],

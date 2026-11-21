@@ -125,4 +125,16 @@ void main() {
     });
     expect(draftScanDecisions(const []), isEmpty);
   });
+
+  testWidgets('Review shows how many students are marked so far', (
+    tester,
+  ) async {
+    await tester.pumpWidget(_Host(_rows));
+    expect(find.text('0 of 3 students marked'), findsOneWidget);
+    await tester.tap(find.widgetWithText(ChoiceChip, 'Present').first);
+    await tester.pump();
+    expect(find.text('1 of 3 students marked'), findsOneWidget);
+    await tester.pumpWidget(_Host(_rows, editable: false));
+    expect(find.textContaining('students marked'), findsNothing);
+  });
 }

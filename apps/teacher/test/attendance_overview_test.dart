@@ -137,4 +137,56 @@ void main() {
     expect(find.text('Bob'), findsNothing);
     expect(find.text('Alice'), findsWidgets);
   });
+
+  testWidgets('Student table fills a wide page and keeps all columns', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter(
+      (r) async => jsonResponse(_summary()),
+    );
+    tester.view.physicalSize = const Size(1440, 1400);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: SingleChildScrollView(
+            child: AttendanceOverview(
+              api: h.services.api,
+              institute: institute,
+              offering: 'class',
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // The % column sits at the right edge of the card, not at 620 px.
+    expect(tester.getTopRight(find.text('%')).dx, greaterThan(1100));
+    expect(find.text('Below 75%'), findsWidgets);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('A subject with no published sessions explains what to do', (
+    tester,
+  ) async {
+    final h = (await tester.runAsync(
+      () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+    ))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter(
+      (r) async => jsonResponse({
+        'offering_id': 'class',
+        'sessions_conducted': 0,
+        'students': <Object>[],
+      }),
+    );
+    await _pump(tester, h);
+    expect(find.text('No published sessions yet'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
 }

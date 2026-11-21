@@ -15,6 +15,7 @@ import 'api.dart';
 import 'config.dart';
 import 'home.dart';
 import 'notifications.dart';
+import 'tokens.dart';
 import 'transitions.dart';
 import 'widgets.dart';
 
@@ -529,6 +530,10 @@ class ProductShell extends StatelessWidget {
       return LayoutBuilder(
         builder: (context, c) {
           final wide = c.maxWidth >= 800;
+          // Wide screens get a labelled sidebar; mid-width keeps the slim rail.
+          final extendedRail =
+              c.maxWidth >= 1100 &&
+              MediaQuery.textScalerOf(context).scale(1) <= 1.3;
           final showInstituteName =
               c.maxWidth >= 620 &&
               MediaQuery.textScalerOf(context).scale(1) <= 1.3;
@@ -545,20 +550,8 @@ class ProductShell extends StatelessWidget {
               title: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.primary,
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    child: const Icon(
-                      Icons.center_focus_strong,
-                      color: Colors.white,
-                      size: 21,
-                    ),
-                  ),
-                  const SizedBox(width: 11),
+                  const FaceTrackMark(size: 32),
+                  const SizedBox(width: 10),
                   Flexible(
                     child: Text(
                       config.title,
@@ -597,9 +590,10 @@ class ProductShell extends StatelessWidget {
                             vertical: 8,
                           ),
                           decoration: BoxDecoration(
-                            color: Theme.of(context).colorScheme.primary
-                                .withValues(alpha: .07),
-                            borderRadius: BorderRadius.circular(12),
+                            color: Theme.of(context)
+                                .colorScheme
+                                .surfaceContainerLowest,
+                            borderRadius: BorderRadius.circular(AppRadius.pill),
                             border: Border.all(
                               color: Theme.of(context).colorScheme.outline,
                             ),
@@ -655,18 +649,31 @@ class ProductShell extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 if (wide || c.maxHeight < 480)
-                  NavigationRail(
-                    selectedIndex: index,
-                    labelType: NavigationRailLabelType.all,
-                    onDestinationSelected: navigate,
-                    destinations: [
-                      for (final t in tabs)
-                        NavigationRailDestination(
-                          icon: Icon(t.icon),
-                          selectedIcon: Icon(t.selectedIcon),
-                          label: Text(t.label),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      border: Border(
+                        right: BorderSide(
+                          color: Theme.of(context).colorScheme.outline,
                         ),
-                    ],
+                      ),
+                    ),
+                    child: NavigationRail(
+                      selectedIndex: index,
+                      extended: extendedRail,
+                      labelType: extendedRail
+                          ? NavigationRailLabelType.none
+                          : NavigationRailLabelType.all,
+                      onDestinationSelected: navigate,
+                      destinations: [
+                        for (final t in tabs)
+                          NavigationRailDestination(
+                            icon: Icon(t.icon),
+                            selectedIcon: Icon(t.selectedIcon),
+                            label: Text(t.label),
+                          ),
+                      ],
+                    ),
                   ),
                 Expanded(child: child),
               ],

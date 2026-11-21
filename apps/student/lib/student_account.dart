@@ -5,6 +5,7 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'student_attendance.dart';
+import 'student_ui.dart';
 
 /// Student statistics on the Account page: subjects, overall attendance and
 /// face enrolment. Each part loads on its own and fails on its own.
@@ -84,13 +85,14 @@ class _StudentAccountStatsState extends ConsumerState<StudentAccountStats> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 8,
             children: [
-              Expanded(
-                child: Text(
-                  'At a glance',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
+              Text(
+                'At a glance',
+                style: Theme.of(context).textTheme.titleMedium,
               ),
               TextButton(
                 onPressed: () => context.go('/attendance'),
@@ -119,13 +121,13 @@ class _StudentAccountStatsState extends ConsumerState<StudentAccountStats> {
                     StatTile(
                       label: 'Present',
                       value: s?.present ?? 0,
-                      accent: const Color(0xff176451),
+                      accent: studentGreen,
                       icon: Icons.check_circle_outline,
                     ),
                     StatTile(
                       label: 'Absent',
                       value: s?.absent ?? 0,
-                      accent: const Color(0xffa22f2f),
+                      accent: studentRed,
                       icon: Icons.cancel_outlined,
                     ),
                   ],
@@ -133,19 +135,51 @@ class _StudentAccountStatsState extends ConsumerState<StudentAccountStats> {
               ),
             ],
           ),
-          const SizedBox(height: 12),
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: Icon(
-              face == 'active' ? Icons.verified_outlined : Icons.face_outlined,
-              color: Theme.of(context).colorScheme.primary,
-            ),
-            title: const Text('Face enrolment'),
-            subtitle: Text(
-              face == null ? 'Could not load' : biometricStatus(face!),
-            ),
-            trailing: const Icon(Icons.chevron_right),
+          const SizedBox(height: 16),
+          InkWell(
+            borderRadius: BorderRadius.circular(16),
             onTap: () => context.go('/enrolment'),
+            child: Container(
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Theme.of(context).colorScheme.outline),
+              ),
+              child: Row(
+                children: [
+                  IconTile(
+                    face == 'active'
+                        ? Icons.verified_outlined
+                        : Icons.face_outlined,
+                    color: face == 'active' ? studentGreen : null,
+                    size: 40,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          'Face enrolment',
+                          style: TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        Text(
+                          face == null
+                              ? 'Could not load. Tap to open.'
+                              : face == 'none'
+                              ? 'Not registered yet. Tap to start.'
+                              : biometricStatus(face!),
+                          style: TextStyle(
+                            color: Theme.of(context).colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const Icon(Icons.chevron_right),
+                ],
+              ),
+            ),
           ),
         ],
       ),

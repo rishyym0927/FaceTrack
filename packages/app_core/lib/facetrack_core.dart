@@ -3,6 +3,7 @@ export 'src/auth.dart';
 export 'src/api.dart';
 export 'src/brand.dart';
 export 'src/diagnostics.dart';
+export 'src/tokens.dart';
 export 'src/widgets.dart';
 export 'src/product_app.dart';
 export 'src/notifications.dart';

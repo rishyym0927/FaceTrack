@@ -253,4 +253,22 @@ void main() {
     expect(tester.widget<FilledButton>(publish).onPressed, isNotNull);
     await tester.pumpWidget(const SizedBox());
   });
+
+  testWidgets('Session steps show the current step and cancelled state', (
+    tester,
+  ) async {
+    Future<void> show(String status, bool captured) => tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: SessionSteps(status: status, captured: captured)),
+      ),
+    );
+    await show('open', false);
+    expect(find.text('Step 2 of 5 · Record classroom'), findsOneWidget);
+    await show('review_required', true);
+    expect(find.text('Step 4 of 5 · Review marks'), findsOneWidget);
+    await show('finalized', true);
+    expect(find.text('Published'), findsOneWidget);
+    await show('cancelled', false);
+    expect(find.text('Cancelled'), findsOneWidget);
+  });
 }

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'api.dart';
+import 'tokens.dart';
 import 'transitions.dart';
 
 ThemeData appTheme() {
@@ -37,8 +38,10 @@ ThemeData appTheme() {
         fontWeight: FontWeight.w800,
         letterSpacing: -.6,
       ),
+      headlineSmall: TextStyle(fontWeight: FontWeight.w800, letterSpacing: -.4),
       titleLarge: TextStyle(fontWeight: FontWeight.w700, letterSpacing: -.2),
       titleMedium: TextStyle(fontWeight: FontWeight.w700),
+      titleSmall: TextStyle(fontWeight: FontWeight.w700),
       labelLarge: TextStyle(fontWeight: FontWeight.w700),
       bodyLarge: TextStyle(height: 1.45),
       bodyMedium: TextStyle(height: 1.4),
@@ -47,36 +50,55 @@ ThemeData appTheme() {
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
       elevation: 0,
+      scrolledUnderElevation: 0,
       centerTitle: false,
       shape: Border(bottom: BorderSide(color: border)),
     ),
     cardTheme: CardThemeData(
-      elevation: 1,
+      elevation: 0,
       shadowColor: const Color(0xff133d35).withValues(alpha: .08),
       color: Colors.white,
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         side: const BorderSide(color: border),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
+      border: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: Color(0xffc6d6cf)),
+      ),
+      enabledBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: Color(0xffc6d6cf)),
+      ),
+      focusedBorder: OutlineInputBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        borderSide: const BorderSide(color: primary, width: 1.8),
+      ),
       filled: true,
       fillColor: Colors.white,
       contentPadding: const EdgeInsets.all(16),
+      helperStyle: const TextStyle(color: muted, height: 1.35),
     ),
     filledButtonTheme: FilledButtonThemeData(
       style: FilledButton.styleFrom(
         minimumSize: const Size(48, 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
         textStyle: const TextStyle(fontWeight: FontWeight.w600),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
         minimumSize: const Size(48, 48),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(13)),
-        side: const BorderSide(color: border),
+        padding: const EdgeInsets.symmetric(horizontal: 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(AppRadius.md),
+        ),
+        side: const BorderSide(color: Color(0xffc6d6cf)),
         textStyle: const TextStyle(fontWeight: FontWeight.w600),
       ),
     ),
@@ -96,6 +118,17 @@ ThemeData appTheme() {
       backgroundColor: Colors.white,
       indicatorColor: Color(0xffdcefe5),
       elevation: 0,
+      minExtendedWidth: 224,
+      selectedLabelTextStyle: TextStyle(
+        fontWeight: FontWeight.w700,
+        fontSize: 13,
+        color: primary,
+      ),
+      unselectedLabelTextStyle: TextStyle(
+        fontWeight: FontWeight.w600,
+        fontSize: 13,
+        color: muted,
+      ),
     ),
     chipTheme: ChipThemeData(
       backgroundColor: Colors.white,
@@ -111,7 +144,7 @@ ThemeData appTheme() {
     dialogTheme: DialogThemeData(
       backgroundColor: Colors.white,
       surfaceTintColor: Colors.transparent,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(22)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppRadius.xl)),
     ),
     dividerTheme: const DividerThemeData(color: border, space: 28),
     tabBarTheme: TabBarThemeData(
@@ -154,13 +187,13 @@ class Panel extends StatelessWidget {
   Widget build(BuildContext context) => Card(
     margin: EdgeInsets.zero,
     child: ClipRRect(
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (accent)
             Container(
-              height: 5,
+              height: 4,
               decoration: const BoxDecoration(
                 gradient: LinearGradient(
                   colors: [Color(0xff146653), Color(0xffa9d78c)],
@@ -295,38 +328,50 @@ class MessageView extends StatelessWidget {
   final IconData icon;
   @override
   Widget build(BuildContext context) => Panel(
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 64,
-          height: 64,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary.withValues(alpha: .08),
-            borderRadius: BorderRadius.circular(20),
-          ),
-          child: Icon(
-            icon,
-            size: 30,
-            color: Theme.of(context).colorScheme.primary,
-          ),
+    padding: 32,
+    child: Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 440),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 56,
+              height: 56,
+              decoration: BoxDecoration(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: .08),
+                borderRadius: BorderRadius.circular(AppRadius.lg),
+              ),
+              child: Icon(
+                icon,
+                size: 28,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: AppSpace.lg),
+            Text(
+              title,
+              style: Theme.of(context).textTheme.titleLarge,
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: AppSpace.sm),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+                height: 1.45,
+              ),
+            ),
+            if (action != null) ...[
+              const SizedBox(height: AppSpace.xl),
+              action!,
+            ],
+          ],
         ),
-        const SizedBox(height: 16),
-        Text(
-          title,
-          style: Theme.of(context).textTheme.titleLarge,
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: 8),
-        Text(
-          message,
-          textAlign: TextAlign.center,
-          style: TextStyle(
-            color: Theme.of(context).colorScheme.onSurfaceVariant,
-          ),
-        ),
-        if (action != null) ...[const SizedBox(height: 20), action!],
-      ],
+      ),
     ),
   );
 }
@@ -363,7 +408,8 @@ class ErrorView extends StatelessWidget {
       title: title,
       message:
           (failure?.message ??
-              'Please retry. If this continues, contact your institute.') +
+              'Something went wrong on our side. Please try again in a moment. '
+                  'If it keeps happening, contact your institute.') +
           // The first characters of the server's request id: enough to find this exact failure
           // in the server log when someone reports it.
           switch (failure?.requestId) {
@@ -371,7 +417,7 @@ class ErrorView extends StatelessWidget {
               '\nReference: ${id.substring(0, 8)}',
             _ => '',
           },
-      action: OutlinedButton.icon(
+      action: FilledButton.tonalIcon(
         onPressed: retry,
         icon: const Icon(Icons.refresh),
         label: const Text('Retry'),
@@ -825,7 +871,7 @@ class StatTile extends StatelessWidget {
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(color: Theme.of(context).colorScheme.outline),
       ),
       child: Column(
@@ -996,7 +1042,7 @@ class SkeletonCard extends StatelessWidget {
     padding: const EdgeInsets.all(20),
     decoration: BoxDecoration(
       color: Colors.white,
-      borderRadius: BorderRadius.circular(20),
+      borderRadius: BorderRadius.circular(AppRadius.lg),
       border: Border.all(color: Theme.of(context).colorScheme.outline),
     ),
     child: Column(
@@ -1101,4 +1147,163 @@ class BarDistribution extends StatelessWidget {
       ],
     );
   }
+}
+
+
+// --- Empty state and extra skeletons -----------------------------------------
+
+/// A friendly, borderless-card empty state: an icon, a plain sentence about
+/// what belongs here, and an optional action. [compact] shrinks it to sit
+/// inside a card or table; the default fills its own dashed-outline area.
+class EmptyState extends StatelessWidget {
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.message,
+    this.action,
+    this.compact = false,
+  });
+  final IconData icon;
+  final String title;
+  final String? message;
+  final Widget? action;
+  final bool compact;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.symmetric(
+        horizontal: AppSpace.xl,
+        vertical: compact ? AppSpace.lg : AppSpace.xxl,
+      ),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: scheme.outline),
+      ),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: compact ? 40 : 48,
+                height: compact ? 40 : 48,
+                decoration: BoxDecoration(
+                  color: scheme.primary.withValues(alpha: .10),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                ),
+                child: Icon(icon, color: scheme.primary, size: compact ? 20 : 24),
+              ),
+              const SizedBox(height: AppSpace.md),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontWeight: FontWeight.w700),
+              ),
+              if (message != null) ...[
+                const SizedBox(height: AppSpace.xs),
+                Text(
+                  message!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: scheme.onSurfaceVariant, height: 1.4),
+                ),
+              ],
+              if (action != null) ...[
+                const SizedBox(height: AppSpace.lg),
+                action!,
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Placeholder rows (avatar, two text lines, trailing pill) for tables and
+/// directories while they load. Static, like every skeleton here.
+class SkeletonRows extends StatelessWidget {
+  const SkeletonRows({super.key, this.count = 4});
+  final int count;
+  @override
+  Widget build(BuildContext context) => Column(
+    crossAxisAlignment: CrossAxisAlignment.stretch,
+    children: [
+      for (var i = 0; i < count; i++)
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+          child: Row(
+            children: [
+              const SkelBox(width: 36, height: 36, radius: 18),
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    SkelBox(width: 120.0 + (i % 3) * 36, height: 14),
+                    const SizedBox(height: 8),
+                    const SkelBox(width: 160, height: 11),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpace.md),
+              const SkelBox(width: 72, height: 24, radius: 100),
+            ],
+          ),
+        ),
+    ],
+  );
+}
+
+/// A card holding a heading bar and [rows] skeleton rows.
+class SkeletonPanel extends StatelessWidget {
+  const SkeletonPanel({super.key, this.rows = 4});
+  final int rows;
+  @override
+  Widget build(BuildContext context) => Panel(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SkelBox(width: 180, height: 18),
+        const SizedBox(height: AppSpace.xs),
+        const SkelBox(width: 260, height: 12),
+        const SizedBox(height: AppSpace.md),
+        SkeletonRows(count: rows),
+      ],
+    ),
+  );
+}
+
+/// Placeholder for a [StatGrid] of [count] tiles.
+class SkeletonStatGrid extends StatelessWidget {
+  const SkeletonStatGrid({super.key, this.count = 6, this.minTileWidth = 150});
+  final int count;
+  final double minTileWidth;
+  @override
+  Widget build(BuildContext context) => StatGrid(
+    minTileWidth: minTileWidth,
+    children: [
+      for (var i = 0; i < count; i++)
+        Container(
+          padding: const EdgeInsets.all(AppSpace.lg),
+          decoration: BoxDecoration(
+            color: Colors.white,
+            borderRadius: BorderRadius.circular(AppRadius.md),
+            border: Border.all(color: Theme.of(context).colorScheme.outline),
+          ),
+          child: const Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SkelBox(width: 90, height: 12),
+              SizedBox(height: AppSpace.md),
+              SkelBox(width: 56, height: 26),
+            ],
+          ),
+        ),
+    ],
+  );
 }

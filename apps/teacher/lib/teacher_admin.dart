@@ -37,9 +37,9 @@ enum _Target {
   role,
 }
 
-const _green = Color(0xff176451);
-const _amber = Color(0xff9a6a00);
-const _grey = Color(0xff587067);
+const _green = AppTone.success;
+const _amber = AppTone.warning;
+const _grey = AppTone.neutral;
 
 /// Key in SharedPreferences: the tour has been shown to this account.
 String adminTourSeenKey(String userId) => 'facetrack.admin.tour.v1.$userId';
@@ -62,7 +62,8 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   bool peopleStudents = false;
   bool manageAcademic = false;
   bool loading = true;
-  String? loadError, studentsError;
+  Object? loadError;
+  String? studentsError;
 
   /// Label (or number) of the record just created, highlighted until the next
   /// section change.
@@ -151,7 +152,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       if (!mounted || generation != _reloadGeneration) return;
       setState(() {
         loading = false;
-        loadError = e is AppFailure ? e.message : 'Could not load academic records.';
+        loadError = e;
       });
     }
     if (mounted && generation == _reloadGeneration && section != _Section.academics) {
@@ -262,15 +263,15 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       _Target.subject,
     ),
     _Step(
-      'Add class groups',
+      'Add sections',
       'Branch and semester, e.g. CSE · 3rd Semester.',
       groups.length,
       _Section.academics,
       _Target.section,
     ),
     _Step(
-      'Allocate subjects to class groups',
-      'Links a subject to the class group that studies it. Faculty and students work inside these.',
+      'Allocate subjects to sections',
+      'Links a subject to the section that studies it. Faculty and students work inside these.',
       offerings.length,
       _Section.academics,
       _Target.allocation,
@@ -325,7 +326,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     _Target.section => _GroupForm(
       terms: terms,
       onSubmit: (b) => _run(
-        'Class group created.',
+        'Section created.',
         () => _post('/v1/admin/class-groups', b),
         created: b['branch'] as String?,
       ),
@@ -334,7 +335,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       courses: courses,
       groups: groups,
       onSubmit: (b) => _run(
-        'Subject allocated to the class group.',
+        'Subject allocated to the section.',
         () => _post('/v1/admin/offerings', b),
         created: b['title'] as String?,
       ),
@@ -415,7 +416,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     _TourStep(
       title: 'The setup timeline',
       body:
-          'Seven steps in order: term, subjects, class groups, allocations, faculty, '
+          'Seven steps in order: term, subjects, sections, allocations, faculty, '
           'assignments and students. Each shows how many you have created.',
       section: _Section.overview,
       target: _k['timeline'],
@@ -434,7 +435,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       title: 'Academic setup',
       body:
           'Four cards, filled in order. A card stays locked until what it needs exists, '
-          'for example class groups need a semester term first.',
+          'for example sections need a semester term first.',
       section: _Section.academics,
       target: _k['academic'],
       icon: Icons.account_tree_outlined,
@@ -524,19 +525,19 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   Widget build(BuildContext context) {
     final Widget body;
     if (loading && terms.isEmpty && teachers.isEmpty) {
-      body = const Padding(
-        padding: EdgeInsets.all(40),
-        child: Center(child: CircularProgressIndicator()),
-      );
-    } else if (loadError != null) {
-      body = Panel(
-        child: MessageView(
-          icon: Icons.cloud_off_outlined,
-          title: 'Admin data could not be loaded',
-          message: loadError!,
-          action: FilledButton(onPressed: _reload, child: const Text('Retry')),
+      body = Semantics(
+        label: 'Loading the admin console',
+        child: const Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            SkeletonStatGrid(),
+            SizedBox(height: AppSpace.xl),
+            SkeletonPanel(),
+          ],
         ),
       );
+    } else if (loadError != null) {
+      body = ErrorView(loadError!, retry: _reload);
     } else {
       body = LayoutBuilder(
         builder: (context, c) {
@@ -554,10 +555,10 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 SizedBox(
-                  width: 240,
+                  width: 232,
                   child: KeyedSubtree(key: _k['nav'], child: _sideNav()),
                 ),
-                const SizedBox(width: 24),
+                const SizedBox(width: AppSpace.xl),
                 Expanded(child: content),
               ],
             );
@@ -566,7 +567,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               KeyedSubtree(key: _k['nav'], child: _topNav()),
-              const SizedBox(height: 20),
+              const SizedBox(height: AppSpace.lg),
               content,
             ],
           );
@@ -575,7 +576,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     }
     return ContentPage(
       onRefresh: _reload,
-      children: [_hero(), const SizedBox(height: 24), body],
+      children: [_hero(), const SizedBox(height: AppSpace.xl), body],
     );
   }
 
@@ -583,179 +584,176 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     final tracked = _steps.where((s) => s.count != null).toList();
     final done = tracked.where((s) => s.done).length;
     final name = ref.watch(authProvider).instituteName;
-    return Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xff0d2a2c), Color(0xff135f50), Color(0xff23906f)],
-        ),
-      ),
-      child: Wrap(
-        alignment: WrapAlignment.spaceBetween,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        spacing: 24,
-        runSpacing: 20,
-        children: [
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 620),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'ADMIN CONSOLE',
-                  style: TextStyle(
-                    color: Color(0xffa8e5cf),
-                    fontWeight: FontWeight.w700,
-                    letterSpacing: 1.6,
-                    fontSize: 12,
-                  ),
+    final phone = MediaQuery.sizeOf(context).width < 600;
+    final ringSize = phone ? 68.0 : 104.0;
+    final ring = Semantics(
+      label: 'Setup progress: $done of ${tracked.length} steps done',
+      child: ExcludeSemantics(
+        child: SizedBox(
+          key: _k['progress'],
+          width: ringSize,
+          height: ringSize,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              TweenAnimationBuilder<double>(
+                tween: Tween(end: tracked.isEmpty ? 0 : done / tracked.length),
+                duration: MediaQuery.disableAnimationsOf(context)
+                    ? Duration.zero
+                    : const Duration(milliseconds: 700),
+                curve: Curves.easeOutCubic,
+                builder: (_, v, _) => CircularProgressIndicator(
+                  value: v,
+                  strokeWidth: phone ? 6 : 8,
+                  strokeCap: StrokeCap.round,
+                  backgroundColor: const Color(0x33ffffff),
+                  valueColor: const AlwaysStoppedAnimation(Colors.white),
                 ),
-                const SizedBox(height: 6),
-                const Text(
-                  'Administration',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 28,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -.5,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  '${name.isEmpty ? 'Your institute' : name}: set up subjects and class groups, '
-                  'add people and control who can do what.',
-                  style: const TextStyle(
-                    color: Color(0xffd5e9e2),
-                    height: 1.45,
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Theme(
-                  data: Theme.of(context).copyWith(
-                    filledButtonTheme: FilledButtonThemeData(
-                      style: FilledButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: const Color(0xff135f50),
-                      ),
-                    ),
-                    outlinedButtonTheme: OutlinedButtonThemeData(
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: Colors.white,
-                        side: const BorderSide(color: Color(0x66ffffff)),
-                      ),
-                    ),
-                  ),
-                  child: Wrap(
-                    spacing: 10,
-                    runSpacing: 10,
+              ),
+              Padding(
+                padding: EdgeInsets.all(phone ? 12 : 16),
+                child: FittedBox(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      FilledButton.icon(
-                        key: _k['tour'],
-                        onPressed: _startTour,
-                        icon: const Icon(Icons.play_circle_outline),
-                        label: const Text('Take the tour'),
+                      Text(
+                        '$done/${tracked.length}',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 24,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                      OutlinedButton.icon(
-                        onPressed: loading ? null : _reload,
-                        icon: const Icon(Icons.refresh),
-                        label: const Text('Refresh'),
+                      const Text(
+                        'setup steps',
+                        style: TextStyle(color: Brand.mint, fontSize: 12),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          Semantics(
-            label: 'Setup progress: $done of ${tracked.length} steps done',
-            child: ExcludeSemantics(
-              child: SizedBox(
-                key: _k['progress'],
-                width: 120,
-                height: 120,
-                child: Stack(
-                  fit: StackFit.expand,
-                  children: [
-                    TweenAnimationBuilder<double>(
-                      tween: Tween(
-                        end: tracked.isEmpty ? 0 : done / tracked.length,
-                      ),
-                      duration: const Duration(milliseconds: 700),
-                      curve: Curves.easeOutCubic,
-                      builder: (_, v, _) => CircularProgressIndicator(
-                        value: v,
-                        strokeWidth: 10,
-                        strokeCap: StrokeCap.round,
-                        backgroundColor: const Color(0x33ffffff),
-                        valueColor: const AlwaysStoppedAnimation(Colors.white),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.all(18),
-                      child: FittedBox(
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Text(
-                              '$done/${tracked.length}',
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 24,
-                                fontWeight: FontWeight.w800,
-                              ),
-                            ),
-                            const Text(
-                              'setup steps',
-                              style: TextStyle(
-                                color: Color(0xffd5e9e2),
-                                fontSize: 12,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
               ),
-            ),
+            ],
+          ),
+        ),
+      ),
+    );
+    const title = Text(
+      'Administration',
+      style: TextStyle(
+        color: Colors.white,
+        fontSize: 26,
+        fontWeight: FontWeight.w800,
+        letterSpacing: -.5,
+      ),
+    );
+    final subtitle = Text(
+      '${name.isEmpty ? 'Your institute' : name}: set up subjects and sections, '
+      'add people and control who can do what.',
+      style: const TextStyle(color: Brand.mint, height: 1.45),
+    );
+    final actions = Theme(
+      data: Theme.of(context).copyWith(
+        filledButtonTheme: FilledButtonThemeData(
+          style: FilledButton.styleFrom(
+            backgroundColor: Colors.white,
+            foregroundColor: Brand.green,
+          ),
+        ),
+        outlinedButtonTheme: OutlinedButtonThemeData(
+          style: OutlinedButton.styleFrom(
+            foregroundColor: Colors.white,
+            side: const BorderSide(color: Color(0x66ffffff)),
+          ),
+        ),
+      ),
+      child: Wrap(
+        spacing: 10,
+        runSpacing: 10,
+        children: [
+          FilledButton.icon(
+            key: _k['tour'],
+            onPressed: _startTour,
+            icon: const Icon(Icons.play_circle_outline),
+            label: const Text('Take the tour'),
+          ),
+          OutlinedButton.icon(
+            onPressed: loading ? null : _reload,
+            icon: const Icon(Icons.refresh),
+            label: const Text('Refresh'),
           ),
         ],
       ),
     );
+    return Container(
+      padding: EdgeInsets.all(phone ? AppSpace.lg + 4 : 28),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(AppRadius.xl),
+        gradient: Brand.gradient,
+      ),
+      child: phone
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    const Expanded(child: title),
+                    const SizedBox(width: AppSpace.md),
+                    ring,
+                  ],
+                ),
+                const SizedBox(height: AppSpace.sm),
+                subtitle,
+                const SizedBox(height: AppSpace.lg),
+                actions,
+              ],
+            )
+          : Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      title,
+                      const SizedBox(height: AppSpace.xs + 2),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 620),
+                        child: subtitle,
+                      ),
+                      const SizedBox(height: AppSpace.lg),
+                      actions,
+                    ],
+                  ),
+                ),
+                const SizedBox(width: AppSpace.xl),
+                ring,
+              ],
+            ),
+    );
   }
 
-  ({IconData icon, String title, String about, String? badge}) _navInfo(
-    _Section s,
-  ) {
+  ({IconData icon, String title, String? badge}) _navInfo(_Section s) {
     final steps = _steps.where((x) => x.section == s && x.count != null);
     final complete = steps.isNotEmpty && steps.every((x) => x.done);
     return switch (s) {
       _Section.overview => (
         icon: Icons.dashboard_outlined,
         title: 'Overview',
-        about: 'Progress, next step, statistics',
         badge: null,
       ),
       _Section.academics => (
         icon: Icons.account_tree_outlined,
         title: 'Academic setup',
-        about: 'Terms, subjects, class groups',
         badge: complete ? 'done' : null,
       ),
       _Section.people => (
         icon: Icons.people_outline,
         title: 'People',
-        about: 'Faculty, students, logins',
         badge: complete ? 'done' : '${teachers.length + students.length}',
       ),
       _Section.access => (
         icon: Icons.key_outlined,
         title: 'Access',
-        about: 'Assignments and roles',
         badge: null,
       ),
     };
@@ -764,7 +762,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   Widget _sideNav() {
     final scheme = Theme.of(context).colorScheme;
     return Panel(
-      padding: 8,
+      padding: AppSpace.sm,
       child: Column(
         children: [
           for (final s in _Section.values)
@@ -777,46 +775,42 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                     color: on
                         ? scheme.primary.withValues(alpha: .10)
                         : Colors.transparent,
-                    borderRadius: BorderRadius.circular(14),
+                    borderRadius: BorderRadius.circular(AppRadius.md),
                     child: InkWell(
-                      borderRadius: BorderRadius.circular(14),
+                      borderRadius: BorderRadius.circular(AppRadius.md),
                       onTap: () => _goSection(s),
                       child: Padding(
-                        padding: const EdgeInsets.all(12),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 12,
+                          vertical: 13,
+                        ),
                         child: Row(
                           children: [
                             Icon(
                               info.icon,
+                              size: 22,
                               color: on
                                   ? scheme.primary
                                   : scheme.onSurfaceVariant,
                             ),
                             const SizedBox(width: 12),
                             Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(
-                                    info.title,
-                                    style: TextStyle(
-                                      fontWeight: FontWeight.w700,
-                                      color: on ? scheme.primary : null,
-                                    ),
-                                  ),
-                                  Text(
-                                    info.about,
-                                    style: TextStyle(
-                                      fontSize: 12,
-                                      color: scheme.onSurfaceVariant,
-                                    ),
-                                  ),
-                                ],
+                              child: Text(
+                                info.title,
+                                style: TextStyle(
+                                  fontWeight: on
+                                      ? FontWeight.w700
+                                      : FontWeight.w600,
+                                  color: on
+                                      ? scheme.primary
+                                      : scheme.onSurface,
+                                ),
                               ),
                             ),
                             if (info.badge == 'done')
                               const Icon(
                                 Icons.check_circle,
-                                color: _green,
+                                color: AppTone.success,
                                 size: 18,
                               )
                             else if (info.badge != null)
@@ -837,24 +831,33 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
     );
   }
 
+  /// Phones: the four areas as a row of pills that scrolls sideways if needed.
   Widget _topNav() => SingleChildScrollView(
     scrollDirection: Axis.horizontal,
-    child: SegmentedButton<_Section>(
-      showSelectedIcon: false,
-      segments: [
+    child: Row(
+      children: [
         for (final s in _Section.values)
-          ButtonSegment(
-            value: s,
-            icon: Icon(
-              _navInfo(s).badge == 'done'
-                  ? Icons.check_circle
-                  : _navInfo(s).icon,
+          Padding(
+            padding: const EdgeInsets.only(right: AppSpace.sm),
+            child: ChoiceChip(
+              showCheckmark: false,
+              avatar: Icon(
+                _navInfo(s).badge == 'done'
+                    ? Icons.check_circle
+                    : _navInfo(s).icon,
+                size: 18,
+                color: section == s
+                    ? Theme.of(context).colorScheme.primary
+                    : _navInfo(s).badge == 'done'
+                    ? AppTone.success
+                    : Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
+              label: Text(_navInfo(s).title),
+              selected: section == s,
+              onSelected: (_) => _goSection(s),
             ),
-            label: Text(_navInfo(s).title),
           ),
       ],
-      selected: {section},
-      onSelectionChanged: (v) => _goSection(v.first),
     ),
   );
 
@@ -951,7 +954,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                 _quick(
                   Icons.link_outlined,
                   'Allocate subject',
-                  'Subject to a class group',
+                  'Subject to a section',
                   () => _open(_Target.allocation),
                 ),
                 _quick(
@@ -990,8 +993,8 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               'Institute at a glance',
               tip: const _InfoTip(
                 'What these numbers mean',
-                'Semester terms, subjects and class groups make up the academic structure. An '
-                    'allocation is one subject taught to one class group. "With login" counts people '
+                'Semester terms, subjects and sections make up the academic structure. An '
+                    'allocation is one subject taught to one section. "With login" counts people '
                     'who can sign in.',
               ),
             ),
@@ -1009,7 +1012,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                   icon: Icons.menu_book_outlined,
                 ),
                 StatTile(
-                  label: 'Class groups',
+                  label: 'Sections',
                   value: groups.length,
                   icon: Icons.groups_2_outlined,
                 ),
@@ -1067,10 +1070,13 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
   Widget _quick(IconData icon, String title, String sub, VoidCallback onTap) {
     final scheme = Theme.of(context).colorScheme;
     return Material(
-      color: scheme.surfaceContainerLowest,
-      borderRadius: BorderRadius.circular(16),
+      color: Colors.white,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        side: BorderSide(color: scheme.outline),
+      ),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.all(14),
@@ -1080,7 +1086,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                 padding: const EdgeInsets.all(9),
                 decoration: BoxDecoration(
                   color: scheme.primary.withValues(alpha: .10),
-                  borderRadius: BorderRadius.circular(12),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
                 child: Icon(icon, color: scheme.primary, size: 22),
               ),
@@ -1126,7 +1132,17 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         : isNext
         ? ('Up next', _amber)
         : ('Not started', _grey);
-    return IntrinsicHeight(
+    final action = TextButton(
+      onPressed: () => untracked ? _goSection(s.section) : _open(s.target),
+      child: Text(untracked ? 'Open' : (s.done ? 'Add more' : 'Start')),
+    );
+    // Wide rows keep the status and action on the right of the text.
+    return LayoutBuilder(
+      builder: (context, c) {
+        final inline =
+            c.maxWidth >= 640 &&
+            MediaQuery.textScalerOf(context).scale(1) <= 1.3;
+        return IntrinsicHeight(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -1136,7 +1152,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               children: [
                 const SizedBox(height: 10),
                 CircleAvatar(
-                  radius: 15,
+                  radius: 14,
                   backgroundColor: s.done
                       ? _green
                       : isNext
@@ -1147,6 +1163,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                       : Text(
                           '$n',
                           style: TextStyle(
+                            fontSize: 13,
                             fontWeight: FontWeight.w700,
                             color: isNext
                                 ? Colors.white
@@ -1161,67 +1178,90 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                       margin: const EdgeInsets.only(top: 4),
                       color: s.done
                           ? _green.withValues(alpha: .5)
-                          : theme.colorScheme.outlineVariant,
+                          : theme.colorScheme.outline,
                     ),
                   ),
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: AppSpace.md),
           Expanded(
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 10),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    s.title,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    s.help,
-                    style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
-                  ),
-                  const SizedBox(height: 6),
-                  Wrap(
-                    spacing: 10,
-                    runSpacing: 6,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
+              padding: const EdgeInsets.symmetric(vertical: AppSpace.sm),
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpace.md,
+                  vertical: AppSpace.sm,
+                ),
+                decoration: BoxDecoration(
+                  color: isNext
+                      ? theme.colorScheme.primary.withValues(alpha: .05)
+                      : null,
+                  borderRadius: BorderRadius.circular(AppRadius.md),
+                  border: isNext
+                      ? Border.all(
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: .25,
+                          ),
+                        )
+                      : null,
+                ),
+                child: Builder(
+                  builder: (context) {
+                    final text = Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          s.title,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
                         ),
-                        decoration: BoxDecoration(
-                          color: color.withValues(alpha: .10),
-                          borderRadius: BorderRadius.circular(99),
-                        ),
-                        child: Text(
-                          label,
+                        const SizedBox(height: 2),
+                        Text(
+                          s.help,
                           style: TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w700,
-                            color: color,
+                            fontSize: 13,
+                            height: 1.4,
+                            color: theme.colorScheme.onSurfaceVariant,
                           ),
                         ),
-                      ),
-                      TextButton(
-                        onPressed: () =>
-                            untracked ? _goSection(s.section) : _open(s.target),
-                        child: Text(
-                          untracked ? 'Open' : (s.done ? 'Add more' : 'Start'),
+                      ],
+                    );
+                    if (inline) {
+                      return Row(
+                        children: [
+                          Expanded(child: text),
+                          const SizedBox(width: AppSpace.md),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 200),
+                            child: TonePill(label, tone: color),
+                          ),
+                          const SizedBox(width: AppSpace.xs),
+                          SizedBox(width: 84, child: action),
+                        ],
+                      );
+                    }
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        text,
+                        const SizedBox(height: AppSpace.sm),
+                        Wrap(
+                          spacing: 10,
+                          runSpacing: 4,
+                          crossAxisAlignment: WrapCrossAlignment.center,
+                          children: [TonePill(label, tone: color), action],
                         ),
-                      ),
-                    ],
-                  ),
-                ],
+                      ],
+                    );
+                  },
+                ),
               ),
             ),
           ),
         ],
       ),
+    );
+      },
     );
   }
 
@@ -1276,17 +1316,17 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       children: [
         _chartTitle(
           'By semester',
-          'Class groups and subject allocations in each semester',
+          'Sections and subject allocations in each semester',
         ),
         if (semesters.isEmpty)
-          const Text('Add class groups to see them by semester.')
+          const Text('Add sections to see them by semester.')
         else
           BarDistribution(
             labelWidth: 132,
             bars: [
               for (final s in semesters) ...[
                 BarDatum(
-                  '${semesterLabel(s)} class groups',
+                  '${semesterLabel(s)} sections',
                   sections[s] ?? 0,
                   const Color(0xff146653),
                 ),
@@ -1358,7 +1398,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         tip: const _InfoTip(
           'Semester term',
           'A semester term is the period classes run in, such as 2026-ODD (Odd Semester 2026). '
-              'Create it first: class groups belong to a term.',
+              'Create it first: sections belong to a term.',
         ),
         items: [for (final t in terms) t.label],
         fresh: fresh,
@@ -1374,7 +1414,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         tip: const _InfoTip(
           'Subject',
           'A subject is a course with a code, e.g. BCS 201 · Design & Analysis of Algorithm. '
-              'Add it once; it can then be taught to several class groups.',
+              'Add it once; it can then be taught to several sections.',
         ),
         items: [for (final c in courses) c.label],
         fresh: fresh,
@@ -1384,16 +1424,16 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
       _SetupCard(
         number: 3,
         icon: Icons.groups_2_outlined,
-        title: 'Class groups',
+        title: 'Sections',
         about: 'A group of students: branch and semester.',
         tip: const _InfoTip(
-          'Class group',
-          'A class group is one group of students that attends classes together, e.g. '
+          'Section',
+          'A section is one group of students that attends classes together, e.g. '
               'CSE · 3rd Semester. It belongs to a semester term.',
         ),
-        items: [for (final g in groups) g.label],
+        items: [for (final g in groups) _sectionLabel(g)],
         fresh: fresh,
-        addLabel: 'Add class group',
+        addLabel: 'Add section',
         blocked: terms.isEmpty ? 'Create a semester term first.' : null,
         onAdd: () => _open(_Target.section),
       ),
@@ -1401,11 +1441,11 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         number: 4,
         icon: Icons.link_outlined,
         title: 'Allocations',
-        about: 'Which subject each class group studies.',
+        about: 'Which subject each section studies.',
         tip: const _InfoTip(
           'Allocation',
-          'An allocation links one subject to one class group. Faculty take attendance and students '
-              'join inside allocations, so add one for every subject a class group studies.',
+          'An allocation links one subject to one section. Faculty take attendance and students '
+              'join inside allocations, so add one for every subject a section studies.',
         ),
         items: [for (final o in offerings) '${o.title} · ${o.subtitle}'],
         fresh: fresh,
@@ -1413,23 +1453,22 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
         blocked: courses.isEmpty
             ? 'Add a subject first.'
             : groups.isEmpty
-            ? 'Add a class group first.'
+            ? 'Add a section first.'
             : null,
         onAdd: () => _open(_Target.allocation),
       ),
     ];
     return [
-      const _Heading(
+      _Heading(
         'Academic setup',
         subtitle:
-            'Build the structure in order: term → subjects → class groups → allocations. '
+            'Build the structure in order: term → subjects → sections → allocations. '
             'Use the names and codes from the timetable.',
-      ),
-      Align(
-        alignment: Alignment.centerLeft,
-        child: OutlinedButton.icon(
+        trailing: OutlinedButton.icon(
           icon: Icon(manageAcademic ? Icons.expand_less : Icons.edit_outlined),
-          label: Text(manageAcademic ? 'Hide record editor' : 'Manage academic records'),
+          label: Text(
+            manageAcademic ? 'Hide record editor' : 'Manage academic records',
+          ),
           onPressed: () => setState(() => manageAcademic = !manageAcademic),
         ),
       ),
@@ -1621,7 +1660,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
                   'missing from the list, add them in People or give them the Faculty role.',
             ),
             points: const [
-              'Do this for every subject after allocating it to a class group.',
+              'Do this for every subject after allocating it to a section.',
               'A subject can have more than one faculty member.',
             ],
             action: FilledButton.icon(
@@ -1637,7 +1676,7 @@ class _TeacherAdminState extends ConsumerState<TeacherAdmin> {
               padding: const EdgeInsets.only(top: 8),
               child: _Note(
                 offerings.isEmpty
-                    ? 'Allocate a subject to a class group first (Academic setup).'
+                    ? 'Allocate a subject to a section first (Academic setup).'
                     : 'Add faculty first (People).',
               ),
             ),
@@ -1781,7 +1820,7 @@ class _SetupCard extends StatelessWidget {
                   color: (done ? _green : scheme.primary).withValues(
                     alpha: .10,
                   ),
-                  borderRadius: BorderRadius.circular(14),
+                  borderRadius: BorderRadius.circular(AppRadius.md),
                 ),
                 child: Icon(
                   done ? Icons.check_circle : icon,
@@ -1807,46 +1846,68 @@ class _SetupCard extends StatelessWidget {
                 ),
               ),
               tip,
+              const SizedBox(width: AppSpace.xs),
               Text(
                 '${items.length}',
                 style: TextStyle(
                   fontSize: 26,
                   fontWeight: FontWeight.w800,
+                  letterSpacing: -.5,
                   color: done ? _green : scheme.onSurfaceVariant,
                 ),
               ),
             ],
           ),
-          const SizedBox(height: 8),
-          Text(about, style: TextStyle(color: scheme.onSurfaceVariant)),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            about,
+            style: TextStyle(color: scheme.onSurfaceVariant, height: 1.4),
+          ),
+          const SizedBox(height: AppSpace.md),
           if (items.isEmpty)
-            Text(
-              'None yet.',
-              style: TextStyle(
-                color: scheme.onSurfaceVariant,
-                fontStyle: FontStyle.italic,
-              ),
+            const EmptyState(
+              compact: true,
+              icon: Icons.inbox_outlined,
+              title: 'Nothing added yet',
             )
           else
-            Wrap(
-              spacing: 6,
-              runSpacing: 6,
-              children: [
-                for (final i in items.take(4))
-                  Chip(
-                    visualDensity: VisualDensity.compact,
-                    label: Text(i, overflow: TextOverflow.ellipsis),
-                    side: fresh != null && i.contains(fresh!)
-                        ? const BorderSide(color: _green, width: 2)
-                        : null,
-                  ),
-              ],
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: scheme.outline),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Column(
+                children: [
+                  for (final (i, label) in items.take(4).indexed)
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpace.md,
+                        vertical: 10,
+                      ),
+                      decoration: BoxDecoration(
+                        color: fresh != null && label.contains(fresh!)
+                            ? _green.withValues(alpha: .10)
+                            : null,
+                        border: i == 0
+                            ? null
+                            : Border(top: BorderSide(color: scheme.outline)),
+                      ),
+                      child: Text(
+                        label,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                ],
+              ),
             ),
-          const SizedBox(height: 12),
+          const SizedBox(height: AppSpace.md),
           if (blocked != null)
             Padding(
-              padding: const EdgeInsets.only(bottom: 8),
+              padding: const EdgeInsets.only(bottom: AppSpace.sm),
               child: Row(
                 children: [
                   const Icon(Icons.lock_outline, size: 16, color: _amber),
@@ -1863,6 +1924,7 @@ class _SetupCard extends StatelessWidget {
           Wrap(
             spacing: 8,
             runSpacing: 8,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               FilledButton.tonalIcon(
                 key: addKey,

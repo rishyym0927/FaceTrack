@@ -84,6 +84,7 @@ void main() {
     await tester.tap(find.text('Attendance').first);
     await tester.pumpAndSettle();
     expect(find.text('No published attendance yet'), findsOneWidget);
+    expect(find.text('Go to subjects'), findsOneWidget);
     expect(dashboardReads, 1);
     expect(tester.takeException(), isNull);
   });

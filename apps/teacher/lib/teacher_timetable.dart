@@ -9,6 +9,8 @@ import 'package:facetrack_models/facetrack_models.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
+import 'teacher_reports.dart' show friendlyError;
+
 const timetableColumns =
     'entry_key,term_code,course_code,branch,semester,section,teacher_email,room_code,weekday,start_time,end_time,effective_from,effective_until,timezone\n';
 
@@ -95,7 +97,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
         error = null;
       });
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = friendlyError(e));
     }
   }
 
@@ -124,7 +126,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
         resumeUrl = null;
       });
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = friendlyError(e));
     }
   }
 
@@ -137,7 +139,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
         dialogTitle: 'Save timetable template',
       );
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = friendlyError(e));
     }
   }
 
@@ -252,7 +254,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
       importId = result['resource_id'] as String;
       await poll();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = friendlyError(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -323,7 +325,7 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
       });
       widget.changed();
     } catch (e) {
-      if (mounted) setState(() => error = e.toString());
+      if (mounted) setState(() => error = friendlyError(e));
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -333,105 +335,190 @@ class _TeacherTimetableState extends State<TeacherTimetable> {
   Widget build(BuildContext context) {
     final rows = (preview?['preview_json']?['rows'] as List?) ?? const [];
     final errors = (preview?['preview_json']?['errors'] as List?) ?? const [];
+    final scheme = Theme.of(context).colorScheme;
+    final muted = TextStyle(color: scheme.onSurfaceVariant);
+    Widget step(int n, String title, List<Widget> body) => Padding(
+      padding: const EdgeInsets.only(bottom: 20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          CircleAvatar(
+            radius: 13,
+            backgroundColor: scheme.primary.withValues(alpha: .10),
+            child: Text(
+              '$n',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+                color: scheme.primary,
+              ),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 3, bottom: 8),
+                  child: Text(
+                    title,
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+                ...body,
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
     return Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('Timetable CSV', style: Theme.of(context).textTheme.titleMedium),
-          const SizedBox(height: 8),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: [
-              TextButton.icon(
-                onPressed: saveTemplate,
-                icon: const Icon(Icons.download_outlined),
-                label: const Text('Download CSV template'),
+          step(1, 'Prepare your CSV', [
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                OutlinedButton.icon(
+                  onPressed: saveTemplate,
+                  icon: const Icon(Icons.download_outlined),
+                  label: const Text('Download CSV template'),
+                ),
+                TextButton.icon(
+                  onPressed: createRoom,
+                  icon: const Icon(Icons.meeting_room_outlined),
+                  label: const Text('Add room'),
+                ),
+              ],
+            ),
+            const ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: Text('CSV format and import help'),
+              childrenPadding: EdgeInsets.only(bottom: 12),
+              expandedCrossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Add the rooms used by your CSV before importing. Check the validated entries before confirming. Sessions open manually.',
+                ),
+                SizedBox(height: 8),
+                Text(
+                  'Use one row per weekly period. Match the approved semester term, subject code, faculty email and room code. Leave the section column blank for a section created without a letter. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as BCS201-CSE1-Mon-09.',
+                ),
+              ],
+            ),
+          ]),
+          step(2, 'Upload and validate', [
+            Wrap(
+              spacing: 10,
+              runSpacing: 8,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              children: [
+                (selected == null ? FilledButton.icon : OutlinedButton.icon)(
+                  onPressed: busy ? null : choose,
+                  icon: const Icon(Icons.upload_file_outlined),
+                  label: const Text('Choose CSV'),
+                ),
+                if (selected != null)
+                  FilledButton(
+                    onPressed: busy || termId == null ? null : upload,
+                    child: Text(
+                      busy ? 'Checking timetable…' : 'Upload for validation',
+                    ),
+                  ),
+              ],
+            ),
+            if (filename != null && selected != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text('Selected file: $filename', style: muted),
               ),
-              FilledButton.icon(
-                onPressed: busy ? null : choose,
-                icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('Choose CSV'),
+            if ((busy && preview?['status'] != 'ready') ||
+                preview?['status'] == 'queued') ...[
+              const SizedBox(height: 10),
+              const LinearProgressIndicator(
+                semanticsLabel: 'Validating timetable',
               ),
-              TextButton.icon(
-                onPressed: createRoom,
-                icon: const Icon(Icons.meeting_room_outlined),
-                label: const Text('Add room'),
-              ),
+              if (preview?['status'] == 'queued')
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text('Waiting for validation…'),
+                ),
             ],
-          ),
-          const ExpansionTile(
-            title: Text('CSV format and import help'),
-            childrenPadding: EdgeInsets.fromLTRB(16, 0, 16, 12),
-            children: [
+          ]),
+          if (errors.isNotEmpty)
+            step(3, 'Fix these issues', [
+              const Text(
+                'Check the room code, approved subject code, section, assigned faculty and semester dates. Fix any issue, then choose and upload the CSV again:',
+              ),
+              const SizedBox(height: 6),
+              for (final e in errors.take(8)) Text('• ${e['message']}'),
+            ]),
+          if (preview?['status'] == 'ready')
+            step(3, 'Check and confirm', [
               Text(
-                'Add the rooms used by your CSV before importing. Check the validated entries before confirming. Sessions open manually.',
+                '${rows.length} valid timetable ${rows.length == 1 ? 'entry' : 'entries'}',
+                style: const TextStyle(fontWeight: FontWeight.w700),
               ),
-              SizedBox(height: 8),
+              const SizedBox(height: 4),
+              for (final row in rows.take(12))
+                Text(
+                  '${row['course_code']} · ${row['branch']}${row['section'] == '' || row['section'] == 'ALL' ? '' : ' ${row['section']}'} · ${row['weekday']} ${row['start_time']}–${row['end_time']} · ${row['room_code']}',
+                ),
+              if (rows.length > 12) Text('… and ${rows.length - 12} more'),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: () async {
+                  final picked = await showDatePicker(
+                    context: context,
+                    initialDate: date,
+                    firstDate: DateTime.now().subtract(
+                      const Duration(days: 30),
+                    ),
+                    lastDate: DateTime.now().add(const Duration(days: 180)),
+                  );
+                  if (picked != null && mounted) setState(() => date = picked);
+                },
+                child: Text(
+                  'Session date: ${MaterialLocalizations.of(context).formatMediumDate(date)} · change',
+                ),
+              ),
               Text(
-                'Use one row per weekly period. Match the approved semester term, subject code, faculty email and room code. Leave the section column blank for a class group created without a section. Weekday is MON, TUE, WED, THU, FRI, SAT or SUN; times use HH:MM, dates use YYYY-MM-DD, timezone is Asia/Kolkata. Entry key is a stable label such as BCS201-CSE1-Mon-09.',
+                'This creates sessions for the selected date only. Choose a day that matches at least one CSV weekday and falls within its effective dates.',
+                style: muted,
               ),
-            ],
-          ),
-          if (filename != null && selected != null)
-            Padding(
-              padding: const EdgeInsets.symmetric(vertical: 8),
-              child: Text('Selected file: $filename'),
-            ),
-          if (selected != null)
-            FilledButton(
-              onPressed: busy || termId == null ? null : upload,
-              child: Text(
-                busy ? 'Checking timetable…' : 'Upload for validation',
+              const SizedBox(height: 12),
+              FilledButton(
+                onPressed: busy ? null : confirm,
+                child: const Text('Confirm timetable'),
               ),
-            ),
-          if (preview?['status'] == 'queued')
-            const Text('Waiting for validation…'),
-          if (errors.isNotEmpty) ...[
-            const Text(
-              'Check the room code, approved subject code, section, assigned faculty and semester dates. Fix any issue, then choose and upload the CSV again:',
-            ),
-            for (final e in errors.take(8)) Text('• ${e['message']}'),
-          ],
-          if (preview?['status'] == 'ready') ...[
-            const SizedBox(height: 12),
-            Text(
-              '${rows.length} valid timetable ${rows.length == 1 ? 'entry' : 'entries'}',
-              style: Theme.of(context).textTheme.titleMedium,
-            ),
-            for (final row in rows.take(12))
-              Text(
-                '${row['course_code']} · ${row['branch']}${row['section'] == '' || row['section'] == 'ALL' ? '' : ' ${row['section']}'} · ${row['weekday']} ${row['start_time']}–${row['end_time']} · ${row['room_code']}',
-              ),
-            if (rows.length > 12) Text('… and ${rows.length - 12} more'),
-            TextButton(
-              onPressed: () async {
-                final picked = await showDatePicker(
-                  context: context,
-                  initialDate: date,
-                  firstDate: DateTime.now().subtract(const Duration(days: 30)),
-                  lastDate: DateTime.now().add(const Duration(days: 180)),
-                );
-                if (picked != null && mounted) setState(() => date = picked);
-              },
-              child: Text(
-                'Session date: ${MaterialLocalizations.of(context).formatMediumDate(date)} · change',
-              ),
-            ),
-            const Text(
-              'This creates sessions for the selected date only. Choose a day that matches at least one CSV weekday and falls within its effective dates.',
-            ),
-            FilledButton(
-              onPressed: busy ? null : confirm,
-              child: const Text('Confirm timetable'),
-            ),
-          ],
+            ]),
           if (error != null)
             Semantics(
               liveRegion: true,
-              child: Text(
-                error!,
-                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              child: Container(
+                padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
+                decoration: BoxDecoration(
+                  color: scheme.error.withValues(alpha: .07),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: scheme.error.withValues(alpha: .25),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.error_outline, color: scheme.error, size: 20),
+                    const SizedBox(width: 10),
+                    Expanded(child: Text(error!)),
+                    if (termId == null)
+                      TextButton(
+                        onPressed: prepare,
+                        child: const Text('Retry'),
+                      ),
+                  ],
+                ),
               ),
             ),
         ],

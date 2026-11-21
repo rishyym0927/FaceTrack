@@ -64,7 +64,7 @@ class _AcademicManagementState extends State<_AcademicManagement> {
         kind: 'class-groups',
         id: g.id,
         version: g.version,
-        label: g.label,
+        label: _sectionLabel(g),
         fields: {'semester': g.semester},
         term: codes[g.termId],
       );
@@ -84,7 +84,7 @@ class _AcademicManagementState extends State<_AcademicManagement> {
   static const labels = {
     'terms': 'Semester term',
     'courses': 'Catalog subject',
-    'class-groups': 'Class group',
+    'class-groups': 'Section',
     'offerings': 'Teaching allocation',
   };
 
@@ -249,7 +249,7 @@ class _AcademicEditorState extends State<_AcademicEditor> {
             'This display name applies only to this teaching allocation.',
           'terms' =>
             'These dates and this code apply to the entire semester term.',
-          _ => 'This semester number applies to the class group and all its allocations.',
+          _ => 'This semester number applies to the section and all its allocations.',
         }),
         for (final field in controllers.entries) ...[
           const SizedBox(height: 12),

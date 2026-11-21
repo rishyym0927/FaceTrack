@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:dio/dio.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_teacher/teacher_admin.dart';
@@ -137,6 +139,9 @@ void main() {
   );
 
   Future<void> section(WidgetTester tester, String name) async {
+    // On phones the area pills scroll sideways: bring the one we want into view.
+    await tester.ensureVisible(find.text(name).first);
+    await tester.pumpAndSettle();
     await tester.tap(find.text(name).first);
     await tester.pumpAndSettle();
   }
@@ -165,6 +170,105 @@ void main() {
     expect(writes.single.headers['If-Match'], '1');
     expect(writes.single.data, {'title': 'Compilers Lab'});
     expect(find.text('Academic record updated.'), findsOneWidget);
+  });
+
+  testWidgets('First load shows skeleton placeholders', (
+    tester,
+  ) async {
+    final h = await _admin(tester);
+    final gate = Completer<void>();
+    final ok = _adapter(h.account, []);
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path.startsWith('/v1/academics/')) await gate.future;
+      return ok.handler(r);
+    });
+    await _pumpAdmin(tester, h);
+    expect(find.byType(SkeletonStatGrid), findsOneWidget);
+    expect(find.byType(SkeletonPanel), findsOneWidget);
+    gate.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(SkeletonPanel), findsNothing);
+    expect(find.text('Setup checklist'), findsOneWidget);
+  });
+
+  testWidgets('A failed load explains itself and Retry recovers', (
+    tester,
+  ) async {
+    final h = await _admin(tester);
+    var failing = true;
+    final ok = _adapter(h.account, []);
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (failing && r.path.startsWith('/v1/academics/')) {
+        return jsonResponse({
+          'error': {
+            'code': 'UNAVAILABLE',
+            'message': 'The service is busy.',
+            'request_id': 'r',
+            'retryable': true,
+          },
+        }, 503);
+      }
+      return ok.handler(r);
+    });
+    await _pumpAdmin(tester, h);
+    expect(find.text('Service temporarily unavailable'), findsOneWidget);
+    // One card, not a card inside a card.
+    expect(
+      find.descendant(
+        of: find.byType(Panel),
+        matching: find.byType(Panel),
+      ),
+      findsNothing,
+    );
+    failing = false;
+    await tester.tap(find.text('Retry'));
+    await tester.pumpAndSettle();
+    expect(find.text('Setup checklist'), findsOneWidget);
+  });
+
+  testWidgets('The people directory is a table on wide screens', (
+    tester,
+  ) async {
+    final h = await _admin(tester);
+    h.services.api.dio.httpClientAdapter = _adapter(
+      h.account,
+      [],
+      students: [
+        {
+          'id': 's1',
+          'official_name': 'Asha Verma',
+          'enrollment_number': '0001',
+          'official_email': 'asha@example.edu',
+          'status': 'approved',
+        },
+      ],
+    );
+    await _pumpAdmin(tester, h);
+    await section(tester, 'People');
+    await tester.tap(find.text('Students 1'));
+    await tester.pumpAndSettle();
+    expect(find.text('Enrolment number'), findsOneWidget);
+    expect(find.text('Email'), findsOneWidget);
+    expect(find.text('0001'), findsOneWidget);
+  });
+
+  testWidgets('A section without a letter reads as branch and semester', (
+    tester,
+  ) async {
+    final h = await _admin(tester);
+    h.services.api.dio.httpClientAdapter = _adapter(
+      h.account,
+      [],
+      academics: {
+        'class-groups': [
+          {'id': 'g1', 'branch': 'CSE', 'semester': 3, 'version': 1},
+        ],
+      },
+    );
+    await _pumpAdmin(tester, h);
+    await section(tester, 'Academic setup');
+    expect(find.text('CSE · 3rd Semester'), findsOneWidget);
+    expect(find.textContaining('null'), findsNothing);
   });
 
   testWidgets('Admin opens on a console that names the next step', (
@@ -249,7 +353,7 @@ void main() {
     expect(find.text('Semester term created.'), findsOneWidget);
   });
 
-  testWidgets('New class groups and faculty omit legacy identifiers', (
+  testWidgets('New sections and faculty omit legacy identifiers', (
     tester,
   ) async {
     final h = await _admin(tester);
@@ -265,7 +369,7 @@ void main() {
     );
     await _pumpAdmin(tester, h);
     await section(tester, 'Academic setup');
-    await tester.tap(find.text('Add class group'));
+    await tester.tap(find.text('Add section'));
     await tester.pumpAndSettle();
     await tester.enterText(
       find.widgetWithText(TextFormField, 'Branch (e.g. CSE)'),
@@ -275,7 +379,7 @@ void main() {
       find.widgetWithText(TextFormField, 'Semester (1–20)'),
       '1',
     );
-    await tester.tap(find.text('Create class group'));
+    await tester.tap(find.text('Create section'));
     await tester.pumpAndSettle();
     expect(posts.single.data, {
       'term_id': 'term1',
@@ -351,7 +455,7 @@ void main() {
     expect(find.text('Create a semester term first.'), findsOneWidget);
     final add = tester.widget<ButtonStyleButton>(
       find.ancestor(
-        of: find.text('Add class group'),
+        of: find.text('Add section'),
         matching: find.byWidgetPredicate((w) => w is ButtonStyleButton),
       ),
     );
@@ -383,7 +487,7 @@ void main() {
     for (final t in [
       'Semester terms',
       'Subjects',
-      'Class groups',
+      'Sections',
       'Allocations',
     ]) {
       expect(find.text(t), findsWidgets);

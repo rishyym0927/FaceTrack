@@ -1,6 +1,5 @@
 import 'dart:async';
 
-import 'package:camera/camera.dart';
 import 'package:crypto/crypto.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
@@ -11,6 +10,7 @@ import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'student_ui.dart';
 import 'student_pose_analyzer_stub.dart'
     if (dart.library.io) 'student_pose_analyzer_io.dart'
     as pose_platform;
@@ -440,33 +440,61 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
 
   @override
   Widget build(BuildContext context) {
-    if (loading) return const Center(child: CircularProgressIndicator());
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    if (loading) {
+      return ContentPage(
+        children: [
+          const PageHeader(title: 'Face enrolment'),
+          const SkeletonCard(),
+          const SizedBox(height: 16),
+          const SkeletonCard(),
+        ],
+      );
+    }
     if (state == null) {
       return ContentPage(
         children: [
-          ErrorView(error ?? const AppFailure('Please retry.'), retry: load),
+          const PageHeader(title: 'Face enrolment'),
+          ErrorView(
+            error ?? const AppFailure('Could not load face enrolment.'),
+            retry: load,
+          ),
         ],
       );
     }
     final a = state!.attempt;
     final captureVisible =
         !state!.active || replacing || (a?.unfinished ?? false);
+    final progress = RegistrationProgress.of(
+      state!,
+      hasClip: pending != null,
+    );
+    final showStatus = !state!.active || (a != null && a.status != 'active');
+    final gap = const SizedBox(height: 16);
     return ContentPage(
       children: [
         PageHeader(
           title: 'Face enrolment',
+          subtitle: state!.active
+              ? 'You are registered for classroom recognition.'
+              : 'Register your face once so recorded classes can suggest you as present. It takes about a minute.',
           action: OutlinedButton.icon(
             onPressed: busy ? null : load,
             icon: const Icon(Icons.refresh),
             label: const Text('Refresh'),
           ),
         ),
-        if (error != null && pending == null)
-          Padding(
-            padding: const EdgeInsets.only(bottom: 16),
-            child: ErrorView(error!, retry: load),
+        if (error != null && pending == null) ...[
+          InlineNotice(
+            error!.message,
+            icon: Icons.error_outline,
+            tone: scheme.error,
+            onRetry: busy ? null : load,
           ),
-        if (state!.active)
+          gap,
+        ],
+        if (state!.active) ...[
           Panel(
             accent: true,
             child: Column(
@@ -476,13 +504,13 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                   children: [
                     const _StateIcon(
                       icon: Icons.verified_outlined,
-                      color: Color(0xff176451),
+                      color: studentGreen,
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         'Face enrolment active',
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: theme.textTheme.titleLarge,
                       ),
                     ),
                   ],
@@ -500,91 +528,91 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                     child: const Text('Replace recording'),
                   ),
                 ],
-                if (replacing)
+                if (replacing) ...[
+                  const SizedBox(height: 8),
                   const Text(
                     'Your current enrolment stays active until your faculty approves the replacement.',
                   ),
+                ],
               ],
             ),
           ),
-        if (state!.consentId == null && notice != null)
-          Panel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Text(
-                  'Before recording',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-                const SizedBox(height: 12),
-                Text(notice!['text']),
-                const SizedBox(height: 12),
-                CheckboxListTile(
-                  contentPadding: EdgeInsets.zero,
-                  value: accepted,
-                  onChanged: busy
-                      ? null
-                      : (v) => setState(() => accepted = v ?? false),
-                  title: const Text(
-                    'I understand and voluntarily agree to face enrolment.',
-                  ),
-                ),
-                FilledButton(
-                  onPressed: !accepted || busy ? null : consent,
-                  child: Text(busy ? 'Saving…' : 'Accept and continue'),
-                ),
-              ],
-            ),
-          ),
-        if (a != null && a.status != 'active')
+          gap,
+        ],
+        if (showStatus) ...[
           Panel(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
                   children: [
-                    _StateIcon.forStatus(a.status),
+                    if (a != null && a.status != 'active')
+                      _StateIcon.forStatus(a.status)
+                    else
+                      const _StateIcon(
+                        icon: Icons.face_retouching_natural_outlined,
+                        color: Color(0xff135f50),
+                      ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        state!.active &&
-                                [
-                                  'expired',
-                                  'cancelled',
-                                  'rejected',
-                                  'failed',
-                                ].contains(a.status)
+                        a == null || a.status == 'active'
+                            ? 'Register your face'
+                            : state!.active &&
+                                  [
+                                    'expired',
+                                    'cancelled',
+                                    'rejected',
+                                    'failed',
+                                  ].contains(a.status)
                             ? 'Replacement ${biometricStatus(a.status).toLowerCase()}'
                             : biometricStatus(a.status),
-                        style: Theme.of(context).textTheme.titleLarge,
+                        style: theme.textTheme.titleLarge,
                       ),
                     ),
                   ],
                 ),
-                if (a.reason != null) ...[
-                  const SizedBox(height: 8),
-                  Text(switch (a.reason) {
-                    'CLIP_TOO_SHORT' => 'The saved video was under 10 seconds. Record again and let the camera stop on its own, even after all directions are captured.',
-                    'INVALID_MEDIA' => 'The video could not be read. Record again and wait for the camera to finish saving it.',
-                    'MULTIPLE_FACES' => 'More than one face appeared. Record again with only your face in view.',
-                    _ => a.reason!,
-                  }),
+                if (!progress.complete) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    progress.next,
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 20),
+                  StepProgress(progress),
                 ],
-                if (['expired', 'rejected', 'failed'].contains(a.status))
+                if (a?.reason != null) ...[
+                  const SizedBox(height: 16),
+                  InlineNotice(
+                    switch (a!.reason) {
+                      'CLIP_TOO_SHORT' =>
+                        'The saved video was under 10 seconds. Record again and let the camera stop on its own, even after all directions are captured.',
+                      'INVALID_MEDIA' =>
+                        'The video could not be read. Record again and wait for the camera to finish saving it.',
+                      'MULTIPLE_FACES' =>
+                        'More than one face appeared. Record again with only your face in view.',
+                      _ => a.reason!,
+                    },
+                    icon: Icons.error_outline,
+                    tone: studentRed,
+                  ),
+                ],
+                if (a != null &&
+                    ['expired', 'rejected', 'failed'].contains(a.status))
                   const Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
                       'This recording cannot be retried. Start a new guided recording when you are ready; your previous active enrolment, if any, stays active until a replacement is approved.',
                     ),
                   ),
-                if (['queued', 'processing'].contains(a.status))
+                if (a != null && ['queued', 'processing'].contains(a.status))
                   const Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
                       'You can leave this page while your recording is processed.',
                     ),
                   ),
-                if (a.status == 'review_required')
+                if (a?.status == 'review_required')
                   const Padding(
                     padding: EdgeInsets.only(top: 12),
                     child: Text(
@@ -594,6 +622,54 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
               ],
             ),
           ),
+          gap,
+        ],
+        if (state!.consentId == null && notice != null) ...[
+          Panel(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  'Before recording',
+                  style: theme.textTheme.titleLarge,
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  'Please read how your face data is used.',
+                  style: TextStyle(color: scheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: scheme.surfaceContainerLowest,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: scheme.outline),
+                  ),
+                  child: Text(notice!['text']),
+                ),
+                const SizedBox(height: 12),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  value: accepted,
+                  onChanged: busy
+                      ? null
+                      : (v) => setState(() => accepted = v ?? false),
+                  title: const Text(
+                    'I understand and voluntarily agree to face enrolment.',
+                  ),
+                ),
+                const SizedBox(height: 8),
+                FilledButton(
+                  onPressed: !accepted || busy ? null : consent,
+                  child: Text(busy ? 'Saving…' : 'Accept and continue'),
+                ),
+              ],
+            ),
+          ),
+          gap,
+        ],
         if (captureVisible &&
             state!.consentId != null &&
             (a == null || !a.unfinished || a.status == 'awaiting_upload'))
@@ -604,18 +680,35 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                 if (pending == null && !camera.recording) ...[
                   Text(
                     'Before you record',
-                    style: Theme.of(context).textTheme.titleMedium,
+                    style: theme.textTheme.titleMedium,
                   ),
                   const SizedBox(height: 8),
-                  const Text(
-                    'Use good lighting and keep only your face in frame. Follow each direction and let the camera stop on its own. Recording takes 12–25 seconds with audio off.',
+                  const TipRow(
+                    Icons.light_mode_outlined,
+                    'Find good lighting, facing a window or lamp.',
+                  ),
+                  const TipRow(
+                    Icons.person_outline,
+                    'Keep only your face in the frame.',
+                  ),
+                  const TipRow(
+                    Icons.screen_rotation_alt_outlined,
+                    'Follow each direction and let the camera stop on its own.',
+                  ),
+                  const TipRow(
+                    Icons.timer_outlined,
+                    'It takes 12–25 seconds, with audio off.',
                   ),
                   const SizedBox(height: 16),
                 ],
                 if (camera.error != null)
                   Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    child: Text(camera.error!),
+                    padding: const EdgeInsets.only(bottom: 12),
+                    child: InlineNotice(
+                      camera.error!,
+                      icon: Icons.videocam_off_outlined,
+                      tone: scheme.error,
+                    ),
                   ),
                 if (retaining)
                   const Padding(
@@ -623,20 +716,28 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                     child: Center(child: CircularProgressIndicator()),
                   ),
                 if (pending != null && !retaining) ...[
+                  Text('Review your video', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 10),
                   ClipPlayback(
                     key: ValueKey(pending!.path),
                     file: pending!.file,
                   ),
+                  const SizedBox(height: 8),
                   const Text(
                     'Check that only you are visible and all five poses are shown. Audio is disabled.',
                   ),
-                  if (pending!.missedGuidance.isNotEmpty)
-                    Text(
+                  if (pending!.missedGuidance.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    InlineNotice(
                       'Live guidance did not capture: ${pending!.missedGuidance.join(', ')}. Review the video; you can retake it or upload for faculty review.',
+                      icon: Icons.info_outline,
+                      tone: studentAmber,
                     ),
+                  ],
                   if (uploadProgress != null) ...[
                     const SizedBox(height: 12),
                     LinearProgressIndicator(value: uploadProgress),
+                    const SizedBox(height: 4),
                     Text('Uploading ${(uploadProgress! * 100).round()}%'),
                   ],
                   const SizedBox(height: 16),
@@ -663,11 +764,10 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
                       padding: const EdgeInsets.only(top: 12),
                       child: Semantics(
                         liveRegion: true,
-                        child: Text(
+                        child: InlineNotice(
                           error!.message,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
+                          icon: Icons.error_outline,
+                          tone: scheme.error,
                         ),
                       ),
                     ),
@@ -691,40 +791,51 @@ class _StudentEnrolmentState extends ConsumerState<StudentEnrolment> {
             ),
           ),
         if ((a != null && a.unfinished) || state!.consentId != null) ...[
-          const SectionTitle('Manage your enrolment'),
-          Panel(
-            padding: 16,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                if (a != null && a.unfinished)
-                  _ManageRow(
-                    icon: Icons.delete_outline,
-                    title: 'Discard this recording',
-                    body: 'Removes the unfinished recording. You can record again at any time.',
-                    action: OutlinedButton(
-                      onPressed: busy || camera.recording ? null : cancel,
-                      child: const Text('Discard unfinished enrolment'),
-                    ),
-                  ),
-                if (a != null && a.unfinished && state!.consentId != null)
-                  const Divider(height: 24),
-                if (state!.consentId != null)
-                  _ManageRow(
-                    icon: Icons.privacy_tip_outlined,
-                    title: 'Withdraw consent',
-                    body:
-                        'Stops face recognition for you and deletes your face data. '
-                        'Your faculty can still mark your attendance manually.',
-                    action: TextButton(
-                      style: TextButton.styleFrom(
-                        foregroundColor: Theme.of(context).colorScheme.error,
+          gap,
+          Card(
+            margin: EdgeInsets.zero,
+            clipBehavior: Clip.antiAlias,
+            child: Theme(
+              data: theme.copyWith(dividerColor: Colors.transparent),
+              child: ExpansionTile(
+                leading: Icon(
+                  Icons.privacy_tip_outlined,
+                  color: scheme.onSurfaceVariant,
+                ),
+                title: const Text('Manage your enrolment'),
+                subtitle: const Text('Discard a recording or withdraw consent'),
+                childrenPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                children: [
+                  if (a != null && a.unfinished)
+                    _ManageRow(
+                      icon: Icons.delete_outline,
+                      title: 'Discard this recording',
+                      body:
+                          'Removes the unfinished recording. You can record again at any time.',
+                      action: OutlinedButton(
+                        onPressed: busy || camera.recording ? null : cancel,
+                        child: const Text('Discard unfinished enrolment'),
                       ),
-                      onPressed: busy || camera.recording ? null : withdraw,
-                      child: const Text('Withdraw face-enrolment consent'),
                     ),
-                  ),
-              ],
+                  if (a != null && a.unfinished && state!.consentId != null)
+                    const Divider(height: 24),
+                  if (state!.consentId != null)
+                    _ManageRow(
+                      icon: Icons.privacy_tip_outlined,
+                      title: 'Withdraw consent',
+                      body:
+                          'Stops face recognition for you and deletes your face data. '
+                          'Your faculty can still mark your attendance manually.',
+                      action: TextButton(
+                        style: TextButton.styleFrom(
+                          foregroundColor: scheme.error,
+                        ),
+                        onPressed: busy || camera.recording ? null : withdraw,
+                        child: const Text('Withdraw face-enrolment consent'),
+                      ),
+                    ),
+                ],
+              ),
             ),
           ),
         ],
@@ -1056,6 +1167,10 @@ class _CaptureControls extends StatelessWidget {
         : pose == 'front'
         ? 'Look straight at the camera'
         : 'Look $pose';
+    final captured = [
+      for (final d in order)
+        if (guidance?.completed.contains(d) == true) d,
+    ].length;
     final detail =
         camera.error ??
         camera.controlMessage ??
@@ -1082,6 +1197,19 @@ class _CaptureControls extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(detail, style: TextStyle(color: scheme.onSurfaceVariant)),
+            const SizedBox(height: 14),
+            ClipRRect(
+              borderRadius: BorderRadius.circular(100),
+              child: LinearProgressIndicator(
+                minHeight: 8,
+                value: order.isEmpty ? 0 : captured / order.length,
+              ),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              '$captured of ${order.length} directions captured',
+              style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+            ),
             if (camera.recording) ...[
               const SizedBox(height: 10),
               Text(

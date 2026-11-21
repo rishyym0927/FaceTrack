@@ -120,7 +120,9 @@ void main() {
         find.textContaining('Could not load subject names'),
         findsOneWidget,
       );
-      expect(find.text('50%'), findsNothing);
+      // The overall ring is the first thing on the page, not hidden in trends.
+      expect(find.text('50%'), findsOneWidget);
+      expect(find.text('Overall attendance'), findsOneWidget);
       expect(find.text('Unassessed'), findsNothing);
       // The status chips filter the record list.
       await tester.ensureVisible(find.widgetWithText(ChoiceChip, 'Absent'));
@@ -131,6 +133,7 @@ void main() {
       await tester.ensureVisible(trends);
       await tester.tap(trends);
       await tester.pumpAndSettle();
+      expect(find.text('By subject'), findsOneWidget);
       expect(find.text('50%'), findsOneWidget);
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
@@ -221,14 +224,71 @@ void main() {
     ));
     await tester.pumpAndSettle();
     final dropdown = find.byType(DropdownButtonFormField<String?>);
+    await tester.ensureVisible(dropdown);
+    await tester.pumpAndSettle();
     await tester.tap(dropdown);
     await tester.pumpAndSettle();
     expect(find.text('Older subject'), findsWidgets);
     await tester.tap(find.text('Older subject').last);
     await tester.pumpAndSettle();
+    await tester.ensureVisible(find.text('Refresh'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('Refresh'));
     await tester.pumpAndSettle();
     expect(find.text('Older subject'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Attendance page lays out at 320 px and 200% text', (tester) async {
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    tester.platformDispatcher.textScaleFactorTestValue = 2;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+    final h = (await tester.runAsync(() => harness()))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      if (r.path == '/v1/me/attendance') {
+        return jsonResponse({'items': rows, 'next_cursor': null, 'summary': {}});
+      }
+      return jsonResponse({'items': [], 'next_cursor': null});
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(classesBuilder: (_) => const StudentAttendance()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text('Overall attendance'), findsOneWidget);
+    final trends = find.text('Attendance trends');
+    await tester.ensureVisible(trends);
+    await tester.pumpAndSettle();
+    await tester.tap(trends);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('Empty attendance shows a friendly message', (tester) async {
+    final h = (await tester.runAsync(() => harness()))!;
+    addTearDown(() => tester.runAsync(h.dispose));
+    h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+      if (r.path == '/v1/me') return jsonResponse(h.account);
+      return jsonResponse({'items': [], 'next_cursor': null, 'summary': {}});
+    });
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [servicesProvider.overrideWithValue(h.services)],
+        child: ProductApp(classesBuilder: (_) => const StudentAttendance()),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('No published attendance yet'), findsOneWidget);
+    expect(find.textContaining('Once your faculty'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
 }

@@ -54,15 +54,15 @@ class _FormState extends State<_Form> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(widget.title, style: Theme.of(context).textTheme.titleLarge),
+          Text(widget.title, style: Theme.of(context).textTheme.headlineSmall),
           if (widget.help != null) ...[
-            const SizedBox(height: 4),
+            const SizedBox(height: AppSpace.xs),
             Text(
               widget.help!,
-              style: TextStyle(color: scheme.onSurfaceVariant),
+              style: TextStyle(color: scheme.onSurfaceVariant, height: 1.4),
             ),
           ],
-          const SizedBox(height: 20),
+          const SizedBox(height: AppSpace.xl),
           ...widget.fields(() => setState(() {})),
           if (error != null)
             Container(
@@ -86,7 +86,7 @@ class _FormState extends State<_Form> {
                 ],
               ),
             ),
-          const SizedBox(height: 12),
+          const Divider(height: AppSpace.xl),
           Wrap(
             spacing: 12,
             runSpacing: 8,
@@ -231,7 +231,7 @@ class _CourseFormState extends State<_CourseForm> {
     final onSubmit = widget.onSubmit;
     return _Form(
       title: 'Add subject',
-      help: 'Add each subject once; the same subject can be allocated to several class groups.',
+      help: 'Add each subject once; the same subject can be allocated to several sections.',
       action: 'Create subject',
       onSubmit: onSubmit,
       fields: (_) => [
@@ -275,9 +275,9 @@ class _GroupFormState extends State<_GroupForm> {
   Widget build(BuildContext context) {
     term ??= widget.terms.length == 1 ? widget.terms.first.id : null;
     return _Form(
-      title: 'Add class group',
-      help: 'A class group combines a branch and semester for one term.',
-      action: 'Create class group',
+      title: 'Add section',
+      help: 'A section combines a branch and semester for one term.',
+      action: 'Create section',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
         _Dropdown(
@@ -345,8 +345,8 @@ class _OfferingFormState extends State<_OfferingForm> {
   @override
   Widget build(BuildContext context) {
     return _Form(
-      title: 'Allocate subject to a class group',
-      help: 'Repeat for every subject each class group studies.',
+      title: 'Allocate subject to a section',
+      help: 'Repeat for every subject each section studies.',
       action: 'Allocate subject',
       onSubmit: widget.onSubmit,
       fields: (rebuild) => [
@@ -368,8 +368,8 @@ class _OfferingFormState extends State<_OfferingForm> {
         _Dropdown(
           label: 'Section',
           value: group,
-          items: {for (final g in widget.groups) g.id: g.label},
-          empty: 'Add a class group first.',
+          items: {for (final g in widget.groups) g.id: _sectionLabel(g)},
+          empty: 'Add a section first.',
           onChanged: (v) {
             group = v;
             rebuild();
@@ -525,7 +525,7 @@ class _AssignFormState extends State<_AssignForm> {
             for (final o in widget.offerings)
               o.id: '${o.title} · ${o.subtitle}',
           },
-          empty: 'Allocate a subject to a class group first.',
+          empty: 'Allocate a subject to a section first.',
           onChanged: (v) {
             offering = v;
             rebuild();
@@ -793,6 +793,10 @@ class _DirectoryState extends State<_Directory> {
           .toLowerCase()
           .contains(q);
     }).toList();
+    final wide =
+        MediaQuery.sizeOf(context).width >= 760 &&
+        MediaQuery.textScalerOf(context).scale(1) <= 1.3;
+    final visible = shown.take(50).toList();
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -800,11 +804,12 @@ class _DirectoryState extends State<_Directory> {
           '${widget.title} (${widget.people.length})',
           style: theme.textTheme.titleMedium,
         ),
-        const SizedBox(height: 10),
+        const SizedBox(height: AppSpace.md),
         if (widget.people.isEmpty)
           const _EmptyHint(
             icon: Icons.person_add_alt_1_outlined,
-            text: 'Nobody added yet. Use the Add button above to create the first record.',
+            title: 'Nobody added yet',
+            text: 'Use the Add button above to create the first record.',
           )
         else ...[
           Wrap(
@@ -822,11 +827,12 @@ class _DirectoryState extends State<_Directory> {
                 ChoiceChip(
                   label: Text(label),
                   selected: filter == f,
+                  showCheckmark: false,
                   onSelected: (_) => setState(() => filter = f),
                 ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpace.md),
           TextField(
             controller: _search,
             onChanged: (_) => setState(() {}),
@@ -838,110 +844,25 @@ class _DirectoryState extends State<_Directory> {
                   : 'Search name, number or email',
             ),
           ),
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpace.md),
           if (shown.isEmpty)
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 12),
-              child: Text('No one matches this search or filter.'),
-            ),
-          for (final p in shown.take(50))
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 400),
-              margin: const EdgeInsets.symmetric(vertical: 4),
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            const _EmptyHint(
+              icon: Icons.search_off_outlined,
+              title: 'No one matches',
+              text: 'Try a different search or filter.',
+            )
+          else
+            Container(
+              clipBehavior: Clip.antiAlias,
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color:
-                    widget.fresh != null &&
-                        (p[widget.numberKey ?? 'official_email'] as String?)
-                                ?.toLowerCase() ==
-                            widget.fresh?.toLowerCase()
-                    ? _green.withValues(alpha: .10)
-                    : theme.colorScheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(AppRadius.md),
+                border: Border.all(color: theme.colorScheme.outline),
               ),
-              child: Row(
+              child: Column(
                 children: [
-                  CircleAvatar(
-                    radius: 18,
-                    backgroundColor: theme.colorScheme.primary.withValues(
-                      alpha: .10,
-                    ),
-                    child: Text(
-                      _initials('${p['official_name']}'),
-                      style: TextStyle(
-                        fontSize: 13,
-                        fontWeight: FontWeight.w700,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          '${p['official_name']}',
-                          style: const TextStyle(fontWeight: FontWeight.w700),
-                        ),
-                        Text(
-                          [
-                            if (widget.numberKey != null) p[widget.numberKey],
-                            p['official_email'],
-                          ].whereType<String>().join(' · '),
-                          style: TextStyle(
-                            color: theme.colorScheme.onSurfaceVariant,
-                            fontSize: 13,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (p['auth_user_id'] != null)
-                    const Flexible(
-                      child: Tooltip(
-                        message: 'This person can sign in.',
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              Icons.verified_user_outlined,
-                              size: 16,
-                              color: _green,
-                            ),
-                            SizedBox(width: 4),
-                            Flexible(
-                              child: Text(
-                                'Login linked',
-                                overflow: TextOverflow.ellipsis,
-                                style: TextStyle(
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.w700,
-                                  color: _green,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    )
-                  else
-                    Flexible(
-                      child: Tooltip(
-                        message: 'Give this person a login with a temporary password.',
-                        child: TextButton(
-                          onPressed: _creating.contains(p['id'])
-                              ? null
-                              : () => _createLogin(p),
-                          child: Text(
-                            _creating.contains(p['id'])
-                                ? 'Creating…'
-                                : 'Create login',
-                          ),
-                        ),
-                      ),
-                    ),
+                  if (wide) _headerRow(theme),
+                  for (final (i, p) in visible.indexed)
+                    _personRow(theme, p, wide: wide, first: i == 0 && !wide),
                 ],
               ),
             ),
@@ -949,6 +870,156 @@ class _DirectoryState extends State<_Directory> {
             _Note('+ ${shown.length - 50} more. Refine the search.'),
         ],
       ],
+    );
+  }
+
+  Widget _headerRow(ThemeData theme) {
+    final style = TextStyle(
+      fontSize: 12,
+      fontWeight: FontWeight.w700,
+      letterSpacing: .3,
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    return Container(
+      color: theme.colorScheme.surfaceContainerLowest,
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpace.lg,
+        vertical: AppSpace.md,
+      ),
+      child: Row(
+        children: [
+          const SizedBox(width: 36 + AppSpace.md),
+          Expanded(flex: 3, child: Text('Name', style: style)),
+          if (widget.numberKey != null)
+            Expanded(flex: 2, child: Text('Enrolment number', style: style)),
+          Expanded(flex: 4, child: Text('Email', style: style)),
+          SizedBox(
+            width: 140,
+            child: Align(
+              alignment: Alignment.centerRight,
+              child: Text('Login', style: style),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _personRow(
+    ThemeData theme,
+    Json p, {
+    required bool wide,
+    required bool first,
+  }) {
+    final linked = p['auth_user_id'] != null;
+    final number = widget.numberKey == null
+        ? null
+        : p[widget.numberKey] as String?;
+    final email = p['official_email'] as String?;
+    final isFresh =
+        widget.fresh != null &&
+        (p[widget.numberKey ?? 'official_email'] as String?)?.toLowerCase() ==
+            widget.fresh?.toLowerCase();
+    final creating = _creating.contains(p['id']);
+    final status = linked
+        ? const Tooltip(
+            message: 'This person can sign in.',
+            child: TonePill(
+              'Login linked',
+              tone: AppTone.success,
+              icon: Icons.verified_user_outlined,
+            ),
+          )
+        : Tooltip(
+            message: 'Give this person a login with a temporary password.',
+            child: OutlinedButton(
+              style: OutlinedButton.styleFrom(
+                minimumSize: const Size(0, 40),
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+              ),
+              onPressed: creating ? null : () => _createLogin(p),
+              child: Text(creating ? 'Creating…' : 'Create login'),
+            ),
+          );
+    final avatar = CircleAvatar(
+      radius: 18,
+      backgroundColor: theme.colorScheme.primary.withValues(alpha: .10),
+      child: Text(
+        _initials('${p['official_name']}'),
+        style: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w700,
+          color: theme.colorScheme.primary,
+        ),
+      ),
+    );
+    final name = Text(
+      '${p['official_name']}',
+      style: const TextStyle(fontWeight: FontWeight.w700),
+    );
+    final muted = TextStyle(
+      color: theme.colorScheme.onSurfaceVariant,
+      fontSize: 13,
+    );
+    final Widget row = wide
+        ? Row(
+            children: [
+              avatar,
+              const SizedBox(width: AppSpace.md),
+              Expanded(flex: 3, child: name),
+              if (widget.numberKey != null)
+                Expanded(
+                  flex: 2,
+                  child: Text(number ?? '—', style: muted),
+                ),
+              Expanded(
+                flex: 4,
+                child: Text(
+                  email ?? '—',
+                  style: muted,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              SizedBox(
+                width: 140,
+                child: Align(alignment: Alignment.centerRight, child: status),
+              ),
+            ],
+          )
+        : Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              avatar,
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    name,
+                    Text(
+                      [number, email].whereType<String>().join(' · '),
+                      style: muted,
+                    ),
+                    const SizedBox(height: AppSpace.sm),
+                    Align(alignment: Alignment.centerLeft, child: status),
+                  ],
+                ),
+              ),
+            ],
+          );
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 400),
+      padding: EdgeInsets.symmetric(
+        horizontal: AppSpace.lg,
+        vertical: wide ? AppSpace.sm + 2 : AppSpace.md,
+      ),
+      decoration: BoxDecoration(
+        color: isFresh ? _green.withValues(alpha: .10) : null,
+        border: first
+            ? null
+            : Border(top: BorderSide(color: theme.colorScheme.outline)),
+      ),
+      child: row,
     );
   }
 }

@@ -5,8 +5,9 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'student_notifications.dart' show attendanceThreshold;
+import 'student_ui.dart';
 
-const _present = Color(0xff176451), _absent = Color(0xffa22f2f);
+const _present = studentGreen, _absent = studentRed;
 
 /// Present / Absent / Unassessed counts over published records, with the
 /// session-v1 percentage (unassessed never counts).
@@ -260,6 +261,7 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
   Widget build(BuildContext context) {
     final header = PageHeader(
       title: 'Your attendance',
+      subtitle: 'Published results for every subject you are enrolled in.',
       action: OutlinedButton.icon(
         onPressed: loading ? null : load,
         icon: const Icon(Icons.refresh),
@@ -288,7 +290,9 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
           header,
           const MessageView(
             title: 'No published attendance yet',
-            message: 'Your faculty must review and publish a class before it appears here.',
+            message:
+                'Once your faculty reviews and publishes a class, your result appears here.',
+            icon: Icons.event_available_outlined,
           ),
         ],
       );
@@ -313,35 +317,54 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
         if (failed.isNotEmpty)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
+            child: InlineNotice(
               'Could not load ${failed.join(' and ')}; the rest is shown.',
-              style: TextStyle(color: Theme.of(context).colorScheme.error),
+              icon: Icons.cloud_off_outlined,
+              tone: studentAmber,
+              onRetry: load,
             ),
           ),
         if (olderCursor != null)
           Padding(
             padding: const EdgeInsets.only(bottom: 12),
-            child: Text(
+            child: InlineNotice(
               'Records, filters and trends cover the latest ${records.length} published records. Load older records to extend this view.',
             ),
           ),
+        _overview(context, AttendanceStats(scoped)),
+        const SizedBox(height: 16),
         _filters(context),
         const SizedBox(height: 16),
         _records(context, listed),
-        if (olderCursor != null)
+        if (olderCursor != null) ...[
+          const SizedBox(height: 12),
           OutlinedButton(
             onPressed: loading || loadingOlder ? null : loadOlder,
             child: Text(
               loadingOlder ? 'Loading older records…' : 'Load older records',
             ),
           ),
-        ExpansionTile(
-          title: const Text('Attendance trends'),
-          children: [
-            _overview(context, AttendanceStats(scoped)),
-            if (subject == null) _bySubject(context, scoped),
-            _trend(context, scoped),
-          ],
+        ],
+        const SizedBox(height: 16),
+        Card(
+          margin: EdgeInsets.zero,
+          clipBehavior: Clip.antiAlias,
+          child: Theme(
+            data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+            child: ExpansionTile(
+              leading: const Icon(Icons.insights_outlined),
+              title: const Text('Attendance trends'),
+              subtitle: const Text('By subject and by month'),
+              childrenPadding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+              children: [
+                if (subject == null) ...[
+                  _bySubject(context, scoped),
+                  const SizedBox(height: 12),
+                ],
+                _trend(context, scoped),
+              ],
+            ),
+          ),
         ),
       ],
     );
@@ -354,9 +377,9 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
       ?subject,
     };
     return Panel(
-      padding: 14,
+      padding: 16,
       child: Wrap(
-        spacing: 12,
+        spacing: 16,
         runSpacing: 12,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
@@ -384,21 +407,21 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
               onChanged: (v) => setState(() => subject = v),
             ),
           ),
-          SegmentedButton<AttendanceRange>(
-            showSelectedIcon: false,
-            segments: const [
-              ButtonSegment(
-                value: AttendanceRange.month,
-                label: Text('This month'),
-              ),
-              ButtonSegment(
-                value: AttendanceRange.quarter,
-                label: Text('3 months'),
-              ),
-              ButtonSegment(value: AttendanceRange.all, label: Text('All')),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              for (final (value, label) in const [
+                (AttendanceRange.month, 'This month'),
+                (AttendanceRange.quarter, '3 months'),
+                (AttendanceRange.all, 'All time'),
+              ])
+                ChoiceChip(
+                  label: Text(label),
+                  selected: range == value,
+                  onSelected: (_) => setState(() => range = value),
+                ),
             ],
-            selected: {range},
-            onSelectionChanged: (v) => setState(() => range = v.first),
           ),
         ],
       ),
@@ -432,7 +455,10 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Overview', style: Theme.of(context).textTheme.titleMedium),
+          Text(
+            subject == null ? 'Overall attendance' : 'Selected subject',
+            style: Theme.of(context).textTheme.titleMedium,
+          ),
           const SizedBox(height: 16),
           LayoutBuilder(
             builder: (context, box) => box.maxWidth >= 480
@@ -647,6 +673,14 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
           margin: const EdgeInsets.only(bottom: 8),
           child: ListTile(
             onTap: () => context.push('/classes/${r['offering_id']}'),
+            leading: Icon(
+              finalStatus(r['status'] as String?) == 'present'
+                  ? Icons.check_circle
+                  : Icons.cancel,
+              color: finalStatus(r['status'] as String?) == 'present'
+                  ? _present
+                  : _absent,
+            ),
             title: Text(
               title(r['offering_id'] as String),
               style: const TextStyle(fontWeight: FontWeight.w600),
@@ -699,10 +733,21 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
           ),
           if (children.isEmpty)
             Padding(
-              padding: const EdgeInsets.only(top: 16),
-              child: Text(
-                'No classes match these filters.',
-                style: TextStyle(color: scheme.onSurfaceVariant),
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.filter_alt_off_outlined,
+                    size: 32,
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'No classes match these filters.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                ],
               ),
             ),
           ...children,

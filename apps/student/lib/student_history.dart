@@ -3,6 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'student_ui.dart';
+
 class StudentHistory extends ConsumerStatefulWidget {
   const StudentHistory({super.key, required this.offering});
   final String offering;
@@ -218,101 +220,203 @@ class _StudentHistoryState extends ConsumerState<StudentHistory>
     );
   }
 
-  @override
-  Widget build(BuildContext context) => ContentPage(
-    onRefresh: refresh,
-    children: [
-      TextButton.icon(
-        onPressed: () => goBack(context, '/classes'),
-        icon: const Icon(Icons.arrow_back),
-        label: const Text('Your subjects'),
-      ),
-      PageHeader(
-        title: subject?.title ?? 'Your published attendance',
-        action: OutlinedButton(
-          onPressed: refresh,
-          child: const Text('Refresh'),
-        ),
-      ),
-      if (disputeLoadFailed)
-        ErrorView(
-          const AppFailure('Could not load attendance queries.'),
-          retry: loadDisputes,
-        ),
-      PagedList<Json>(
-        controller: controller,
-        emptyTitle: 'No published attendance yet',
-        emptyMessage: 'Your faculty must review and publish a session before it appears here.',
-        item: (r) {
-          final mark = finalStatus(r['status'] as String?);
-          if (!finalStatuses.contains(mark)) return const SizedBox.shrink();
-          final d = DateTime.parse(r['starts_at']).toLocal(),
-              l = MaterialLocalizations.of(context);
-          // Match by session, not by publication id: an accepted correction
-          // supersedes the original Absent publication with a new id, so a
-          // publication-id match would drop the query note after resolution.
-          // disputes arrive newest-first, so the first match is the latest.
-          final query = disputes[r['session_id']];
-          return Panel(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${l.formatMediumDate(d)} · ${l.formatTimeOfDay(TimeOfDay.fromDateTime(d))}',
-                ),
-                const SizedBox(height: 12),
-                StatusBadge(mark),
-                const SizedBox(height: 12),
-                if ((r['revision'] as num? ?? 1) > 1)
-                  const Row(
+  Widget _record(BuildContext context, Json r) {
+    final mark = finalStatus(r['status'] as String?);
+    if (!finalStatuses.contains(mark)) return const SizedBox.shrink();
+    final scheme = Theme.of(context).colorScheme;
+    final d = DateTime.parse(r['starts_at']).toLocal(),
+        l = MaterialLocalizations.of(context);
+    // Match by session, not by publication id: an accepted correction
+    // supersedes the original Absent publication with a new id, so a
+    // publication-id match would drop the query note after resolution.
+    // disputes arrive newest-first, so the first match is the latest.
+    final query = disputes[r['session_id']];
+    final present = mark == 'present';
+    return Panel(
+      padding: 16,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          LayoutBuilder(
+            builder: (context, box) {
+              // Big text or a narrow card puts the badge under the date.
+              final stacked =
+                  box.maxWidth < 360 ||
+                  MediaQuery.textScalerOf(context).scale(1) > 1.3;
+              final dates = Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l.formatMediumDate(d),
+                    style: const TextStyle(
+                      fontWeight: FontWeight.w700,
+                      fontSize: 16,
+                    ),
+                  ),
+                  Text(
+                    l.formatTimeOfDay(TimeOfDay.fromDateTime(d)),
+                    style: TextStyle(color: scheme.onSurfaceVariant),
+                  ),
+                  if (stacked) ...[
+                    const SizedBox(height: 8),
+                    StatusBadge(mark),
+                  ],
+                ],
+              );
+              return Row(
+                crossAxisAlignment: stacked
+                    ? CrossAxisAlignment.start
+                    : CrossAxisAlignment.center,
+                children: [
+                  IconTile(
+                    present
+                        ? Icons.check_circle_outline
+                        : Icons.cancel_outlined,
+                    color: present ? studentGreen : studentRed,
+                    size: 40,
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(child: dates),
+                  if (!stacked) ...[const SizedBox(width: 8), StatusBadge(mark)],
+                ],
+              );
+            },
+          ),
+          if ((r['revision'] as num? ?? 1) > 1 || r['reason'] != null) ...[
+            const SizedBox(height: 12),
+            if ((r['revision'] as num? ?? 1) > 1)
+              const Row(
+                children: [
+                  Icon(Icons.edit_note, size: 18),
+                  SizedBox(width: 6),
+                  Expanded(child: Text('Corrected by faculty')),
+                ],
+              ),
+            if (r['reason'] != null) Text('Faculty note: ${r['reason']}'),
+          ],
+          if (query != null) ...[
+            const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerLowest,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: scheme.outline),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Wrap(
+                    spacing: 8,
+                    crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
-                      Icon(Icons.edit_note, size: 18),
-                      SizedBox(width: 6),
-                      Text('Corrected by faculty'),
+                      Text(
+                        'Your query',
+                        style: const TextStyle(fontWeight: FontWeight.w700),
+                      ),
+                      StatusBadge(query['status']),
                     ],
                   ),
-                if (r['reason'] != null) Text('Faculty note: ${r['reason']}'),
-                if (query != null) ...[
-                  const SizedBox(height: 12),
-                  StatusBadge(query['status']),
+                  const SizedBox(height: 6),
                   Text(switch (query['status']) {
                     'open' =>
                       'Your attendance query is waiting for faculty review.',
-                    'accepted' => 'Your query was accepted and a corrected publication was created.',
+                    'accepted' =>
+                      'Your query was accepted and a corrected publication was created.',
                     'rejected' =>
                       'Your faculty reviewed and declined this query.',
                     _ => 'This query is closed.',
                   }),
                   if (query['resolution_reason'] != null)
                     Text('Faculty response: ${query['resolution_reason']}'),
-                ] else if (disputesReady && r['status'] == 'absent') ...[
-                  const SizedBox(height: 12),
-                  OutlinedButton.icon(
-                    onPressed: () => raiseQuery(r),
-                    icon: const Icon(Icons.chat_bubble_outline),
-                    label: const Text('Raise query'),
-                  ),
                 ],
-              ],
+              ),
             ),
-          );
-        },
+          ] else if (disputesReady && r['status'] == 'absent') ...[
+            const SizedBox(height: 12),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: OutlinedButton.icon(
+                onPressed: () => raiseQuery(r),
+                icon: const Icon(Icons.chat_bubble_outline),
+                label: const Text('Raise query'),
+              ),
+            ),
+          ],
+        ],
       ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => ContentPage(
+    onRefresh: refresh,
+    children: [
+      Align(
+        alignment: Alignment.centerLeft,
+        child: TextButton.icon(
+          onPressed: () => goBack(context, '/classes'),
+          icon: const Icon(Icons.arrow_back),
+          label: const Text('Back to subjects'),
+        ),
+      ),
+      PageHeader(
+        title: subject?.title ?? 'Your published attendance',
+        subtitle: subject?.subtitle,
+        action: OutlinedButton.icon(
+          onPressed: refresh,
+          icon: const Icon(Icons.refresh),
+          label: const Text('Refresh'),
+        ),
+      ),
+      if (disputeLoadFailed) ...[
+        InlineNotice(
+          'Could not load your attendance queries.',
+          icon: Icons.cloud_off_outlined,
+          tone: studentAmber,
+          onRetry: loadDisputes,
+        ),
+        const SizedBox(height: 12),
+      ],
+      // The summary is set while the list loads, so it is rebuilt with the
+      // controller to stay in step with the records below it.
       ListenableBuilder(
         listenable: controller,
         builder: (context, _) {
           final stats = summary;
           if (stats == null) return const SizedBox.shrink();
-          return ExpansionTile(
-            title: const Text('Attendance summary'),
-            children: [
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: _summaryBody(context, stats),
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 20),
+            child: Panel(
+              accent: true,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Text(
+                    'Attendance summary',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                  const SizedBox(height: 16),
+                  _summaryBody(context, stats),
+                ],
               ),
-            ],
+            ),
           );
         },
+      ),
+      Padding(
+        padding: const EdgeInsets.only(bottom: 12),
+        child: Text(
+          'Class by class',
+          style: Theme.of(context).textTheme.titleMedium,
+        ),
+      ),
+      PagedList<Json>(
+        controller: controller,
+        emptyTitle: 'No published attendance yet',
+        emptyMessage:
+            'Once your faculty reviews and publishes a session, it appears here.',
+        item: (r) => _record(context, r),
       ),
     ],
   );
