@@ -1125,6 +1125,12 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     scanUploads.remove(file.path);
   }
 
+  Future<ClassroomPending> _openScanStore() async {
+    final owner = services.client.auth.currentUser?.id;
+    if (owner == null) throw const AppFailure('Sign in again before scanning.');
+    return scanStore = ClassroomPending(owner, institute, widget.id);
+  }
+
   Future<void> openClassroomScan() async {
     if (scanActive || busy || camera.recording || camera.clip != null) return;
     setState(() => scanActive = true);
@@ -1132,73 +1138,51 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     try {
       await camera.interrupt();
       if (!mounted) return;
-      if (kIsWeb) {
-        await scanClassroomInBrowser(
-          onSegment: (file) async {
-            try {
-              await uploadScanSegment(
-                file,
-                report: (message, [value]) => updateBrowserClassroomStatus(
-                  value == null
-                      ? message
-                      : '$message ${(value * 100).round()}%',
-                ),
-              );
-              return null;
-            } catch (error) {
-              final message = terminalClassroomUploadMessage(error);
-              if (message == null) rethrow;
-              return message;
-            }
-          },
-          onStarted: () {},
-        );
-      } else {
-        final owner = services.client.auth.currentUser?.id;
-        if (owner == null) throw const AppFailure('Sign in again before scanning.');
-        final store = ClassroomPending(owner, institute, widget.id);
-        scanStore = store;
-        final recovered = await store.load();
-        for (final entry in recovered) {
-          scanUploads[entry['path'] as String] = _ScanUpload.fromJson(
-            (entry['upload'] as Map).cast<String, dynamic>(),
-          );
-        }
-        scan = ClassroomScan(
-          camera,
-          (file) => uploadScanSegment(file, report: scan!.reportUpload),
-          retain: (file) async {
-            final state = _ScanUpload();
-            final saved = await store.retain(file, state.toJson());
-            scanUploads[saved.path] = state;
-            return saved;
-          },
-          remove: (file) => store.remove(file.path),
-          recovered: [for (final entry in recovered) XFile(entry['path'] as String)],
-          onEvent: (name, {code, attempt, bytes, count, durationMs}) =>
-              services.diagnostics.record(
-                name,
-                sessionId: widget.id,
-                code: code,
-                attempt: attempt,
-                bytes: bytes,
-                count: count,
-                durationMs: durationMs,
-              ),
-        );
-        if (!mounted) return;
-        await Navigator.of(context, rootNavigator: true).push<void>(
-          MaterialPageRoute(
-            fullscreenDialog: true,
-            builder: (_) =>
-                ClassroomScanPage(
-                  scan: scan!,
-                  results: scanResults,
-                  reference: widget.id.substring(0, 8),
-                ),
-          ),
+      // Phones keep unsent segments on disk so a crash or a closed app can resume; a browser has
+      // no private storage for video, so it holds them in memory and warns before the tab closes.
+      final store = kIsWeb ? null : await _openScanStore();
+      final recovered = store == null ? const <Map<String, dynamic>>[] : await store.load();
+      for (final entry in recovered) {
+        scanUploads[entry['path'] as String] = _ScanUpload.fromJson(
+          (entry['upload'] as Map).cast<String, dynamic>(),
         );
       }
+      scan = ClassroomScan(
+        camera,
+        (file) => uploadScanSegment(file, report: scan!.reportUpload),
+        retain: store == null
+            ? null
+            : (file) async {
+                final state = _ScanUpload();
+                final saved = await store.retain(file, state.toJson());
+                scanUploads[saved.path] = state;
+                return saved;
+              },
+        remove: store == null ? null : (file) => store.remove(file.path),
+        recovered: [for (final entry in recovered) XFile(entry['path'] as String)],
+        onEvent: (name, {code, attempt, bytes, count, durationMs}) =>
+            services.diagnostics.record(
+              name,
+              sessionId: widget.id,
+              code: code,
+              attempt: attempt,
+              bytes: bytes,
+              count: count,
+              durationMs: durationMs,
+            ),
+      );
+      if (!mounted) return;
+      await Navigator.of(context, rootNavigator: true).push<void>(
+        MaterialPageRoute(
+          fullscreenDialog: true,
+          builder: (_) =>
+              ClassroomScanPage(
+                scan: scan!,
+                results: scanResults,
+                reference: widget.id.substring(0, 8),
+              ),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         setState(
@@ -1412,7 +1396,6 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
     poll?.cancel();
     lifecycle?.dispose();
     uploader?.cancel();
-    if (scanActive && kIsWeb) cancelBrowserClassroomScan();
     camera.removeListener(changed);
     unawaited(camera.discard());
     camera.dispose();
@@ -1649,6 +1632,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                               icon: const Icon(Icons.rotate_right),
                               label: const Text('Rotate preview'),
                             ),
+                          if (!kIsWeb)
                           TextButton.icon(
                             onPressed: camera.busy ? null : camera.toggleTorch,
                             icon: const Icon(Icons.flashlight_on),
@@ -1668,7 +1652,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                       ),
                       if (camera.controlMessage != null)
                         Text(camera.controlMessage!),
-                      if (camera.recording && !kIsWeb)
+                      if (camera.recording)
                         ListenableBuilder(
                           listenable: camera.faceTracker,
                           builder: (context, _) => Text(

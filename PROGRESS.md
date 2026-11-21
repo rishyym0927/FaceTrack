@@ -377,3 +377,9 @@ The root suite's expected failure records the frozen baseline's degenerate-landm
 ## Frozen prototype evidence
 
 Private manifest `.local/spike/models/buffalo_sc/manifest.json`, profile `.local/spike/profiles/frozen-phase1b-v1.json`, templates `.local/spike/experiments/calibration-v3` and receipt `.local/spike/held-out-freeze-v2.json` remain outside Git. One fresh both-known Test clip passed three fresh-process repeats without changing the receipt. Five independent scenarios remain. Never tune on those held-out clips.
+
+## Session analysis and web camera (2026-11-21)
+
+- Last two sessions (VM logs): per 20 s segment about 26 s of job time, of which about 10 s was API round trips. The hosted database is in Tokyo and the VM in Central India, measured 125 ms per query, so each API call took 1.1-2 s. Uploads took 11-17 s per segment on the phone network. Detect + embed was 6-12 s, CPU stayed under 60 %, 6.7 GB RAM free. Segments 3-4 had no faces because the camera was on the rear lens during the test; segment 1 had 41 of 79 frames rejected as "small" (median face 79 px).
+- Fixes: the per-minute reconcile call visited every open enrolment (14.5 s average, blocking job claims) and now only visits expired ones; the database role check runs once per pooled connection; a false "lease lost" warning after a finished job is no longer logged. Not yet measured after deploy. Moving the VM next to the database (Japan East) is the larger fix and needs the owner's approval.
+- Web camera: the Teacher web scan now uses the phone's scan screen (camera menu, flip, live boxes that are never green, light check, segment progress, unplug recovery, tab-close warning). Verified in headless Chrome with fake cameras and a calibration video; not verified on real laptop/USB webcams, Safari or Firefox.

@@ -45,19 +45,26 @@ async def transaction(engine, actor: UUID, institute: UUID | None = None, email:
             samples.append((perf_counter() - started) * 1000)
         tx = await conn.begin()
         try:
-            permission = await one(
-                conn,
-                """SELECT NOT r.rolsuper AND NOT r.rolbypassrls
-                AND NOT r.rolcreaterole AND NOT r.rolcreatedb
-                AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AS restricted
-                FROM pg_roles r CROSS JOIN pg_class c
-                JOIN pg_namespace n ON n.oid=c.relnamespace
-                WHERE r.rolname=current_user AND n.nspname='app' AND c.relname='offerings'""",
-            )
-            if not permission or not permission["restricted"]:
-                raise APIError(
-                    503, "UNSAFE_DATABASE_ROLE", "Restricted database configuration is required."
+            # A pooled connection keeps its database role, so the check runs once per connection
+            # instead of costing a round trip (~130 ms to the hosted database) on every request.
+            info = conn.sync_connection.info
+            if not info.get("role_restricted"):
+                permission = await one(
+                    conn,
+                    """SELECT NOT r.rolsuper AND NOT r.rolbypassrls
+                    AND NOT r.rolcreaterole AND NOT r.rolcreatedb
+                    AND NOT pg_has_role(current_user,c.relowner,'MEMBER') AS restricted
+                    FROM pg_roles r CROSS JOIN pg_class c
+                    JOIN pg_namespace n ON n.oid=c.relnamespace
+                    WHERE r.rolname=current_user AND n.nspname='app' AND c.relname='offerings'""",
                 )
+                if not permission or not permission["restricted"]:
+                    raise APIError(
+                        503,
+                        "UNSAFE_DATABASE_ROLE",
+                        "Restricted database configuration is required.",
+                    )
+                info["role_restricted"] = True
             await context(conn, actor, institute, email)
             yield conn
             await tx.commit()

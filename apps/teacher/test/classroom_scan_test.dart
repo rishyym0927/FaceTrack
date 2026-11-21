@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:io';
 
-import 'package:camera/camera.dart' show CameraDescription, CameraLensDirection;
 import 'package:flutter/services.dart';
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';

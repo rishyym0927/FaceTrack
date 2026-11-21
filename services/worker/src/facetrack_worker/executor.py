@@ -140,6 +140,7 @@ def stop_child(process):
 def enroll(job, epoch):
     config.validate()
     stop, lost = threading.Event(), threading.Event()
+    closing = threading.Event()  # result is being committed: a late heartbeat 409 is expected
     started = time.monotonic()
     stage = "start"
     log.event("job_start", job_id=job, epoch=epoch)
@@ -171,6 +172,8 @@ def enroll(job, epoch):
                     last = time.monotonic()
                 except httpx.HTTPStatusError as e:
                     if e.response.status_code in LEASE_LOST:
+                        if closing.is_set():
+                            return  # the job finished while this heartbeat was in flight
                         log.event("lease_lost", "warning", job_id=job, reason="heartbeat_rejected",
                                   status=e.response.status_code)
                         lost.set()
@@ -287,6 +290,7 @@ def enroll(job, epoch):
                         unknown_observations=found.get("unknown_observations"),
                     )
                     show("finalizing")
+                    closing.set()
                     payload = {"epoch": epoch, **found}
                     status = post_with_retry(client, f"/internal/v1/jobs/{job}/complete", payload)
                     if status == 422:

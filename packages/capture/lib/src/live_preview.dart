@@ -50,9 +50,12 @@ class LiveCameraPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final mirror =
-        (kIsWeb || defaultTargetPlatform != TargetPlatform.iOS) &&
-        camera.description.lensDirection == CameraLensDirection.front;
+    // The browser plugin flips every picture that is not from a rear camera (front, laptop
+    // and USB webcams alike), so the boxes must be flipped the same way to stay on the faces.
+    final lens = camera.description.lensDirection;
+    final mirror = kIsWeb
+        ? lens != CameraLensDirection.back
+        : defaultTargetPlatform != TargetPlatform.iOS && lens == CameraLensDirection.front;
     final overlay = LayoutBuilder(
       builder: (context, constraints) {
         final size = constraints.biggest;

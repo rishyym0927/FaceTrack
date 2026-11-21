@@ -80,7 +80,13 @@ async def reconcile(conn, worker):
     # All mutations use the same per-student advisory lock as consent/approval.
     candidates = await many(
         conn,
-        "SELECT id,student_id,asset_id,status FROM app.enrollment_attempts WHERE institute_id=:i AND status IN ('awaiting_upload','queued','processing','review_required') ORDER BY student_id,id LIMIT 100",
+        # Only attempts that look expired: the loop below re-checks each one under its lock, but
+        # visiting every open attempt cost ~4 database round trips each (14 s per minute on the VM).
+        """SELECT a.id,a.student_id,a.asset_id,a.status FROM app.enrollment_attempts a
+        JOIN app.media_assets m ON m.institute_id=a.institute_id AND m.id=a.asset_id
+        WHERE a.institute_id=:i AND a.status IN ('awaiting_upload','queued','processing','review_required')
+        AND (m.expires_at<=now() OR (a.status='awaiting_upload' AND m.reservation_expires_at<=now()))
+        ORDER BY a.student_id,a.id LIMIT 100""",
         {"i": i},
     )
     for a in candidates:

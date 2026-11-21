@@ -2,7 +2,9 @@ import 'dart:async';
 
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_capture/facetrack_capture.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'processing_progress.dart';
 import 'recognition_board.dart';
@@ -96,7 +98,9 @@ class ClassroomScan extends ChangeNotifier {
       pending == 0 &&
       !sending;
   void _emit() {
-    if (!closed) notifyListeners();
+    if (closed) return;
+    GuidedCamera.warnBeforeLeaving(!canLeave);
+    notifyListeners();
   }
 
   Future<void> start() async {
@@ -146,6 +150,9 @@ class ClassroomScan extends ChangeNotifier {
     if (ended && !camera.busy && !camera.recording) {
       unawaited(_finishCamera());
     }
+    if (camera.lost && !camera.ready && !camera.busy && scanning && !ended) {
+      unawaited(_recoverCamera());
+    }
     _emit();
   }
 
@@ -155,9 +162,10 @@ class ClassroomScan extends ChangeNotifier {
   /// then the camera is swapped and recording continues on its own. If the other camera cannot
   /// open, the previous one is restored so the teacher is never left without a camera.
   static const switchMinimumSeconds = 4;
-  Future<void> switchCamera() async {
-    if (closed || ended || switching || releasing || !camera.canSwitch) return;
-    final target = camera.otherCamera!;
+  Future<void> switchCamera({CameraDescription? to}) async {
+    if (closed || ended || switching || releasing) return;
+    final target = to ?? camera.otherCamera;
+    if (target == null || target == camera.selectedCamera) return;
     final previous = camera.selectedCamera;
     final wasScanning = scanning;
     switching = true;
@@ -177,11 +185,51 @@ class ClassroomScan extends ChangeNotifier {
         await camera.selectCamera(previous);
         cameraError = 'Could not switch cameras. Went back to the previous one.';
       } else {
-        onEvent?.call('camera_switched', code: camera.usingFront ? 'front' : 'rear');
+        onEvent?.call(
+          'camera_switched',
+          code: camera.hasFrontRear ? (camera.usingFront ? 'front' : 'rear') : 'other',
+        );
       }
     } finally {
       _paused = false;
       switching = false;
+      _emit();
+    }
+    if (!closed && !ended && wasScanning && camera.ready) await _next();
+  }
+
+  /// The open camera disappeared (a USB webcam was unplugged, or another app took it). Keep
+  /// uploading what was recorded, move to another camera when there is one and carry on; when
+  /// there is none, stop recording and say so. Pressing Start again reopens a camera.
+  bool recovering = false;
+  Future<void> _recoverCamera() async {
+    if (recovering || closed || ended || switching || releasing) return;
+    recovering = true;
+    _paused = true;
+    final lostCamera = camera.lostCamera;
+    final wasScanning = scanning;
+    _emit();
+    try {
+      for (var i = 0; i < 50 && (collecting || camera.clip != null || camera.busy); i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      if (closed) return;
+      await camera.refreshCameras();
+      final others = [for (final c in camera.cameras) if (c != lostCamera) c];
+      if (others.isNotEmpty && wasScanning) {
+        await camera.selectCamera(others.first);
+        if (camera.ready) {
+          cameraError = 'The camera was disconnected. Continuing on ${describeCamera(others.first, camera.cameras)}.';
+          onEvent?.call('camera_recovered', code: 'switched');
+        }
+      }
+      if (!camera.ready) {
+        scanning = false;
+        cameraError = 'The camera was disconnected. Reconnect it, then press Start to continue.';
+      }
+    } finally {
+      _paused = false;
+      recovering = false;
       _emit();
     }
     if (!closed && !ended && wasScanning && camera.ready) await _next();
@@ -345,6 +393,7 @@ class ClassroomScan extends ChangeNotifier {
   @override
   void dispose() {
     closed = true;
+    GuidedCamera.warnBeforeLeaving(false);
     camera.removeListener(_cameraChanged);
     // Pending clips belong to the recovery store until confirmed or discarded.
     _queue.clear();
@@ -369,12 +418,16 @@ class ClassroomScanPage extends StatefulWidget {
 }
 
 const _ink = Color(0xff102e28);
-const _tips = [
-  (Icons.light_mode_outlined, 'Make sure light falls on students’ faces.'),
-  (Icons.social_distance_outlined, 'Move closer if faces look small or blurry.'),
+List<(IconData, String)> get _tips => [
+  (Icons.light_mode_outlined, 'Make sure light falls on students’ faces, not from a window behind them.'),
+  (Icons.social_distance_outlined, 'Move closer if faces look small or blurry. Grey boxes are fine; amber means move closer.'),
   (Icons.timer_outlined, 'Sweep slowly and pause about 3 seconds on each group.'),
   (Icons.cloud_upload_outlined, 'Segments upload in the background. Keep this page open until they are sent.'),
-  (Icons.flip_camera_android, 'You can switch between the front and rear camera at any time.'),
+  if (kIsWeb)
+    (Icons.videocam_outlined, 'Using a USB webcam? Plug it in, then pick it from the camera menu. You can switch cameras at any time.')
+  else
+    (Icons.flip_camera_android, 'You can switch between the front and rear camera at any time.'),
+  if (kIsWeb) (Icons.keyboard_outlined, 'Press Space to start or stop the scan.'),
 ];
 
 class _ClassroomScanPageState extends State<ClassroomScanPage> {
@@ -552,6 +605,8 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                 ),
               ),
             ),
+          if (controller != null && !scan.scanning && scan.recorded == 0 && !scan.switching)
+            const IgnorePointer(child: _FrameGuide()),
           if (scan.switching)
             const ColoredBox(
               color: Color(0x99000000),
@@ -627,15 +682,18 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
             _RoundButton(icon: Icons.close, tooltip: 'Close camera', onPressed: _close),
             const SizedBox(width: 8),
             Expanded(child: Align(alignment: Alignment.centerLeft, child: _statusPill(camera))),
+            if (_showPicker(camera)) _cameraMenu(camera),
             if (camera.canSwitch)
               _RoundButton(
                 key: const ValueKey('flip-camera'),
-                icon: Icons.flip_camera_android,
-                tooltip: camera.usingFront ? 'Switch to rear camera' : 'Switch to front camera',
+                icon: camera.hasFrontRear ? Icons.flip_camera_android : Icons.cameraswitch_outlined,
+                tooltip: camera.hasFrontRear
+                    ? (camera.usingFront ? 'Switch to rear camera' : 'Switch to front camera')
+                    : 'Switch to the next camera',
                 busy: scan.switching,
-                onPressed: scan.switching || scan.releasing || scan.ended ? null : scan.switchCamera,
+                onPressed: scan.switching || scan.releasing || scan.ended ? null : () => scan.switchCamera(),
               ),
-            if (!camera.usingFront)
+            if (!kIsWeb && !camera.usingFront)
               _RoundButton(
                 icon: Icons.flashlight_on_outlined,
                 tooltip: 'Toggle torch',
@@ -643,6 +701,14 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
               ),
             _RoundButton(icon: Icons.help_outline, tooltip: 'Scanning tips', onPressed: _showTips),
           ],
+        ),
+        // Faces change several times a second; only this line listens to them.
+        ListenableBuilder(
+          listenable: camera.faceTracker,
+          builder: (context, _) => Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(padding: const EdgeInsets.only(left: 8), child: _hint(camera) ?? const SizedBox.shrink()),
+          ),
         ),
         if (camera.recording)
           Padding(
@@ -661,6 +727,78 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
       ],
     ),
   );
+
+  /// A list of cameras to choose from: needed for several webcams, or more than a front / rear pair.
+  bool _showPicker(GuidedCamera camera) =>
+      camera.cameras.length > 1 && (kIsWeb || camera.cameras.length > 2);
+
+  Widget _cameraMenu(GuidedCamera camera) => PopupMenuButton<CameraDescription>(
+    key: const ValueKey('camera-menu'),
+    tooltip: 'Choose camera',
+    enabled: !scan.switching && !scan.releasing && !scan.ended,
+    position: PopupMenuPosition.under,
+    onSelected: (choice) => unawaited(scan.switchCamera(to: choice)),
+    itemBuilder: (_) => [
+      for (final c in camera.cameras)
+        CheckedPopupMenuItem(
+          value: c,
+          checked: c == camera.selectedCamera,
+          child: Text(describeCamera(c, camera.cameras), overflow: TextOverflow.ellipsis),
+        ),
+    ],
+    child: const Padding(
+      padding: EdgeInsets.all(8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: Color(0x8c000000), shape: BoxShape.circle),
+        child: SizedBox.square(
+          dimension: 40,
+          child: Icon(Icons.videocam_outlined, color: Colors.white, size: 22),
+        ),
+      ),
+    ),
+  );
+
+  /// What the picture looks like right now: faces in view and, in the browser, the light.
+  /// One short line, so the teacher can fix the framing before recording starts.
+  Widget? _hint(GuidedCamera camera) {
+    if (!camera.ready || scan.switching) return null;
+    final (IconData icon, Color color, String text)? line;
+    if (camera.lighting == Lighting.tooDark) {
+      line = (Icons.light_mode_outlined, Colors.amber, 'Too dark. Turn on the lights so faces are clear.');
+    } else if (camera.lighting == Lighting.tooBright) {
+      line = (Icons.wb_sunny_outlined, Colors.amber, 'Too bright. Avoid windows or lamps behind the students.');
+    } else if (camera.faceTracker.available || camera.framingAvailable) {
+      final faces = camera.faceTracker.faces;
+      final close = faces.where((f) => !f.framed).length;
+      line = faces.isEmpty
+          ? (Icons.face_retouching_off, Colors.white70, 'No faces in view. Aim toward the class.')
+          : close > 0
+          ? (Icons.zoom_in_map, Colors.amber, '${faces.length} in view · $close too small or cut off. Move closer.')
+          : (Icons.face_outlined, Colors.white70, '${faces.length} face${faces.length == 1 ? '' : 's'} in view');
+    } else {
+      line = null;
+    }
+    if (line == null) return null;
+    return Container(
+      key: const ValueKey('framing-hint'),
+      margin: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: .55),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(line.$1, size: 16, color: line.$2),
+          const SizedBox(width: 6),
+          Flexible(
+            child: Text(line.$3, style: TextStyle(color: line.$2 == Colors.white70 ? Colors.white : line.$2, fontSize: 12.5)),
+          ),
+        ],
+      ),
+    );
+  }
 
   Widget _recordButton(GuidedCamera camera) {
     final scanning = scan.scanning;
@@ -811,6 +949,15 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
         ),
       );
     }
+    if (camera.framesFaces && camera.framingFailed && banners.length < 2) {
+      banners.add(
+        const _Banner(
+          icon: Icons.info_outline,
+          color: Colors.white70,
+          text: 'Live face boxes are unavailable in this browser. Recording and recognition still work.',
+        ),
+      );
+    }
     if (camera.controlMessage != null) {
       banners.add(_Banner(icon: Icons.info_outline, color: Colors.white70, text: camera.controlMessage!));
     }
@@ -819,7 +966,9 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
         const _Banner(
           icon: Icons.touch_app_outlined,
           color: Colors.white70,
-          text: 'Hold the phone steady, then sweep slowly and pause about 3 seconds on each group.',
+          text: kIsWeb
+              ? 'Put the camera where it sees the whole class, then pan slowly and pause about 3 seconds on each group.'
+              : 'Hold the phone steady, then sweep slowly and pause about 3 seconds on each group.',
         ),
       );
     }
@@ -863,7 +1012,20 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
         onPopInvokedWithResult: (didPop, _) {
           if (!didPop) unawaited(_close());
         },
-        child: Scaffold(
+        child: CallbackShortcuts(
+          bindings: {
+            if (kIsWeb)
+              const SingleActivator(LogicalKeyboardKey.space): () {
+                if (scan.scanning) {
+                  unawaited(scan.stop());
+                } else if (!camera.busy && !scan.finishing && !scan.switching) {
+                  unawaited(scan.start());
+                }
+              },
+          },
+          child: Focus(
+            autofocus: true,
+            child: Scaffold(
           backgroundColor: Colors.black,
           body: SafeArea(
             top: false,
@@ -927,6 +1089,8 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                 );
               },
             ),
+          ),
+        ),
           ),
         ),
       );
@@ -1197,4 +1361,48 @@ class _Banner extends StatelessWidget {
       ),
     ),
   );
+}
+
+/// Faint corner brackets and thirds before the first recording: where to put the class.
+class _FrameGuide extends StatelessWidget {
+  const _FrameGuide();
+  @override
+  Widget build(BuildContext context) => CustomPaint(
+    key: const ValueKey('frame-guide'),
+    painter: _GuidePainter(),
+    child: const SizedBox.expand(),
+  );
+}
+
+class _GuidePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final inset = size.shortestSide * .12;
+    final r = Rect.fromLTRB(inset, inset * 2.2, size.width - inset, size.height - inset * 2.4);
+    final bracket = Paint()
+      ..color = Colors.white.withValues(alpha: .7)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 3
+      ..strokeCap = StrokeCap.round;
+    final len = size.shortestSide * .08;
+    for (final (corner, dx, dy) in [
+      (r.topLeft, 1.0, 1.0),
+      (r.topRight, -1.0, 1.0),
+      (r.bottomLeft, 1.0, -1.0),
+      (r.bottomRight, -1.0, -1.0),
+    ]) {
+      canvas.drawLine(corner, corner.translate(len * dx, 0), bracket);
+      canvas.drawLine(corner, corner.translate(0, len * dy), bracket);
+    }
+    final thirds = Paint()
+      ..color = Colors.white.withValues(alpha: .14)
+      ..strokeWidth = 1;
+    for (var i = 1; i < 3; i++) {
+      canvas.drawLine(Offset(r.left + r.width * i / 3, r.top), Offset(r.left + r.width * i / 3, r.bottom), thirds);
+      canvas.drawLine(Offset(r.left, r.top + r.height * i / 3), Offset(r.right, r.top + r.height * i / 3), thirds);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

@@ -7,22 +7,57 @@ import 'package:flutter/services.dart';
 import 'browser_capture_stub.dart'
     if (dart.library.js_interop) 'browser_capture_web.dart'
     as browser;
+import 'framing.dart';
 import 'files_stub.dart'
     if (dart.library.io) 'files_io.dart'
     if (dart.library.js_interop) 'files_web.dart'
     as files;
 import 'pose_analyzer.dart';
 import 'pose_guidance.dart';
+import 'web_framing_stub.dart'
+    if (dart.library.js_interop) 'web_framing_web.dart'
+    as web;
+
+/// Names a laptop's own webcam; a camera that is not one of these is probably a USB webcam
+/// plugged in on purpose, which is what a teacher scanning a room wants by default.
+final _builtInCamera = RegExp(r'built-?in|integrated|facetime|internal', caseSensitive: false);
 
 CameraDescription preferredCamera(
   List<CameraDescription> cameras, {
   required bool enrollment,
-}) => cameras.firstWhere(
-  (camera) =>
-      camera.lensDirection ==
-      (enrollment ? CameraLensDirection.front : CameraLensDirection.back),
-  orElse: () => cameras.first,
-);
+  String? remembered,
+}) {
+  if (remembered != null) {
+    for (final camera in cameras) {
+      if (camera.name == remembered) return camera;
+    }
+  }
+  final lens = enrollment ? CameraLensDirection.front : CameraLensDirection.back;
+  for (final camera in cameras) {
+    if (camera.lensDirection == lens) return camera;
+  }
+  if (!enrollment) {
+    for (final camera in cameras) {
+      if (!_builtInCamera.hasMatch(camera.name)) return camera;
+    }
+  }
+  return cameras.first;
+}
+
+/// A readable name for the camera list: the browser's device label, or front / rear / external.
+String describeCamera(CameraDescription camera, List<CameraDescription> all) {
+  final name = camera.name
+      .replaceAll(RegExp(r'\s*\([0-9a-f]{4}:[0-9a-f]{4}\)\s*$'), '')
+      .trim();
+  if (kIsWeb && name.isNotEmpty) return name;
+  final same = all.where((c) => c.lensDirection == camera.lensDirection).toList();
+  final number = same.length > 1 ? ' ${same.indexOf(camera) + 1}' : '';
+  return switch (camera.lensDirection) {
+    CameraLensDirection.front => 'Front camera$number',
+    CameraLensDirection.back => 'Rear camera$number',
+    CameraLensDirection.external => 'External camera$number',
+  };
+}
 
 class LiveFaceTracker extends ChangeNotifier {
   final _since = <int, DateTime>{};
@@ -42,6 +77,16 @@ class LiveFaceTracker extends ChangeNotifier {
         ),
     ];
     _since.removeWhere((id, _) => !visible.contains(id));
+    notifyListeners();
+  }
+
+  /// Faces already judged by the caller (fully in view and steady), as the browser detector does.
+  void observeBoxes(
+    List<({int id, Rect bounds, bool framed})> found,
+    DateTime now,
+  ) {
+    _last = now;
+    faces = [for (final f in found) (bounds: f.bounds, framed: f.framed)];
     notifyListeners();
   }
 
@@ -98,6 +143,29 @@ class GuidedCamera extends ChangeNotifier {
   CameraController? controller;
   List<CameraDescription> cameras = [];
   CameraDescription? selectedCamera;
+
+  /// The camera chosen last in this browser tab, so a re-opened scan keeps a USB webcam.
+  static String? rememberedClassroomCamera;
+
+  /// Set when the open camera stopped (unplugged, taken by another app, permission revoked).
+  /// Cleared by the next successful open.
+  bool lost = false;
+  CameraDescription? lostCamera;
+
+  /// Browser only: how bright the picture is and whether the face detector is running.
+  Lighting lighting = Lighting.unknown;
+  int? light;
+  bool framingAvailable = false, framingFailed = false;
+  Timer? _framingTimer;
+  int _endedTicks = 0;
+  void Function()? _stopDeviceWatch;
+  Timer? _deviceDebounce;
+  bool get framesFaces => kIsWeb && !enrollmentGuidance;
+
+  /// Browser only: ask the browser to warn before the tab is closed (unsent video is in memory).
+  static void warnBeforeLeaving(bool on) {
+    if (kIsWeb) web.guardWebUnload(on);
+  }
   PoseFrameAnalyzer? analyzer;
   PoseGuidance? guidance;
   Timer? timer, _faceExpiry;
@@ -232,6 +300,7 @@ class GuidedCamera extends ChangeNotifier {
         selectedCamera = preferredCamera(
           cameras,
           enrollment: enrollmentGuidance,
+          remembered: enrollmentGuidance ? null : rememberedClassroomCamera,
         );
       }
       next = CameraController(
@@ -253,8 +322,12 @@ class GuidedCamera extends ChangeNotifier {
       }
       controller = next;
       ready = true;
+      lost = false;
+      lostCamera = null;
+      next.addListener(_controllerChanged);
       if (enrollmentGuidance && !kIsWeb) await lockPortraitCapture();
       await startPreviewAnalysis();
+      if (framesFaces) _startWebFraming();
     } catch (_) {
       await next?.dispose();
       if (!disposed && generation == epoch) {
@@ -265,6 +338,106 @@ class GuidedCamera extends ChangeNotifier {
       if (generation == epoch) busy = false;
       emit();
     }
+  }
+
+  // ---- Browser: live framing and camera hot-plug --------------------------------------------
+
+  void _startWebFraming() {
+    _framingTimer?.cancel();
+    framingAvailable = false;
+    framingFailed = false;
+    unawaited(
+      web.startWebFraming().then((ok) {
+        framingAvailable = ok;
+        framingFailed = !ok;
+        emit();
+      }),
+    );
+    _framingTimer = Timer.periodic(const Duration(milliseconds: 200), (_) => _webTick());
+    _stopDeviceWatch ??= web.watchWebDevices(() {
+      _deviceDebounce?.cancel();
+      _deviceDebounce = Timer(const Duration(milliseconds: 600), () => unawaited(refreshCameras()));
+    });
+  }
+
+  void _stopWebFraming({bool release = true}) {
+    _framingTimer?.cancel();
+    _framingTimer = null;
+    // Keep the loaded detector while only swapping cameras: loading it takes about a second.
+    if (framesFaces && release) web.stopWebFraming();
+    faceTracker.clear();
+    light = null;
+    lighting = Lighting.unknown;
+  }
+
+  void _webTick() {
+    if (disposed || !ready || busy && !recording) return;
+    final reading = web.readWebFraming();
+    if (!reading.video) {
+      // The browser fires no error when a webcam is unplugged, so a picture that has ended for
+      // a moment (not a single missed frame) is treated as the camera being lost.
+      if (reading.ended && ++_endedTicks >= 3) _cameraLost();
+      return;
+    }
+    _endedTicks = 0;
+    final before = (lighting, faceTracker.faces.length, framingAvailable);
+    // Smooth the light reading so a passing hand does not flicker the advice.
+    final value = reading.light;
+    if (value != null) {
+      light = light == null ? value : ((light! * 3 + value) / 4).round();
+      lighting = lightingOf(light);
+    }
+    final faces = reading.faces;
+    if (faces != null) {
+      faceTracker.observeBoxes(faces, DateTime.now());
+    } else {
+      faceTracker.expire(DateTime.now());
+    }
+    if (reading.detector != framingAvailable) framingAvailable = reading.detector;
+    if (before != (lighting, faceTracker.faces.length, framingAvailable)) emit();
+  }
+
+  /// Re-reads the list of cameras after one is plugged in or removed.
+  Future<void> refreshCameras() async {
+    if (disposed || busy || recording || !kIsWeb) return;
+    try {
+      final found = await availableCameras();
+      if (disposed || found.isEmpty && ready) return;
+      cameras = found;
+      final current = selectedCamera;
+      if (current != null && ready && !found.contains(current)) _cameraLost();
+      emit();
+    } catch (_) {
+      // Keep the list we have; the open camera reports its own problems.
+    }
+  }
+
+  void _controllerChanged() {
+    final current = controller;
+    if (current == null || disposed || lost) return;
+    if (current.value.hasError) _cameraLost();
+  }
+
+  /// The open camera is gone. A segment being recorded is kept when long enough; the page
+  /// then picks another camera or asks the teacher to reconnect.
+  void _cameraLost() {
+    if (lost || disposed || enrollmentGuidance) return;
+    lost = true;
+    _endedTicks = 0;
+    lostCamera = selectedCamera;
+    onEvent?.call('camera_failed', code: 'lost');
+    unawaited(() async {
+      final wasRecording = recording;
+      if (wasRecording) await stop(minimumSeconds: 4);
+      final old = controller;
+      _stopWebFraming();
+      await _stopPreviewAnalysis(old);
+      controller = null;
+      ready = false;
+      error = 'Camera disconnected. Reconnect it or choose another camera.';
+      emit();
+      await _release(old);
+    }());
   }
 
   /// Framing feedback before recording never completes challenge poses.
@@ -324,17 +497,29 @@ class GuidedCamera extends ChangeNotifier {
     final current = selectedCamera;
     if (current == null || cameras.length < 2) return null;
     final front = current.lensDirection != CameraLensDirection.front;
-    for (final camera in cameras) {
-      if ((camera.lensDirection == CameraLensDirection.front) == front &&
-          camera.lensDirection != CameraLensDirection.external) {
-        return camera;
+    final hasBoth =
+        cameras.any((c) => c.lensDirection == CameraLensDirection.front) &&
+        cameras.any((c) => c.lensDirection == CameraLensDirection.back);
+    if (hasBoth) {
+      for (final camera in cameras) {
+        if ((camera.lensDirection == CameraLensDirection.front) == front &&
+            camera.lensDirection != CameraLensDirection.external) {
+          return camera;
+        }
       }
     }
-    return null;
+    // Laptops and USB webcams have no front / rear: step to the next camera in the list.
+    final at = cameras.indexOf(current);
+    return cameras[(at + 1) % cameras.length];
   }
 
   bool get canSwitch => otherCamera != null;
   bool get usingFront => selectedCamera?.lensDirection == CameraLensDirection.front;
+
+  /// A phone-style front / rear pair, as opposed to a list of webcams.
+  bool get hasFrontRear =>
+      cameras.any((c) => c.lensDirection == CameraLensDirection.front) &&
+      cameras.any((c) => c.lensDirection == CameraLensDirection.back);
 
   Future<void> selectCamera(CameraDescription choice) async {
     if (busy ||
@@ -353,12 +538,14 @@ class GuidedCamera extends ChangeNotifier {
     emit();
     final generation = epoch;
     try {
+      _stopWebFraming(release: false);
       await _stopPreviewAnalysis(old);
       await _release(old);
     } finally {
       if (epoch == generation) busy = false;
     }
     if (epoch == generation && !disposed) await initialize();
+    if (!enrollmentGuidance && ready) rememberedClassroomCamera = choice.name;
   }
 
   Future<void> start(List<String> order) async {
@@ -588,6 +775,7 @@ class GuidedCamera extends ChangeNotifier {
     _recordingClock.stop();
     _faceExpiry?.cancel();
     faceTracker.clear();
+    _stopWebFraming();
     final old = controller;
     final wasRecording = recording;
     interrupted = lifecycle && !disposed && (ready || busy);
@@ -637,6 +825,9 @@ class GuidedCamera extends ChangeNotifier {
   void dispose() {
     disposed = true;
     timer?.cancel();
+    _deviceDebounce?.cancel();
+    _stopDeviceWatch?.call();
+    _stopDeviceWatch = null;
     unawaited(interrupt());
     faceTracker.dispose();
     super.dispose();

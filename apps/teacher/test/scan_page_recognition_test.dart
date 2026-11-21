@@ -1,4 +1,3 @@
-import 'package:camera/camera.dart' show CameraDescription, CameraLensDirection;
 import 'package:facetrack_capture/facetrack_capture.dart';
 import 'package:facetrack_teacher/classroom_scan.dart';
 import 'package:facetrack_teacher/recognition_board.dart';
