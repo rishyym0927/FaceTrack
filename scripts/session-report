@@ -1,0 +1,16 @@
+#!/bin/sh
+# One-command diagnostic report for a class (Markdown). See docs/MONDAY_DIAGNOSTICS.md.
+#
+#   scripts/session-report --vm latest              the most recent class on the Azure VM
+#   scripts/session-report --vm <session-id>        one class (add --since 3d for an older one)
+#   scripts/session-report --vm --since 3h          every class active in the last 3 hours
+#   scripts/session-report --logs-dir ./logs <id>   from a folder of collected logs
+#   scripts/session-report --stdin <id> < file.log  from a file or a pipe
+#   add --no-db to skip the read-only database part, --out report.md to write a file
+#
+# Uses the API environment's Python when present (it has psycopg for the database part).
+set -eu
+HERE=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+PY="$HERE/../services/api/.venv/bin/python"
+[ -x "$PY" ] || PY=python3
+exec "$PY" "$HERE/session_report.py" "$@"

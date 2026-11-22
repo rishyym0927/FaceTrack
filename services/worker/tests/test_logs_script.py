@@ -25,6 +25,11 @@ LOG = "\n".join(
         line("worker", "worker_error", level="error", job_id=JOB, stage="download"),
         line("worker", "resources", level="info", cpu_percent=41.5, mem_available_mb=5000),
         line("worker", "resources", level="info", cpu_percent=88.0, mem_available_mb=900),
+        # as Celery prints worker lines, and as the persistent capture stores any container's
+        "[2026-11-21 15:42:02,730: WARNING/MainProcess] "
+        + line("worker", "download_done", level="info", job_id=JOB, bytes=10896480),
+        "facetrack-worker-2 2026-11-21T15:42:03.000000000Z "
+        + line("worker", "lease_lost", level="warning", job_id=JOB, reason="api_rejected"),
     ]
 )
 
@@ -48,14 +53,18 @@ def test_a_request_id_prefix_finds_one_failure():
 
 def test_a_job_id_follows_the_worker_stages():
     _, rows, _ = run(JOB)
-    assert [r["event"] for r in rows] == ["job_start", "worker_error"]
+    assert [r["event"] for r in rows] == [
+        "job_start", "worker_error", "download_done", "lease_lost",
+    ]
 
 
 def test_errors_only():
     _, rows, _ = run("--errors")
-    assert {r["event"] for r in rows} == {"request", "worker_error", "database_error"}
+    assert {r["event"] for r in rows} == {
+        "request", "worker_error", "database_error", "lease_lost",
+    }
     # a status reported by an app is not a server error
-    assert all(r.get("level") == "error" or r.get("status", 0) >= 400 for r in rows)
+    assert all(r.get("level") in ("error", "warning") or r.get("status", 0) >= 400 for r in rows)
 
 
 def test_resources_shows_recent_readings():
@@ -73,3 +82,16 @@ def test_unsafe_input_is_refused():
 def test_no_arguments_prints_usage():
     code, rows, _ = run()
     assert code == 2 and rows == []
+
+
+def test_vm_mode_reads_the_persistent_files_and_cuts_by_time():
+    """The command run on the server prefers /var/log/facetrack and falls back to Docker."""
+    import re
+
+    result = subprocess.run(
+        ["sh", "-c", f"sed -n '/^vm_command()/,/^}}/p' {SCRIPT}"], capture_output=True, text=True
+    )
+    body = result.stdout
+    assert "/var/log/facetrack/*.log" in body and "zcat" in body
+    assert "docker compose logs" in body  # fallback while the capture is not installed
+    assert re.search(r"claim.*204", body)  # idle polls are dropped on the server

@@ -600,32 +600,15 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
   void _showStudents() => showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
+    useSafeArea: true,
     backgroundColor: _ink,
+    constraints: const BoxConstraints(maxWidth: 720),
     shape: const RoundedRectangleBorder(
       borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
     ),
-    builder: (sheet) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
-        child: ListenableBuilder(
-          listenable: Listenable.merge([scan, results]),
-          builder: (context, _) => Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              RecognitionBoard(
-                entries: _entries,
-                maxHeight: MediaQuery.sizeOf(context).height * .5,
-              ),
-              const SizedBox(height: 10),
-              const Text(
-                'Green means the server recognised the student. Boxes on the camera only show detected faces.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white60, fontSize: 12),
-              ),
-            ],
-          ),
-        ),
-      ),
+    builder: (sheet) => _StudentsSheet(
+      listenable: Listenable.merge([scan, results]),
+      entries: () => _entries,
     ),
   );
 
@@ -646,26 +629,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
               ),
             )
           else
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (camera.error == null && scan.cameraError == null)
-                      const CircularProgressIndicator(color: Colors.white70)
-                    else
-                      const Icon(Icons.videocam_off_outlined, size: 40, color: Colors.white54),
-                    const SizedBox(height: 14),
-                    Text(
-                      scan.cameraError ?? camera.error ?? 'Opening camera…',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                  ],
-                ),
-              ),
-            ),
+            _cameraState(camera),
           if (controller != null && !scan.scanning && scan.recorded == 0 && !scan.switching)
             const IgnorePointer(child: _FrameGuide()),
           if (scan.switching)
@@ -683,6 +647,88 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
               ),
             ),
         ],
+      ),
+    );
+  }
+
+  /// What shows where the picture will be: opening, a permission problem, or any other camera
+  /// failure, each with the next step.
+  Widget _cameraState(GuidedCamera camera) {
+    final message = scan.cameraError ?? camera.error;
+    if (message == null) {
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              CircularProgressIndicator(color: Colors.white70),
+              SizedBox(height: 14),
+              Text('Opening camera…', style: TextStyle(color: Colors.white70)),
+            ],
+          ),
+        ),
+      );
+    }
+    final permission = message.contains('Allow camera access');
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.fromLTRB(32, 96, 32, 200),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            key: const ValueKey('camera-state'),
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 64,
+                height: 64,
+                decoration: const BoxDecoration(color: Colors.white10, shape: BoxShape.circle),
+                child: Icon(
+                  permission ? Icons.no_photography_outlined : Icons.videocam_off_outlined,
+                  size: 32,
+                  color: Colors.white70,
+                ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                permission ? 'Camera access needed' : 'Camera unavailable',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 8),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70, height: 1.4),
+              ),
+              if (permission) ...[
+                const SizedBox(height: 12),
+                Text(
+                  kIsWeb
+                      ? 'Choose Allow in the browser prompt, or open the camera icon in the address bar and allow it for this site.'
+                      : 'Allow the camera in your phone settings for this app, then try again.',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white54, fontSize: 13, height: 1.4),
+                ),
+              ],
+              const SizedBox(height: 16),
+              OutlinedButton.icon(
+                key: const ValueKey('camera-retry'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white38),
+                  minimumSize: const Size(48, 48),
+                ),
+                onPressed: camera.busy
+                    ? null
+                    : () => unawaited(scan.cameraError != null ? scan.start() : camera.initialize()),
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -726,74 +772,96 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
   static String _clock(int seconds) =>
       '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
 
-  Widget _topBar(GuidedCamera camera) => Container(
-    padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-    decoration: const BoxDecoration(
-      gradient: LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [Color(0xb3000000), Color(0x00000000)],
-      ),
-    ),
-    child: Column(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Row(
-          children: [
-            _RoundButton(icon: Icons.close, tooltip: 'Close camera', onPressed: _close),
-            const SizedBox(width: 8),
-            Expanded(child: Align(alignment: Alignment.centerLeft, child: _statusPill(camera))),
-            if (_showPicker(camera)) _cameraMenu(camera),
-            if (camera.canSwitch)
-              _RoundButton(
-                key: const ValueKey('flip-camera'),
-                icon: camera.hasFrontRear ? Icons.flip_camera_android : Icons.cameraswitch_outlined,
-                tooltip: camera.hasFrontRear
-                    ? (camera.usingFront ? 'Switch to rear camera' : 'Switch to front camera')
-                    : 'Switch to the next camera',
-                busy: scan.switching,
-                onPressed: scan.switching || scan.releasing || scan.ended ? null : () => scan.switchCamera(),
-              ),
-            if (!kIsWeb && !camera.usingFront)
-              _RoundButton(
-                icon: Icons.flashlight_on_outlined,
-                tooltip: 'Toggle torch',
-                onPressed: camera.busy ? null : camera.toggleTorch,
-              ),
-            _RoundButton(icon: Icons.help_outline, tooltip: 'Scanning tips', onPressed: _showTips),
-          ],
-        ),
-        // Faces change several times a second; only this line listens to them.
-        ListenableBuilder(
-          listenable: camera.faceTracker,
-          builder: (context, _) => Align(
-            alignment: Alignment.centerLeft,
-            child: Padding(padding: const EdgeInsets.only(left: 8), child: _hint(camera) ?? const SizedBox.shrink()),
+  Widget _topBar(GuidedCamera camera) => LayoutBuilder(
+    builder: (context, box) {
+      // Narrow phones: the status pill gets a row of its own so it keeps its text.
+      final compact = box.maxWidth < 460;
+      final size = box.maxWidth < 400 ? 44.0 : 48.0;
+      final pill = _statusPill(camera);
+      return Container(
+        padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [Color(0xb3000000), Color(0x00000000)],
           ),
         ),
-        if (camera.recording)
-          Padding(
-            padding: const EdgeInsets.only(top: 8, left: 4, right: 4),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(4),
-              child: LinearProgressIndicator(
-                key: const ValueKey('segment-progress'),
-                value: (camera.elapsed / camera.segmentSeconds).clamp(0, 1).toDouble(),
-                minHeight: 4,
-                backgroundColor: Colors.white24,
-                color: Colors.redAccent,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                _RoundButton(icon: Icons.close, tooltip: 'Close camera', size: size, onPressed: _close),
+                if (compact)
+                  const Spacer()
+                else ...[
+                  const SizedBox(width: 8),
+                  Expanded(child: Align(alignment: Alignment.centerLeft, child: pill)),
+                ],
+                if (_showPicker(camera)) _cameraMenu(camera, size),
+                if (camera.canSwitch)
+                  _RoundButton(
+                    key: const ValueKey('flip-camera'),
+                    icon: camera.hasFrontRear ? Icons.flip_camera_android : Icons.cameraswitch_outlined,
+                    tooltip: camera.hasFrontRear
+                        ? (camera.usingFront ? 'Switch to rear camera' : 'Switch to front camera')
+                        : 'Switch to the next camera',
+                    size: size,
+                    busy: scan.switching,
+                    onPressed: scan.switching || scan.releasing || scan.ended ? null : () => scan.switchCamera(),
+                  ),
+                if (!kIsWeb && !camera.usingFront)
+                  _RoundButton(
+                    icon: Icons.flashlight_on_outlined,
+                    tooltip: 'Toggle torch',
+                    size: size,
+                    onPressed: camera.busy ? null : camera.toggleTorch,
+                  ),
+                _RoundButton(icon: Icons.help_outline, tooltip: 'Scanning tips', size: size, onPressed: _showTips),
+              ],
+            ),
+            if (compact)
+              Padding(
+                padding: const EdgeInsets.only(top: 6, left: 4),
+                child: Align(alignment: Alignment.centerLeft, child: pill),
+              ),
+            // Faces change several times a second; only this line listens to them.
+            ListenableBuilder(
+              listenable: camera.faceTracker,
+              builder: (context, _) => Align(
+                alignment: Alignment.centerLeft,
+                child: Padding(
+                  padding: const EdgeInsets.only(left: 4),
+                  child: _hint(camera) ?? const SizedBox.shrink(),
+                ),
               ),
             ),
-          ),
-      ],
-    ),
+            if (camera.recording)
+              Padding(
+                padding: const EdgeInsets.only(top: 8, left: 4, right: 4),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    key: const ValueKey('segment-progress'),
+                    value: (camera.elapsed / camera.segmentSeconds).clamp(0, 1).toDouble(),
+                    minHeight: 4,
+                    backgroundColor: Colors.white24,
+                    color: Colors.redAccent,
+                  ),
+                ),
+              ),
+          ],
+        ),
+      );
+    },
   );
 
   /// A list of cameras to choose from: needed for several webcams, or more than a front / rear pair.
   bool _showPicker(GuidedCamera camera) =>
       camera.cameras.length > 1 && (kIsWeb || camera.cameras.length > 2);
 
-  Widget _cameraMenu(GuidedCamera camera) => PopupMenuButton<CameraDescription>(
+  Widget _cameraMenu(GuidedCamera camera, double size) => PopupMenuButton<CameraDescription>(
     key: const ValueKey('camera-menu'),
     tooltip: 'Choose camera',
     enabled: !scan.switching && !scan.releasing && !scan.ended,
@@ -807,13 +875,13 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
           child: Text(describeCamera(c, camera.cameras), overflow: TextOverflow.ellipsis),
         ),
     ],
-    child: const Padding(
-      padding: EdgeInsets.all(8),
+    child: Padding(
+      padding: const EdgeInsets.only(left: 6),
       child: DecoratedBox(
-        decoration: BoxDecoration(color: Color(0x8c000000), shape: BoxShape.circle),
+        decoration: const BoxDecoration(color: Color(0x80000000), shape: BoxShape.circle),
         child: SizedBox.square(
-          dimension: 40,
-          child: Icon(Icons.videocam_outlined, color: Colors.white, size: 22),
+          dimension: size,
+          child: const Icon(Icons.videocam_outlined, color: Colors.white, size: 22),
         ),
       ),
     ),
@@ -861,10 +929,10 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
     );
   }
 
-  Widget _recordButton(GuidedCamera camera) {
+  Widget _recordButton(GuidedCamera camera, {bool caption = false}) {
     final scanning = scan.scanning;
     final disabled = !scanning && (camera.busy || scan.finishing || scan.switching);
-    return Semantics(
+    final button = Semantics(
       button: true,
       label: scanning ? 'Stop scan' : 'Start scan',
       child: GestureDetector(
@@ -900,6 +968,25 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
           ),
         ),
       ),
+    );
+    if (!caption) return button;
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        button,
+        const SizedBox(height: 4),
+        ExcludeSemantics(
+          child: Text(
+            scanning ? 'Stop scan' : 'Start scan',
+            maxLines: 1,
+            style: TextStyle(
+              color: disabled ? Colors.white38 : Colors.white,
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -982,7 +1069,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
       );
     }
     final cameraProblem = scan.cameraError ?? (camera.controller == null ? null : camera.error);
-    if (cameraProblem != null) {
+    if (cameraProblem != null && camera.controller != null) {
       banners.add(
         _Banner(
           icon: Icons.videocam_off_outlined,
@@ -1048,7 +1135,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
   }
 
   Widget _controls(GuidedCamera camera, {required bool vertical}) {
-    final children = <Widget>[_studentsChip(), _recordButton(camera), _rightChip(camera)];
+    final children = <Widget>[_studentsChip(), _recordButton(camera, caption: !vertical), _rightChip(camera)];
     final box = Container(
       padding: vertical
           ? const EdgeInsets.symmetric(vertical: 12, horizontal: 8)
@@ -1060,9 +1147,12 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
             : const BorderRadius.vertical(top: Radius.circular(24)),
       ),
       child: vertical
-          ? Column(
-              mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-              children: children,
+          ? MediaQuery.withClampedTextScaling(
+              maxScaleFactor: 1.3,
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: children,
+              ),
             )
           : Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1215,7 +1305,15 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                         Row(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
-                            Icon(icon, size: 34, color: color),
+                            Container(
+                              width: 56,
+                              height: 56,
+                              decoration: BoxDecoration(
+                                color: color.withValues(alpha: .12),
+                                borderRadius: BorderRadius.circular(AppRadius.lg),
+                              ),
+                              child: Icon(icon, size: 30, color: color),
+                            ),
                             const SizedBox(width: 14),
                             Expanded(
                               child: Column(
@@ -1241,14 +1339,38 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                               child: Text('${(value * 100).round()}% uploaded'),
                             ),
                         ],
-                        if (scan.pending > 0)
+                        if (scan.submitted > 0 || scan.pending > 0 || scan.skipped > 0)
                           Padding(
-                            padding: const EdgeInsets.only(top: 8),
-                            child: Text('${scan.submitted} uploaded · ${scan.pending} remaining'),
+                            key: const ValueKey('finish-counts'),
+                            padding: const EdgeInsets.only(top: 14),
+                            child: Wrap(
+                              spacing: 8,
+                              runSpacing: 8,
+                              children: [
+                                TonePill(
+                                  '${scan.submitted} uploaded',
+                                  tone: AppTone.success,
+                                  icon: Icons.cloud_done_outlined,
+                                ),
+                                if (scan.pending > 0)
+                                  TonePill(
+                                    '${scan.pending} remaining',
+                                    tone: AppTone.warning,
+                                    icon: Icons.hourglass_top,
+                                  ),
+                                if (scan.skipped > 0)
+                                  TonePill(
+                                    '${scan.skipped} skipped',
+                                    tone: AppTone.danger,
+                                    icon: Icons.block,
+                                  ),
+                              ],
+                            ),
                           ),
                         if (progressSteps(snapshot.info, uploading: scan.pending).isNotEmpty) ...[
                           const SizedBox(height: 18),
                           Card(
+                            margin: EdgeInsets.zero,
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: ProcessingProgress(
@@ -1262,6 +1384,7 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
                         if (snapshot.rows.isNotEmpty) ...[
                           const SizedBox(height: 18),
                           Card(
+                            margin: EdgeInsets.zero,
                             child: Padding(
                               padding: const EdgeInsets.all(16),
                               child: RecognitionBoard(
@@ -1315,6 +1438,159 @@ class _ClassroomScanPageState extends State<ClassroomScanPage> {
   }
 }
 
+/// The per-student recognition list over the camera: summary, search, a "needs attention"
+/// filter and the list. Padded for the keyboard so the search field is never covered.
+class _StudentsSheet extends StatefulWidget {
+  const _StudentsSheet({required this.listenable, required this.entries});
+  final Listenable listenable;
+  final List<BoardEntry> Function() entries;
+  @override
+  State<_StudentsSheet> createState() => _StudentsSheetState();
+}
+
+class _StudentsSheetState extends State<_StudentsSheet> {
+  final _search = TextEditingController();
+  bool _attention = false;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final media = MediaQuery.of(context);
+    final room = media.size.height - media.viewInsets.bottom - media.padding.vertical;
+    return Padding(
+      padding: EdgeInsets.only(bottom: media.viewInsets.bottom),
+      child: SafeArea(
+        top: false,
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.fromLTRB(20, 8, 20, 16),
+          child: ListenableBuilder(
+            listenable: widget.listenable,
+            builder: (context, _) {
+              final entries = widget.entries();
+              return Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      margin: const EdgeInsets.only(bottom: 12),
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  if (entries.isEmpty)
+                    const Padding(
+                      padding: EdgeInsets.symmetric(vertical: 24),
+                      child: Text(
+                        'No students to show yet. The list appears once this session\'s roster has loaded.',
+                        key: ValueKey('students-empty'),
+                        textAlign: TextAlign.center,
+                        style: TextStyle(color: Colors.white70, height: 1.4),
+                      ),
+                    )
+                  else ...[
+                    TextField(
+                      key: const ValueKey('students-search'),
+                      controller: _search,
+                      onChanged: (_) => setState(() {}),
+                      style: const TextStyle(color: Colors.white),
+                      cursorColor: Colors.white,
+                      decoration: InputDecoration(
+                        hintText: 'Search name or enrolment',
+                        hintStyle: const TextStyle(color: Colors.white54),
+                        prefixIcon: const Icon(Icons.search, color: Colors.white54),
+                        suffixIcon: _search.text.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear search',
+                                icon: const Icon(Icons.close, color: Colors.white54),
+                                onPressed: () => setState(_search.clear),
+                              ),
+                        filled: true,
+                        fillColor: Colors.white12,
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(14),
+                          borderSide: BorderSide.none,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Semantics(
+                        button: true,
+                        selected: _attention,
+                        label: 'Needs attention',
+                        child: Material(
+                          key: const ValueKey('students-attention'),
+                          color: _attention ? Colors.white30 : Colors.white12,
+                          shape: const StadiumBorder(side: BorderSide(color: Colors.white24)),
+                          child: InkWell(
+                            customBorder: const StadiumBorder(),
+                            onTap: () => setState(() => _attention = !_attention),
+                            child: ConstrainedBox(
+                              constraints: const BoxConstraints(minHeight: 44),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(horizontal: 14),
+                                child: ExcludeSemantics(
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        _attention ? Icons.check : Icons.filter_list,
+                                        size: 18,
+                                        color: Colors.white,
+                                      ),
+                                      const SizedBox(width: 8),
+                                      const Flexible(
+                                        child: Text(
+                                          'Needs attention',
+                                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    RecognitionBoard(
+                      entries: entries,
+                      query: _search.text,
+                      attentionOnly: _attention,
+                      maxHeight: (room * .42).clamp(120.0, 420.0),
+                    ),
+                  ],
+                  const SizedBox(height: 10),
+                  const Text(
+                    'Green means the server recognised the student. Boxes on the camera only show detected faces.',
+                    textAlign: TextAlign.center,
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _RoundButton extends StatelessWidget {
   const _RoundButton({
     super.key,
@@ -1322,21 +1598,23 @@ class _RoundButton extends StatelessWidget {
     required this.tooltip,
     required this.onPressed,
     this.busy = false,
+    this.size = 48,
   });
   final IconData icon;
   final String tooltip;
   final VoidCallback? onPressed;
   final bool busy;
+  final double size;
   @override
   Widget build(BuildContext context) => Padding(
     padding: const EdgeInsets.only(left: 6),
     child: Material(
-      color: Colors.black.withValues(alpha: .5),
+      color: Colors.black.withValues(alpha: .55),
       shape: const CircleBorder(),
       child: IconButton(
         tooltip: tooltip,
         onPressed: onPressed,
-        constraints: const BoxConstraints.tightFor(width: 44, height: 44),
+        constraints: BoxConstraints.tightFor(width: size, height: size),
         icon: busy
             ? const SizedBox.square(
                 dimension: 20,
@@ -1368,7 +1646,9 @@ class _SideChip extends StatelessWidget {
     child: InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(14),
-      child: Padding(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+        child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         child: ExcludeSemantics(
           child: Column(
@@ -1376,20 +1656,23 @@ class _SideChip extends StatelessWidget {
             children: [
               Icon(icon, color: iconColor, size: 22),
               const SizedBox(height: 2),
-              Text(
-                label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+              FittedBox(
+                fit: BoxFit.scaleDown,
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w700),
+                ),
               ),
               Text(
                 caption,
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
-                style: const TextStyle(color: Colors.white60, fontSize: 11),
+                style: const TextStyle(color: Colors.white70, fontSize: 11),
               ),
             ],
           ),
+        ),
         ),
       ),
     ),

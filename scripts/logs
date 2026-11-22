@@ -7,11 +7,15 @@
 #   scripts/logs --resources          recent server CPU / memory / disk readings
 #   scripts/logs --since 2h <id>      look further back (default 1h)
 #   scripts/logs --vm <id>            read the Azure VM's logs over SSH instead of local Docker
+#                                     (the persistent files in /var/log/facetrack when the log
+#                                     capture is installed, which survive deploys; else Docker's)
 #   scripts/logs --stdin <id>         filter log lines piped in (used by the tests)
+#   scripts/logs --all                every event line as plain JSON (what session-report reads)
 #
 # Every line is one JSON object (see docs/DEPLOY_AZURE.md). jq pretty-prints when installed.
+# For a full per-class report use scripts/session-report.
 set -eu
-SINCE=1h MODE=local ID="" ERRORS=0 RESOURCES=0
+SINCE=1h MODE=local ID="" ERRORS=0 RESOURCES=0 ALL=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --since) SINCE=${2:?--since needs a value}; shift ;;
@@ -19,7 +23,8 @@ while [ $# -gt 0 ]; do
     --stdin) MODE=stdin ;;
     --errors) ERRORS=1 ;;
     --resources) RESOURCES=1 ;;
-    -h|--help) sed -n '2,13p' "$0"; exit 0 ;;
+    --all) ALL=1 ;;
+    -h|--help) sed -n '2,17p' "$0"; exit 0 ;;
     -*) echo "Unknown option $1" >&2; exit 2 ;;
     *) ID=$1 ;;
   esac
@@ -27,28 +32,53 @@ while [ $# -gt 0 ]; do
 done
 case "$SINCE" in ''|*[!0-9a-z]*) echo "Invalid --since value." >&2; exit 2 ;; esac
 case "$ID" in *[!A-Za-z0-9-]*) echo "The id may only contain letters, digits and dashes." >&2; exit 2 ;; esac
-[ -n "$ID" ] || [ "$ERRORS" = 1 ] || [ "$RESOURCES" = 1 ] || { sed -n '2,13p' "$0" >&2; exit 2; }
+[ -n "$ID" ] || [ "$ERRORS" = 1 ] || [ "$RESOURCES" = 1 ] || [ "$ALL" = 1 ] || { sed -n '2,17p' "$0" >&2; exit 2; }
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+
+# Lower bound of the window as a UTC timestamp, for files that hold more than the window.
+cutoff() {
+  n=${SINCE%[smhd]}; u=${SINCE#"$n"}
+  case "$n" in ''|*[!0-9]*) echo "Invalid --since value." >&2; exit 2 ;; esac
+  case "$u" in s) g=seconds b=S ;; m) g=minutes b=M ;; h) g=hours b=H ;; d) g=days b=d ;; *) u=h g=hours b=H ;; esac
+  date -u -d "$n $g ago" +%Y-%m-%dT%H:%M:%S 2>/dev/null || date -u "-v-${n}${b}" +%Y-%m-%dT%H:%M:%S
+}
+
+# Persistent files first (they survive deploys and cover days), Docker's own buffer otherwise.
+# Idle job-polling lines are dropped on the server: they are most of the volume.
+vm_command() {
+  cat <<EOF
+if ls /var/log/facetrack/*.log >/dev/null 2>&1; then
+  sudo sh -c 'for f in /var/log/facetrack/*.log /var/log/facetrack/*.log.1 /var/log/facetrack/*.log.*.gz; do
+    [ -f "\$f" ] || continue
+    case "\$f" in *.gz) zcat "\$f" ;; *) cat "\$f" ;; esac
+  done' | grep -v '"route":"/internal/v1/jobs/claim","status":204' |
+  awk -v c="$1" '{ if (match(\$0, /"ts":"[^"]+"/)) { t = substr(\$0, RSTART + 6, RLENGTH - 7); if (t < c) next } print }'
+else
+  cd /opt/facetrack && sudo docker compose logs --no-log-prefix --since $SINCE api worker agent
+fi
+EOF
+}
 
 source_logs() {
   case "$MODE" in
     stdin) cat ;;
     vm)
       ssh -i "${FACETRACK_SSH_KEY:-$HOME/.ssh/facetrack_azure}" -o ConnectTimeout=15 \
-        "azureuser@${FACETRACK_HOST:-facetrack.centralindia.cloudapp.azure.com}" \
-        "cd /opt/facetrack && sudo docker compose logs --no-log-prefix --since $SINCE api worker agent" ;;
+        "azureuser@${FACETRACK_HOST:-facetrack.centralindia.cloudapp.azure.com}" "$(vm_command "$(cutoff)")" ;;
     *) (cd "$ROOT" && docker compose logs --no-log-prefix --since "$SINCE" api worker agent) ;;
   esac
 }
 pretty() { if command -v jq >/dev/null 2>&1; then jq -c . 2>/dev/null || cat; else cat; fi; }
 
-# Keep only JSON event lines (uvicorn prefixes its own with "INFO:").
+# Keep only JSON event lines. Whatever precedes the object is dropped: uvicorn's "INFO:", the
+# worker's Celery "[time: WARNING/MainProcess]" and the container name and timestamp that
+# the persistent capture adds.
 filter() {
-  sed -n 's/^[A-Za-z]*:\{0,1\} *\({.*}\)$/\1/p' |
+  sed -n 's/^[^{]*\({".*}\)[[:space:]]*$/\1/p' |
     if [ "$RESOURCES" = 1 ]; then grep -E '"event": ?"resources"' | tail -n 20
     else
       if [ -n "$ID" ]; then grep -F -- "$ID"; else cat; fi |
         if [ "$ERRORS" = 1 ]; then grep -E '"level": ?"(warning|error)"|"status": ?[45][0-9][0-9]'; else cat; fi
     fi
 }
-source_logs | filter | pretty
+if [ "$ALL" = 1 ]; then source_logs | filter; else source_logs | filter | pretty; fi

@@ -1,3 +1,4 @@
+import 'package:facetrack_core/facetrack_core.dart' show AppRadius, AppSpace;
 import 'package:flutter/material.dart';
 
 String initialsOf(String name) {
@@ -61,18 +62,20 @@ class ReviewCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
+    final narrow = MediaQuery.sizeOf(context).width < 600;
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(18),
+      margin: const EdgeInsets.only(bottom: AppSpace.md),
+      padding: EdgeInsets.all(narrow ? AppSpace.lg : 18),
       decoration: BoxDecoration(
         color: scheme.surface,
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(AppRadius.lg),
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               CircleAvatar(
                 radius: 22,
@@ -85,12 +88,17 @@ class ReviewCard extends StatelessWidget {
                   ),
                 ),
               ),
-              const SizedBox(width: 12),
+              const SizedBox(width: AppSpace.md),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(name, style: Theme.of(context).textTheme.titleMedium),
+                    Text(
+                      name,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
                     if (number != null)
                       Text(
                         'Enrolment number: $number',
@@ -105,12 +113,12 @@ class ReviewCard extends StatelessWidget {
             ],
           ),
           if (chips.isNotEmpty) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpace.md),
             Wrap(spacing: 6, runSpacing: 6, children: chips),
           ],
-          if (body != null) ...[const SizedBox(height: 12), body!],
-          const SizedBox(height: 14),
-          Wrap(spacing: 10, runSpacing: 8, children: actions),
+          if (body != null) ...[const SizedBox(height: AppSpace.md), body!],
+          const SizedBox(height: AppSpace.lg),
+          Wrap(spacing: 10, runSpacing: AppSpace.sm, children: actions),
         ],
       ),
     );

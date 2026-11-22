@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
+import 'account_widgets.dart';
 import 'auth.dart';
 import 'brand.dart';
 import 'diagnostics.dart';
@@ -1394,28 +1395,6 @@ class AccountPage extends ConsumerWidget {
     final center = NotificationScope.of(context);
     final student = ref.read(servicesProvider).config.role == AppRole.student;
 
-    Widget chip(IconData icon, String text) => Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-      decoration: BoxDecoration(
-        color: const Color(0x26ffffff),
-        borderRadius: BorderRadius.circular(99),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon, size: 15, color: Colors.white),
-          const SizedBox(width: 6),
-          Flexible(
-            child: Text(
-              text,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(color: Colors.white, fontSize: 13),
-            ),
-          ),
-        ],
-      ),
-    );
-
     Widget detail(IconData icon, String label, String value, {Widget? trailing}) =>
         ListTile(
           contentPadding: EdgeInsets.zero,
@@ -1428,60 +1407,11 @@ class AccountPage extends ConsumerWidget {
           trailing: trailing,
         );
 
-    final header = Container(
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(24),
-        gradient: const LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [Color(0xff0d2a2c), Color(0xff135f50), Color(0xff23906f)],
-        ),
-      ),
-      child: Wrap(
-        spacing: 20,
-        runSpacing: 16,
-        crossAxisAlignment: WrapCrossAlignment.center,
-        children: [
-          CircleAvatar(
-            radius: 36,
-            backgroundColor: Colors.white,
-            child: Text(
-              _initials(name),
-              style: const TextStyle(
-                fontSize: 26,
-                fontWeight: FontWeight.w800,
-                color: Color(0xff135f50),
-              ),
-            ),
-          ),
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 520),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  name,
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: -.5,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final r in roles) chip(Icons.badge_outlined, r),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
+    final header = AccountHeader(
+      name: name,
+      initials: _initials(name),
+      institute: auth.instituteName,
+      roles: roles,
     );
 
     final details = Panel(
@@ -1507,7 +1437,6 @@ class AccountPage extends ConsumerWidget {
                     ),
             ),
           detail(Icons.mail_outline, 'Email', email ?? ''),
-          detail(Icons.account_balance_outlined, 'Institute', auth.instituteName),
           Padding(
             padding: const EdgeInsets.only(top: 8),
             child: Wrap(
@@ -1589,7 +1518,7 @@ class AccountPage extends ConsumerWidget {
             child: statsBuilder!(context),
           ),
         ],
-        const SizedBox(height: 20),
+        const SizedBox(height: AppSpace.xl),
         LayoutBuilder(
           builder: (context, box) => box.maxWidth >= 820 && activity != null
               ? Row(
@@ -1608,41 +1537,53 @@ class AccountPage extends ConsumerWidget {
                   ],
                 ),
         ),
-        const SizedBox(height: 24),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            if (auth.memberships.length > 1)
-              OutlinedButton.icon(
-                icon: const Icon(Icons.swap_horiz),
-                onPressed: () => showDialog<void>(
-                  context: context,
-                  builder: (context) => SimpleDialog(
-                    title: const Text('Choose institute'),
-                    children: [
-                      for (final m in auth.memberships)
-                        SimpleDialogOption(
-                          onPressed: () {
-                            auth.selectInstitute(m.instituteId);
-                            Navigator.pop(context);
-                          },
-                          child: Padding(
-                            padding: const EdgeInsets.all(12),
-                            child: Text(m.instituteName),
+        if (auth.memberships.length > 1) ...[
+          const AccountGroupLabel('Institute'),
+          Panel(
+            padding: 0,
+            child: AccountActionRow(
+              icon: Icons.swap_horiz,
+              title: 'Switch institute',
+              detail: auth.instituteName,
+              onTap: () => showDialog<void>(
+                context: context,
+                builder: (context) => SimpleDialog(
+                  title: const Text('Choose institute'),
+                  children: [
+                    for (final m in auth.memberships)
+                      SimpleDialogOption(
+                        onPressed: () {
+                          auth.selectInstitute(m.instituteId);
+                          Navigator.pop(context);
+                        },
+                        child: Padding(
+                          padding: const EdgeInsets.all(12),
+                          child: Row(
+                            children: [
+                              Expanded(child: Text(m.instituteName)),
+                              if (m.instituteId == auth.institute)
+                                Icon(
+                                  Icons.check,
+                                  size: 20,
+                                  color: scheme.primary,
+                                ),
+                            ],
                           ),
                         ),
-                    ],
-                  ),
+                      ),
+                  ],
                 ),
-                label: const Text('Switch institute'),
               ),
-            OutlinedButton.icon(
-              onPressed: () => auth.signOut(),
-              icon: const Icon(Icons.logout),
-              label: const Text('Sign out'),
             ),
-          ],
+          ),
+        ],
+        const SizedBox(height: AppSpace.xl),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 360),
+            child: SignOutButton(onPressed: () => auth.signOut()),
+          ),
         ),
       ],
     );

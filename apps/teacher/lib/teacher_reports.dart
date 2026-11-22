@@ -271,7 +271,7 @@ class _TeacherReportsState extends State<TeacherReports> {
               padding: const EdgeInsets.fromLTRB(14, 8, 8, 8),
               decoration: BoxDecoration(
                 color: scheme.error.withValues(alpha: .07),
-                borderRadius: BorderRadius.circular(14),
+                borderRadius: BorderRadius.circular(AppRadius.md),
                 border: Border.all(color: scheme.error.withValues(alpha: .25)),
               ),
               child: Row(
@@ -288,26 +288,16 @@ class _TeacherReportsState extends State<TeacherReports> {
             ),
           ),
         if (loading && reports.isEmpty && error == null)
-          const SkeletonCard()
+          const SkeletonPanel(rows: 2)
         else if (loading)
           const LinearProgressIndicator(semanticsLabel: 'Loading reports'),
         if (reports.isEmpty && error == null && !loading)
-          Panel(
-            padding: 18,
-            child: Row(
-              children: [
-                Icon(
-                  Icons.description_outlined,
-                  color: scheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: 12),
-                const Expanded(
-                  child: Text(
-                    'No reports yet. A draft appears once the session is closed; the final report follows publishing.',
-                  ),
-                ),
-              ],
-            ),
+          const EmptyState(
+            icon: Icons.description_outlined,
+            title: 'No reports yet',
+            message:
+                'A draft appears once the session is closed; the final report follows publishing.',
+            compact: true,
           ),
         for (final report in reports)
           Builder(
@@ -319,39 +309,35 @@ class _TeacherReportsState extends State<TeacherReports> {
                   : null;
               final detail = details[report['id']];
               final deliveries = (detail?['deliveries'] as List?) ?? const [];
+              final tone = finalReport ? AppTone.success : AppTone.warning;
               return Container(
-                margin: const EdgeInsets.only(top: 10),
-                padding: const EdgeInsets.all(16),
+                margin: const EdgeInsets.only(top: AppSpace.md),
+                padding: const EdgeInsets.all(AppSpace.lg),
                 decoration: BoxDecoration(
                   color: scheme.surface,
-                  borderRadius: BorderRadius.circular(16),
+                  borderRadius: BorderRadius.circular(AppRadius.lg),
                   border: Border.all(color: scheme.outlineVariant),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Container(
                           padding: const EdgeInsets.all(9),
                           decoration: BoxDecoration(
-                            color:
-                                (finalReport
-                                        ? const Color(0xff176451)
-                                        : const Color(0xff9a6a00))
-                                    .withValues(alpha: .10),
-                            borderRadius: BorderRadius.circular(12),
+                            color: AppTone.tint(tone),
+                            borderRadius: BorderRadius.circular(AppRadius.md),
                           ),
                           child: Icon(
                             finalReport
                                 ? Icons.verified_outlined
                                 : Icons.edit_note,
-                            color: finalReport
-                                ? const Color(0xff176451)
-                                : const Color(0xff9a6a00),
+                            color: tone,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: AppSpace.md),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -368,10 +354,16 @@ class _TeacherReportsState extends State<TeacherReports> {
                                     color: scheme.onSurfaceVariant,
                                   ),
                                 ),
+                              if (!ready)
+                                Padding(
+                                  padding: const EdgeInsets.only(
+                                    top: AppSpace.sm,
+                                  ),
+                                  child: StatusBadge(report['status']),
+                                ),
                             ],
                           ),
                         ),
-                        if (!ready) StatusBadge(report['status']),
                       ],
                     ),
                     if (ready) ...[

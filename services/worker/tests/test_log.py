@@ -133,3 +133,38 @@ def test_timing_fields_are_logged_even_when_their_name_mentions_a_banned_word(ca
     line = capsys.readouterr().out
     assert '"embedding_ms":12.5' in line.replace(" ", "") and '"embedding_ms":7' in line.replace(" ", "")
     assert '"embedding":3' not in line.replace(" ", "")
+
+
+def test_timings_with_a_redacted_word_in_the_name_still_reach_the_log(capsys):
+    """embedding_ms contains 'embedding', a banned word; durations are named *_ms and are safe."""
+    timings = {"decoding_ms": 10.5, "embedding_ms": 220.25, "embed_every": 2.0, "embedded_faces": 40.0}
+    log.event("inference_done", job_id="j1", timings=timings, embedding_ms=12)
+    (entry,) = events(capsys)
+    assert entry["timings"] == timings and entry["embedding_ms"] == 12
+    # the exemption is for durations only: a score or a vector under the same word stays out
+    log.event("probe", embedding=0.5, embedding_score=0.9, similarity_ms=3, note="x")
+    (entry,) = events(capsys)
+    assert "embedding" not in entry and "embedding_score" not in entry and entry["note"] == "x"
+
+
+def test_a_jobs_ids_are_attached_to_every_line_that_names_it(capsys):
+    log.bind("job-1", session_id="s-1", capture_id="c-1")
+    try:
+        log.event("download_done", job_id="job-1", bytes=5)
+        log.event("lease_lost", "warning", job_id="job-1", reason="heartbeat_silent")
+        log.event("download_done", job_id="job-2", bytes=5)  # another job: nothing attached
+        log.event("resources", backlog=0)
+    finally:
+        log.unbind("job-1")
+    log.event("job_done", job_id="job-1")
+    first, second, other, resources, after = events(capsys)
+    assert first["session_id"] == "s-1" and first["capture_id"] == "c-1"
+    assert second["session_id"] == "s-1"
+    assert "session_id" not in other and "session_id" not in resources and "session_id" not in after
+
+
+def test_the_job_context_stays_small(capsys):
+    for n in range(200):
+        log.bind(f"job-{n}", session_id="s")
+    assert len(log._context) <= 64
+    log._context.clear()

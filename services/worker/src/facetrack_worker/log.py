@@ -71,7 +71,26 @@ def clean(fields):
     return out
 
 
+# Ids of the job being processed (session, capture), attached to every line that names the job,
+# including lines from the heartbeat thread. Set once the job's input is known.
+_context = {}
+
+
+def bind(job, **ids):
+    """Attach ``ids`` (for example session_id and capture_id) to every later line of ``job``."""
+    found = {k: v for k, v in ids.items() if v}
+    if job and found:
+        _context[job] = found
+        while len(_context) > 64:  # a worker holds a handful of jobs; never grow without bound
+            _context.pop(next(iter(_context)))
+
+
+def unbind(job):
+    _context.pop(job, None)
+
+
 def record(name, level="info", **fields):
+    fields = {**_context.get(fields.get("job_id"), {}), **fields}
     return {
         "ts": datetime.now(UTC).isoformat(timespec="milliseconds"),
         "level": level,

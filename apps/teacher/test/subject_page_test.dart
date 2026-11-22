@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:dio/dio.dart';
 import 'package:facetrack_core/facetrack_core.dart';
+import 'package:facetrack_models/facetrack_models.dart';
 import 'package:facetrack_teacher/teacher_classes.dart';
 import 'package:facetrack_teacher/teacher_sessions.dart';
 import 'package:flutter/material.dart';
@@ -263,4 +264,76 @@ void main() {
       },
     );
   }
+
+  for (final (width, scale, height) in const [
+    (320.0, 1.0, 3000.0),
+    (390.0, 1.0, 3000.0),
+    (320.0, 2.0, 7000.0),
+    (390.0, 2.0, 7000.0),
+    (800.0, 1.0, 360.0),
+  ]) {
+    testWidgets(
+      'Subject page layout: header, tabs, sessions and students at ${width.toInt()} px, ${scale}x text',
+      (tester) async {
+        tester.view.physicalSize = Size(width, height);
+        tester.view.devicePixelRatio = 1;
+        tester.platformDispatcher.textScaleFactorTestValue = scale;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
+        final h = (await tester.runAsync(
+          () => harness(role: AppRole.teacher, profileRole: 'teacher'),
+        ))!;
+        addTearDown(() => tester.runAsync(h.dispose));
+        h.services.api.dio.httpClientAdapter = _adapter(h);
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [servicesProvider.overrideWithValue(h.services)],
+            child: ProductApp(
+              classesBuilder: (_) => const TeacherClassDetail(id: 'o1'),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        // Header: name once, code and where once, term and status as pills.
+        expect(find.text('Discrete Mathematics'), findsOneWidget);
+        expect(find.textContaining('BAS 201'), findsOneWidget);
+        expect(find.text('Odd Semester 2026'), findsOneWidget);
+        expect(find.text('Active'), findsOneWidget);
+        // The student count is hidden until the roster has really loaded.
+        expect(find.textContaining('enrolled'), findsNothing);
+        expect(find.text('Join code'), findsOneWidget);
+        // On the Sessions tab the header offers no duplicate session shortcut.
+        expect(find.text('Open sessions'), findsNothing);
+        expect(find.text('Create session'), findsWidgets);
+        await tester.ensureVisible(find.text('1 join request'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('1 join request'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('Open sessions'), findsOneWidget);
+        expect(find.text('Waiting for approval · 1'), findsOneWidget);
+        expect(find.text('Awaiting approval'), findsOneWidget);
+        expect(find.text('Approved'), findsOneWidget);
+        expect(find.text('Face enrolment pending'), findsOneWidget);
+        expect(find.text('1 student enrolled'), findsOneWidget);
+        expect(find.text('Approve'), findsOneWidget);
+        expect(find.text('Decline'), findsOneWidget);
+        // Back to Sessions through the header shortcut.
+        await tester.ensureVisible(find.text('Open sessions'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('Open sessions'));
+        await tester.pumpAndSettle();
+        expect(find.text('Open sessions'), findsNothing);
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox());
+      },
+    );
+  }
+
+  test('A subject accent never depends on anything but its code', () {
+    expect(subjectAccent('BAS 201'), subjectAccent('BAS 201'));
+    expect(subjectWhere(Offering.fromJson(_offering)), 'Section CSE1 · 3rd Semester · CSE');
+  });
 }

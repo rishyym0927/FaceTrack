@@ -337,11 +337,12 @@ class GuidedCamera extends ChangeNotifier {
       if (enrollmentGuidance && !kIsWeb) await lockPortraitCapture();
       await startPreviewAnalysis();
       if (framesFaces) _startWebFraming();
-    } catch (_) {
+    } catch (e) {
       await next?.dispose();
       if (!disposed && generation == epoch) {
         error = 'Camera unavailable. Allow camera access, close other camera apps and retry.';
-        onEvent?.call('camera_failed', code: 'init');
+        // The reason (permission denied, camera in use, none found) is what makes the log useful.
+        onEvent?.call('camera_failed', code: 'init_${e is CameraException ? e.code : e.runtimeType}');
       }
     } finally {
       if (generation == epoch) busy = false;

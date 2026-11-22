@@ -269,6 +269,154 @@ void main() {
     });
   });
 
+  group('timing, context and flood control', () {
+    late DateTime now;
+    setUp(() => now = DateTime(2026, 1, 1, 10));
+    Diagnostics make({
+      required Future<void> Function(Map<String, dynamic>) send,
+      Map<String, Object> Function()? network,
+      String? deviceClass = 'phone',
+    }) {
+      final d = Diagnostics(
+        app: 'student',
+        platform: 'android',
+        version: 'abc1234',
+        send: send,
+        clock: () => now,
+        deviceClass: deviceClass,
+        networkContext: network ?? () => const {'network': 'cellular', 'net_class': '3g'},
+      );
+      addTearDown(d.dispose);
+      return d;
+    }
+
+    Future<void> settle() => Future<void>.delayed(Duration.zero);
+
+    test('every event says how long ago it happened, so the timeline is real', () async {
+      final sent = <Map<String, dynamic>>[];
+      final d = make(send: (b) async => sent.add(b));
+      d.record('scan_started'); // goes out at once (first flush)
+      await settle();
+      now = now.add(const Duration(seconds: 3));
+      d.record('segment_recorded', count: 1);
+      now = now.add(const Duration(seconds: 4));
+      d.record('upload_done', count: 1);
+      now = now.add(const Duration(seconds: 5)); // flushAfter (10 s) has not passed
+      expect(sent.length, 1);
+      d.record('app_error'); // urgent: flushes the three that waited
+      await settle();
+      final events = sent.last['events'] as List;
+      expect([for (final e in events) e['age_ms']], [9000, 5000, 0]);
+      expect(sent.first['events'].single['age_ms'], 0);
+    });
+
+    test('a batch carries a device class and coarse connection details only', () async {
+      final sent = <Map<String, dynamic>>[];
+      final d = make(
+        send: (b) async => sent.add(b),
+        network: () => {
+          'network': 'wifi',
+          'net_class': '4g',
+          'downlink_mbps': 7.5,
+          'rtt_ms': 80,
+          'ssid': 'Hostel-WiFi-5G', // never forwarded, whatever the platform layer returns
+          'ip': '10.0.0.7',
+        },
+      );
+      d.record('scan_started');
+      await settle();
+      final batch = sent.single;
+      expect(batch['device_class'], 'phone');
+      expect(batch['network'], 'wifi');
+      expect(batch['net_class'], '4g');
+      expect(batch['downlink_mbps'], 7.5);
+      expect(batch['rtt_ms'], 80);
+      expect(batch.containsKey('ssid'), isFalse);
+      expect(batch.containsKey('ip'), isFalse);
+      expect(batch.toString().contains('Hostel'), isFalse);
+    });
+
+    test('a failing network probe never costs the batch', () async {
+      final sent = <Map<String, dynamic>>[];
+      final d = make(send: (b) async => sent.add(b), network: () => throw StateError('nope'));
+      d.record('scan_started');
+      await settle();
+      expect(sent.single['events'], hasLength(1));
+      expect(sent.single.containsKey('network'), isFalse);
+    });
+
+    test('device classes come from the screen, never from a model name', () {
+      expect(Diagnostics.deviceClassFor('android', 360, 800), 'phone');
+      expect(Diagnostics.deviceClassFor('android', 800, 1280), 'tablet');
+      expect(Diagnostics.deviceClassFor('web', 800, 1600), 'desktop');
+      expect(Diagnostics.deviceClassFor('web', 390, 844), 'phone');
+      expect(Diagnostics.deviceClassFor('web', 700, 900), 'tablet');
+      expect(Diagnostics.deviceClassFor('web', 0, 0), 'unknown');
+    });
+
+    test('names the server does not know are dropped here, not sent', () {
+      final d = make(send: (_) async {});
+      d.record('login_form_submitted');
+      d.record('camera_recovered', code: 'switched');
+      d.record('scan_paused', code: 'hidden');
+      d.record('scan_resumed', seconds: 4.2);
+      d.record('recognition_load_failed', route: '/v1/sessions/$session/attendance', status: 503);
+      expect([for (final e in d.pending) e['name']], [
+        'camera_recovered',
+        'scan_paused',
+        'scan_resumed',
+        'recognition_load_failed',
+      ]);
+    });
+
+    test('a repeating api error becomes one event with a count', () {
+      final d = make(send: (_) async => throw StateError('offline'));
+      for (var i = 0; i < 40; i++) {
+        d.record('api_error', route: '/v1/sessions/$session/attendance', status: 503);
+        now = now.add(const Duration(milliseconds: 500));
+      }
+      d.record('api_error', route: '/v1/me', status: 502);
+      final events = d.pending;
+      // 20 s of a polling outage: the first 40 are one event (inside 30 s), /v1/me is another.
+      expect(events.length, 2);
+      expect(events.first['count'], 40);
+      expect(events.last['route'], '/v1/me');
+    });
+
+    test('an error that keeps happening is reported again after the window', () {
+      final d = make(send: (_) async => throw StateError('offline'));
+      d.record('api_error', route: '/v1/me', status: 502);
+      now = now.add(const Duration(seconds: 31));
+      d.record('api_error', route: '/v1/me', status: 502);
+      expect(d.pending.length, 2);
+      expect(d.pending.first.containsKey('count'), isFalse);
+    });
+
+    test('different statuses and codes are not merged', () {
+      final d = make(send: (_) async => throw StateError('offline'));
+      d.record('api_error', route: '/v1/me', status: 502);
+      d.record('api_error', route: '/v1/me', status: 503);
+      d.record('api_error', route: '/v1/me', status: 503, code: 'X');
+      expect(d.pending.length, 3);
+    });
+
+    test('no personal field can be added: only whitelisted keys ever appear', () async {
+      final sent = <Map<String, dynamic>>[];
+      final d = make(send: (b) async => sent.add(b));
+      d.record(
+        'camera_failed',
+        sessionId: 'Asha Rao asha@example.test',
+        code: '<script>@x',
+        route: '/v1/me?token=secret&email=asha@example.test',
+      );
+      await settle();
+      final text = sent.single.toString();
+      for (final secret in ['Asha', 'asha@', 'token', 'secret', '<', '@']) {
+        expect(text.contains(secret), isFalse, reason: secret);
+      }
+    });
+  });
+
   group('api errors', () {
     test('a failed request records route template, status and code only', () async {
       final h = await harness();

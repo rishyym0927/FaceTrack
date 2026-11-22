@@ -118,6 +118,29 @@ relevant, and correlation ids. The API, the worker and the agent log to Docker (
 of 10 MB each per service). The apps send anonymous diagnostics to `POST /v1/client-events`, which
 the API writes to the same log as `client_event` lines.
 
+**Docker deletes a container's logs when the container is recreated, and every deploy recreates
+every container.** To keep logs across deploys, install the persistent capture once
+(`deploy/azure/install_log_capture.sh`, see [Monday diagnostics](MONDAY_DIAGNOSTICS.md)). It
+follows each container read-only and appends to `/var/log/facetrack/<service>.log`
+(rotated daily or at 200 MB, kept 14 days, compressed). `scripts/logs --vm` and
+`scripts/session-report --vm` read those files and fall back to Docker's own buffer when the
+capture is not installed.
+
+**One-command report for a class**
+
+```sh
+scripts/session-report --vm latest             # the most recent class, as Markdown
+scripts/session-report --vm <session-id>       # one class (add --since 3d if it is older than a day)
+scripts/session-report --vm --since 3h         # every class active in the last 3 hours
+scripts/session-report --vm latest --out report.md
+```
+
+It joins the app's events (placed at the time they happened on the device), the API and worker
+log lines and, read-only, ids and aggregate counts from the hosted database (never names, scores
+of named students or enrolment numbers), then lists plain-language findings. Add `--no-db` to skip
+the database. Stage timings in it are sums across threads; read `processing wall` and `job
+total` for real time.
+
 **Trace a problem**
 
 ```sh
@@ -134,27 +157,40 @@ session id, a capture id, a job id, or the start of a request id.
 | Event | Service | What it tells you |
 |---|---|---|
 | `request` | api | route template, status, error `code`, duration, DB wait, `session_id`/`capture_id`/`job_id` |
-| `recognition_complete` | api | roster size, students recognised, frames, detections, rejects by gate (`edge`, `small`, `landmarks`, `brightness`, `blur`), median face size, sample fps, per-stage timings, histogram of reasons |
+| `job_claimed` | api | a worker leased a recognition job: `session_id`, `capture_id`, `job_id`, `attempts`, `queue_wait_ms` |
+| `recognition_complete` | api | roster size, students recognised, frames, detections, rejects by gate (`edge`, `small`, `landmarks`, `brightness`, `blur`), median face size, sample fps, per-stage timings (`embedding_ms` included), histogram of reasons, `capture_id`, `attempts` |
 | `job_failed`, `lease_expired` | api | failed jobs with their code and attempt, and leases that ran out |
 | `processing_stalled` | api | a session's jobs have been queued for 90 s or more and no recognition worker has called in. Logged once per session per 5 minutes |
-| `database_error`, `unhandled_error` | api | exception type, SQLSTATE or code location. Never the message |
+| `database_error`, `unhandled_error` | api | exception type, SQLSTATE or code location, route and duration. Never the message |
+| `client_events_rejected` | api | the app sent events this server does not know; the rest of the batch was kept |
 | `job_dispatched`, `claim_paused` | agent | job hand-off to the worker, and why it is not claiming |
 | `agent_notice`, `agent_recovered` | agent | recurring problems (API unreachable, credential rejected, broker down), logged once a minute with a repeat count |
 | `resources` | agent | CPU %, load, memory available, disk free and used %, queue backlog |
-| `job_start`, `download_done`, `inference_done`, `job_done` | worker | each stage with durations |
+| `job_start`, `download_done`, `inference_done`, `job_done` | worker | each stage with durations (`download_done`: bytes, ms, `parts`, `mbps`); lines carry `session_id` and `capture_id` once the job's input is known |
 | `job_failed`, `worker_error`, `lease_lost` | worker | failure code and the **stage** it reached (`input`, `download`, `inference`, `complete`) |
-| `client_event` | api | from the apps: `scan_started`, `segment_recorded`, `upload_retry`, `upload_done`, `upload_failed`, `camera_failed`, `camera_interrupted`, `camera_switched`, `api_error`, `app_error`, `scan_stopped` |
+| `client_event` | api | from the apps, with `event_at` (when it happened on the device), `client`, `platform`, `version`, `device_class` (phone, tablet, desktop), `network` and `net_class` where the browser offers them. Kinds: `scan_started`, `scan_stopped`, `scan_paused`, `scan_resumed`, `segment_recorded`, `upload_retry`, `upload_done`, `upload_failed`, `camera_failed`, `camera_interrupted`, `camera_recovered`, `camera_switched`, `recognition_load_failed`, `api_error`, `app_error` |
+
+`job_claimed`, the `capture_id`/`attempts` fields of `recognition_complete`, and the ids on worker
+lines come from `scripts/pipeline-logging.patch` (apply it with `git apply`; until it is applied
+`scripts/session-report` gets the same links from the database).
+
+Worker lines arrive with Celery's prefix (`[time: WARNING/MainProcess] {...}`) and agent and API
+lines behind other prefixes; the tools read from the first `{"`.
 
 **What is never logged:** names, emails, enrolment numbers, tokens, signed URLs, embeddings,
 frames, or per-student scores. Logging code drops any field with such a name and any value that
 looks like an email, token or URL, and the app diagnostics endpoint only accepts a fixed list of
-event names and short numeric or code fields. Do not add free-text fields.
+event names and short numeric or code fields (device and network details are fixed vocabularies:
+`phone`/`tablet`/`desktop`, `wifi`/`cellular`/`ethernet`/`offline`, never a model name or network
+name). Do not add free-text fields. Durations are the one exception to the name filter: a field
+named `*_ms` is kept even when it contains a filtered word (`embedding_ms`).
 
-**Reading a failed class:** start with `scripts/logs --vm <session-id>`. A recording that never
-processed shows `upload_*` client events and `request` lines for the capture; one that processed
-badly shows `recognition_complete` (low `sample_fps`, many `small` or `blur` rejects, a large
-`not_seen` count) and the worker's per-stage timings. A teacher reading out the **Reference** line
-under an error finds the exact request.
+**Reading a failed class:** start with `scripts/session-report --vm <session-id>`, then
+`scripts/logs --vm <session-id>` for the raw lines. A recording that never processed shows
+`upload_*` client events and `request` lines for the capture; one that processed badly shows
+`recognition_complete` (low `sample_fps`, many `small` or `blur` rejects, a large `not_seen`
+count) and the worker's per-stage timings. A teacher reading out the **Reference** line under an
+error finds the exact request.
 
 ## Capacity and sizing
 

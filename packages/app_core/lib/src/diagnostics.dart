@@ -3,6 +3,10 @@ import 'dart:async';
 import 'package:dio/dio.dart' show DioException;
 import 'package:flutter/foundation.dart';
 
+import 'network_info_stub.dart'
+    if (dart.library.js_interop) 'network_info_web.dart'
+    as network_info;
+
 /// Sends one batch to the server. Throws when it could not be delivered.
 typedef DiagnosticsSender = Future<void> Function(Map<String, dynamic> batch);
 
@@ -24,8 +28,12 @@ class Diagnostics {
     this.maxBuffered = 100,
     String? platform,
     DateTime Function()? clock,
+    String? deviceClass,
+    Map<String, Object> Function()? networkContext,
   }) : platform = platform ?? _platformName(),
-       _clock = clock ?? DateTime.now;
+       _clock = clock ?? DateTime.now,
+       _deviceClass = deviceClass,
+       _networkContext = networkContext ?? network_info.networkContext;
 
   final String app; // 'teacher' or 'student'
   final String platform; // 'web' | 'android' | 'ios' | 'other'
@@ -33,12 +41,38 @@ class Diagnostics {
   final Duration flushAfter;
   final int maxBuffered;
   final DateTime Function() _clock;
+  final Map<String, Object> Function() _networkContext;
+  String? _deviceClass;
   DiagnosticsSender? send;
-  final _buffer = <Map<String, dynamic>>[];
+  final _buffer = <_Entry>[];
+  // Repeats of the same API failure inside [repeatWindow] become one event with a count: a
+  // polling outage must not use the whole budget and crowd out the upload events.
+  final _repeats = <String, _Entry>{};
+  static const repeatWindow = Duration(seconds: 30);
   DateTime? _lastFlush, _backoffUntil;
   bool _sending = false, _disposed = false;
   int _epoch = 0;
   int dropped = 0;
+
+  /// The only names the server accepts (kept equal to `services/api/app/client_events.py` by
+  /// a test). Anything else is dropped here instead of costing the server's whole batch.
+  static const knownEvents = {
+    'scan_started',
+    'scan_stopped',
+    'scan_paused',
+    'scan_resumed',
+    'segment_recorded',
+    'upload_retry',
+    'upload_failed',
+    'upload_done',
+    'camera_failed',
+    'camera_interrupted',
+    'camera_recovered',
+    'camera_switched',
+    'recognition_load_failed',
+    'api_error',
+    'app_error',
+  };
 
   /// Problems worth sending immediately, in case the app is about to be closed.
   static const urgent = {
@@ -55,6 +89,30 @@ class Diagnostics {
       TargetPlatform.iOS => 'ios',
       _ => 'other',
     };
+  }
+
+  /// `phone`, `tablet` or `desktop` from the screen's logical size: a class, never a model.
+  static String deviceClassFor(String platform, double shortestSide, double longestSide) {
+    if (shortestSide <= 0) return 'unknown';
+    if (platform == 'android' || platform == 'ios') {
+      if (shortestSide < 600) return 'phone';
+      return 'tablet';
+    }
+    if (shortestSide < 600) return 'phone'; // a phone's browser
+    return longestSide >= 1024 ? 'desktop' : 'tablet';
+  }
+
+  String _currentDeviceClass() {
+    final known = _deviceClass;
+    if (known != null) return known;
+    try {
+      final view = PlatformDispatcher.instance.views.first;
+      final size = view.physicalSize / view.devicePixelRatio;
+      final short = size.shortestSide, long = size.longestSide;
+      return _deviceClass = deviceClassFor(platform, short, long);
+    } catch (_) {
+      return 'unknown';
+    }
   }
 
   static final _uuid = RegExp(
@@ -99,7 +157,7 @@ class Diagnostics {
     int? durationMs,
     int? count,
   }) {
-    if (_disposed) return;
+    if (_disposed || !knownEvents.contains(name)) return;
     try {
       final safeSession = sessionId != null && _uuid.hasMatch(sessionId)
           ? sessionId
@@ -117,12 +175,26 @@ class Diagnostics {
           'duration_ms': durationMs.clamp(0, 3600000),
         if (count != null && count >= 0) 'count': count.clamp(0, 100000),
       };
-      if (_buffer.length >= maxBuffered) {
+      final now = _clock();
+      if (name == 'api_error') {
+        final key = '${event['route']}|${event['status']}|${event['code']}';
+        final earlier = _repeats[key];
+        if (earlier != null &&
+            now.difference(earlier.at) < repeatWindow &&
+            _buffer.any((e) => identical(e, earlier))) {
+          earlier.event['count'] = ((earlier.event['count'] as int?) ?? 1) + 1;
+          return;
+        }
+        _repeats[key] = _Entry(event, now);
+        _buffer.add(_repeats[key]!);
+        if (_repeats.length > 50) _repeats.clear();
+      } else {
+        _buffer.add(_Entry(event, now));
+      }
+      while (_buffer.length > maxBuffered) {
         _buffer.removeAt(0);
         dropped++;
       }
-      _buffer.add(event);
-      final now = _clock();
       final waiting = _backoffUntil != null && now.isBefore(_backoffUntil!);
       final due = _lastFlush == null || now.difference(_lastFlush!) >= flushAfter;
       if (!waiting && (_buffer.length >= 20 || urgent.contains(name) || due)) {
@@ -139,7 +211,17 @@ class Diagnostics {
     if (_disposed || _sending || _buffer.isEmpty || sender == null) return;
     _sending = true;
     _lastFlush = _clock();
-    final batch = _buffer.take(50).toList();
+    final taken = _buffer.take(50).toList();
+    final stamp = _clock();
+    // `age_ms` says how long ago each event happened, so the server can place it on the real
+    // timeline instead of at the moment the batch arrived.
+    final batch = [
+      for (final e in taken)
+        {
+          ...e.event,
+          'age_ms': stamp.difference(e.at).inMilliseconds.clamp(0, 86400000),
+        },
+    ];
     final epoch = _epoch;
     // [clear] may run while the request is out; what is in the buffer afterwards belongs to
     // the next account and must not be trimmed by this batch's result.
@@ -154,6 +236,8 @@ class Diagnostics {
         if (version.isNotEmpty &&
             RegExp(r'^[0-9A-Za-z.+-]{1,32}$').hasMatch(version))
           'version': version,
+        'device_class': _currentDeviceClass(),
+        ..._safeNetwork(),
         'events': batch,
       });
       sent();
@@ -176,14 +260,33 @@ class Diagnostics {
     }
   }
 
+  Map<String, Object> _safeNetwork() {
+    try {
+      return {
+        for (final e in _networkContext().entries)
+          if (const {'network', 'net_class', 'downlink_mbps', 'rtt_ms'}.contains(e.key))
+            e.key: e.value,
+      };
+    } catch (_) {
+      return const {};
+    }
+  }
+
   /// Forgets buffered events, so they are never sent under another account.
   void clear() {
     _epoch++;
     _buffer.clear();
+    _repeats.clear();
   }
 
   @visibleForTesting
-  List<Map<String, dynamic>> get pending => List.unmodifiable(_buffer);
+  List<Map<String, dynamic>> get pending => [for (final e in _buffer) e.event];
 
   void dispose() => _disposed = true;
+}
+
+class _Entry {
+  _Entry(this.event, this.at);
+  final Map<String, dynamic> event;
+  final DateTime at;
 }

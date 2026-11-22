@@ -108,7 +108,7 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     @app.middleware("http")
     async def bounded_requests(request, call_next):
         request.state.request_id = str(uuid4())
-        start = time.perf_counter()
+        start = request.state.started = time.perf_counter()
 
         waits: list[float] = []
 
@@ -215,8 +215,15 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
             "unhandled_error",
             level=logging.ERROR,
             request_id=request.state.request_id,
+            method=request.method,
+            route=getattr(request.scope.get("route"), "path", "unmatched"),
+            status=500,
+            duration_ms=round((time.perf_counter() - getattr(request.state, "started", time.perf_counter())) * 1000, 1),
             error=type(error).__name__,
             where=where,
+            **logs.correlation(
+                getattr(request.scope.get("route"), "path", ""), request.scope.get("path_params") or {}
+            ),
         )
         return finalize(
             request,

@@ -352,6 +352,8 @@ def enroll(job, epoch):
             beat.start()
             stage = "input"
             data = api(client, "GET", f"/internal/v1/jobs/{job}/input?epoch={epoch}").json()
+            # Every later line about this job (also from the heartbeat thread) names the class.
+            log.bind(job, session_id=data.get("session_id"), capture_id=data.get("capture_id"))
             if data.get("kind") == "delivery":
                 api(client, "POST", f"/internal/v1/jobs/{job}/deliver", {"epoch": epoch})
                 return
@@ -470,6 +472,7 @@ def enroll(job, epoch):
             post_fail(client, job, epoch, "WORKER_ERROR", True, stage)
         finally:
             beat.end()
+            log.unbind(job)
             if process is not None and process.exitcode is None:
                 stop_child(process)
             if connection is not None:

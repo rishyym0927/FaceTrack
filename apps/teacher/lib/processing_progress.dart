@@ -1,3 +1,4 @@
+import 'package:facetrack_core/facetrack_core.dart' show AppRadius, AppSpace, AppTone;
 import 'package:facetrack_models/facetrack_models.dart';
 import 'package:flutter/material.dart';
 
@@ -174,10 +175,32 @@ class ProcessingProgress extends StatelessWidget {
     final soft = onDark ? Colors.white60 : theme.colorScheme.onSurfaceVariant;
     final problem = processingProblem(info);
     final finished = steps.every((s) => s.state == ProgressState.done);
+    final attention = problem != null;
+    final (IconData headIcon, String headline, Color headTone) = finished
+        ? (Icons.verified_outlined, 'Processing complete', AppTone.success)
+        : attention
+        ? (Icons.warning_amber_rounded, 'Processing needs attention', AppTone.warning)
+        : (Icons.auto_awesome_outlined, 'Processing your recordings', AppTone.info);
     return Column(
       key: const ValueKey('processing-progress'),
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        Row(
+          children: [
+            Icon(headIcon, size: 20, color: onDark && !attention ? Colors.white70 : headTone),
+            const SizedBox(width: AppSpace.sm),
+            Expanded(
+              child: Semantics(
+                header: true,
+                child: Text(
+                  headline,
+                  style: TextStyle(color: ink, fontWeight: FontWeight.w800, fontSize: 16),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.md),
         if (info.total > 0 && !finished) ...[
           Row(
             children: [
@@ -187,7 +210,7 @@ class ProcessingProgress extends StatelessWidget {
                   child: LinearProgressIndicator(
                     key: const ValueKey('overall-progress'),
                     value: overallProgress(info),
-                    minHeight: 6,
+                    minHeight: 8,
                     backgroundColor: onDark ? Colors.white24 : null,
                   ),
                 ),
@@ -199,37 +222,54 @@ class ProcessingProgress extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(height: 10),
+          const SizedBox(height: AppSpace.xs),
+          Text(
+            'Current segment',
+            style: TextStyle(color: soft, fontSize: 12),
+          ),
+          const SizedBox(height: AppSpace.md),
         ],
         for (final step in steps)
-          Padding(
-            padding: const EdgeInsets.symmetric(vertical: 4),
+          Container(
+            margin: const EdgeInsets.symmetric(vertical: 2),
+            padding: const EdgeInsets.symmetric(horizontal: AppSpace.sm, vertical: 6),
+            decoration: BoxDecoration(
+              color: switch (step.state) {
+                ProgressState.active => AppTone.tint(onDark ? Colors.white : AppTone.info, .10),
+                ProgressState.warning => AppTone.tint(Colors.amber, .16),
+                _ => Colors.transparent,
+              },
+              borderRadius: BorderRadius.circular(AppRadius.sm),
+            ),
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _StepIcon(step.state, onDark: onDark),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: Text.rich(
-                    TextSpan(
-                      text: step.label,
-                      style: TextStyle(
-                        color: step.state == ProgressState.pending ? soft : ink,
-                        fontWeight: step.state == ProgressState.active || step.state == ProgressState.warning
-                            ? FontWeight.w700
-                            : FontWeight.w500,
-                      ),
-                      children: [
-                        if (step.detail != null)
-                          TextSpan(
-                            text: '  ${step.detail}',
-                            style: TextStyle(
-                              color: step.state == ProgressState.warning ? Colors.amber.shade700 : soft,
-                              fontWeight: FontWeight.w400,
-                              fontSize: 13,
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 1),
+                    child: Text.rich(
+                      TextSpan(
+                        text: step.label,
+                        style: TextStyle(
+                          color: step.state == ProgressState.pending ? soft : ink,
+                          fontWeight: step.state == ProgressState.active || step.state == ProgressState.warning
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                        ),
+                        children: [
+                          if (step.detail != null)
+                            TextSpan(
+                              text: '  ${step.detail}',
+                              style: TextStyle(
+                                color: step.state == ProgressState.warning ? Colors.amber.shade700 : soft,
+                                fontWeight: FontWeight.w400,
+                                fontSize: 13,
+                              ),
                             ),
-                          ),
-                      ],
+                        ],
+                      ),
                     ),
                   ),
                 ),
@@ -237,7 +277,7 @@ class ProcessingProgress extends StatelessWidget {
             ),
           ),
         if (problem != null) ...[
-          const SizedBox(height: 8),
+          const SizedBox(height: AppSpace.sm),
           Container(
             key: const ValueKey('processing-problem'),
             padding: const EdgeInsets.all(12),

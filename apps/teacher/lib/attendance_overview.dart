@@ -1,15 +1,80 @@
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
-import 'teacher_dashboard.dart' show attendanceThreshold, belowAttendanceThreshold;
+import 'teacher_dashboard.dart'
+    show
+        MetricGrid,
+        MetricTile,
+        ThresholdBar,
+        attendanceThreshold,
+        attendanceTone,
+        belowAttendanceThreshold;
 
-/// Cumulative semester attendance for one class: per-student totals and %,
-/// with search, a below-threshold filter, sort and CSV export. Read-only --
-/// it reflects the published sessions and refreshes after each finalize.
+/// Narrows the loaded roster by a free-text query (name or enrolment) and the
+/// below-threshold toggle. Pure, so it is testable without a widget.
+List<Json> filterStudents(
+  List<Json> all, {
+  String query = '',
+  bool belowOnly = false,
+}) {
+  final q = query.trim().toLowerCase();
+  return all.where((s) {
+    if (belowOnly && !belowAttendanceThreshold(s)) return false;
+    if (q.isEmpty) return true;
+    return '${s['official_name']} ${s['enrollment_number']}'
+        .toLowerCase()
+        .contains(q);
+  }).toList();
+}
+
+/// Sort columns: 0 name, 1 enrolment, 2 present, 3 percentage. Students with
+/// no assessed marks yet (no percentage) always sort last on the percentage
+/// column, whichever direction is chosen. Returns a sorted copy.
+List<Json> sortStudents(List<Json> list, int column, bool ascending) {
+  int cmp(Json a, Json b) {
+    if (column == 3) {
+      final x = a['percentage'] as num?, y = b['percentage'] as num?;
+      if (x == null && y == null) return 0;
+      if (x == null) return 1;
+      if (y == null) return -1;
+      final c = x.compareTo(y);
+      return ascending ? c : -c;
+    }
+    final r = switch (column) {
+      0 => '${a['official_name']}'.compareTo('${b['official_name']}'),
+      2 => ((a['attended'] as num?) ?? 0).compareTo((b['attended'] as num?) ?? 0),
+      _ => '${a['enrollment_number']}'.compareTo('${b['enrollment_number']}'),
+    };
+    return ascending ? r : -r;
+  }
+
+  return [...list]..sort(cmp);
+}
+
+/// Mark totals across a roster. A legacy `late` mark counts as attended; it
+/// is reported separately only so nothing is hidden when it is present.
+class MarkTotals {
+  MarkTotals(List<Json> students) {
+    for (final s in students) {
+      present += (s['present'] as num?)?.toInt() ?? 0;
+      late += (s['late'] as num?)?.toInt() ?? 0;
+      absent += (s['absent'] as num?)?.toInt() ?? 0;
+      unassessed += unassessedCount(s).toInt();
+    }
+  }
+  int present = 0, late = 0, absent = 0, unassessed = 0;
+  int get total => present + late + absent + unassessed;
+}
+
+/// Cumulative semester attendance for one class: a summary with mark and
+/// percentage distributions, then per-student totals with search, a
+/// below-threshold filter, sorting and CSV export. Read-only -- it reflects
+/// the published sessions and refreshes after each finalize.
 class AttendanceOverview extends StatefulWidget {
   const AttendanceOverview({
     super.key,
@@ -28,9 +93,10 @@ class AttendanceOverview extends StatefulWidget {
   State<AttendanceOverview> createState() => _AttendanceOverviewState();
 }
 
-/// Fixed widths for the numeric columns; name and enrolment share the rest,
-/// so the table fills a wide desktop page and scrolls sideways on a phone.
-const _numW = 90.0, _pctW = 110.0, _tableMin = 620.0;
+/// Fixed widths for the numeric columns (before text scaling); name and
+/// enrolment share the rest, so the table fills a wide desktop page and
+/// scrolls sideways when it does not fit.
+const _numW = 90.0, _pctW = 120.0, _tableMin = 640.0;
 
 class _AttendanceOverviewState extends State<AttendanceOverview> {
   final _search = TextEditingController();
@@ -97,33 +163,13 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     }
   }
 
-  List<Json> get _students {
-    final all = (_data?['students'] as List?)?.cast<Json>() ?? const [];
-    final q = _search.text.trim().toLowerCase();
-    final list = all.where((s) {
-      if (_belowOnly) {
-        if (!belowAttendanceThreshold(s)) return false;
-      }
-      if (q.isEmpty) return true;
-      return '${s['official_name']} ${s['enrollment_number']}'
-          .toLowerCase()
-          .contains(q);
-    }).toList();
-    int cmp(Json a, Json b) {
-      final r = switch (_sortCol) {
-        0 => '${a['official_name']}'.compareTo('${b['official_name']}'),
-        2 => (a['attended'] as num).compareTo(b['attended'] as num),
-        3 => ((a['percentage'] as num?) ?? -1).compareTo(
-          (b['percentage'] as num?) ?? -1,
-        ),
-        _ => '${a['enrollment_number']}'.compareTo('${b['enrollment_number']}'),
-      };
-      return _asc ? r : -r;
-    }
+  List<Json> get _all => (_data?['students'] as List?)?.cast<Json>() ?? const [];
 
-    list.sort(cmp);
-    return list;
-  }
+  List<Json> get _students => sortStudents(
+    filterStudents(_all, query: _search.text, belowOnly: _belowOnly),
+    _sortCol,
+    _asc,
+  );
 
   void _sort(int col) => setState(() {
     if (_sortCol == col) {
@@ -132,6 +178,11 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
       _sortCol = col;
       _asc = true;
     }
+  });
+
+  void _sortTo(int col, bool asc) => setState(() {
+    _sortCol = col;
+    _asc = asc;
   });
 
   Future<void> _exportCsv() async {
@@ -167,14 +218,22 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
   @override
   Widget build(BuildContext context) {
     if (_loading && _data == null) {
-      return const Column(children: [SkeletonCard(), SizedBox(height: 12), SkeletonList()]);
+      return const Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          SkeletonStatGrid(count: 4),
+          SizedBox(height: AppSpace.md),
+          SkeletonPanel(rows: 3),
+        ],
+      );
     }
     if (_error != null && _data == null) {
       return ErrorView(_error!, retry: _load);
     }
+    final theme = Theme.of(context);
     final conducted = _data?['sessions_conducted'] ?? 0;
+    final all = _all;
     final students = _students;
-    final all = (_data?['students'] as List?)?.cast<Json>() ?? const [];
     final pcts = <num>[
       for (final s in all)
         if ((s['assessed'] as num?) != null && (s['assessed'] as num) > 0)
@@ -187,18 +246,19 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
     final above = all
         .where((s) => s['percentage'] is num && !belowAttendanceThreshold(s))
         .length;
+    final pad = MediaQuery.sizeOf(context).width < 600 ? 16.0 : 24.0;
     return Panel(
+      padding: pad,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
+          Wrap(
+            alignment: WrapAlignment.spaceBetween,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: AppSpace.md,
+            runSpacing: AppSpace.sm,
             children: [
-              Expanded(
-                child: Text(
-                  'Semester attendance',
-                  style: Theme.of(context).textTheme.titleLarge,
-                ),
-              ),
+              Text('Semester attendance', style: theme.textTheme.titleLarge),
               OutlinedButton.icon(
                 onPressed: _loading ? null : () => ApiClient.freshReads(_load),
                 icon: const Icon(Icons.refresh, size: 18),
@@ -207,172 +267,339 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
             ],
           ),
           if (_loading) ...[
-            const SizedBox(height: 8),
+            const SizedBox(height: AppSpace.sm),
             const LinearProgressIndicator(
               semanticsLabel: 'Refreshing attendance',
             ),
           ],
-          const SizedBox(height: 4),
+          const SizedBox(height: AppSpace.xs),
           Text(
             '$conducted classes conducted · ${all.length} students',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
+            style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
           ),
           if (_error != null) ...[
-            const SizedBox(height: 12),
+            const SizedBox(height: AppSpace.md),
             _InlineError(
               message: '${_error!.message} Showing the last loaded figures.',
               onRetry: () => ApiClient.freshReads(_load),
             ),
           ],
-          if (all.isNotEmpty) ...[
-            const SizedBox(height: 16),
+          if (all.isEmpty) ...[
+            const SizedBox(height: AppSpace.md),
+            EmptyState(
+              icon: Icons.insights_outlined,
+              title: 'No published sessions yet',
+              message:
+                  'Publish attendance for a session and the semester overview builds up here.',
+              compact: true,
+            ),
+          ] else ...[
+            const SizedBox(height: AppSpace.lg),
             Reveal(
-              child: StatGrid(
+              child: MetricGrid(
                 children: [
-                  StatTile(
+                  MetricTile(
                     label: 'Average attendance',
-                    value: avg ?? 0,
-                    decimals: 1,
-                    suffix: '%',
-                    accent: percentColor(avg),
+                    value: avg == null ? '—' : '${avg.toStringAsFixed(1)}%',
+                    tone: percentColor(avg),
                     icon: Icons.insights_outlined,
                     caption: avg == null ? 'No data yet' : 'across assessed',
                   ),
-                  StatTile(
+                  MetricTile(
                     label: 'At or above $attendanceThreshold%',
-                    value: above,
-                    accent: const Color(0xff176451),
+                    value: '$above',
+                    tone: AppTone.success,
                     icon: Icons.trending_up,
                   ),
-                  StatTile(
+                  MetricTile(
                     label: 'Below $attendanceThreshold%',
-                    value: below,
-                    accent: const Color(0xffa22f2f),
+                    value: '$below',
+                    tone: below == 0 ? AppTone.success : AppTone.danger,
                     icon: Icons.trending_down,
                     caption: below == 0 ? 'All on track' : 'Need attention',
                   ),
-                  StatTile(
+                  MetricTile(
                     label: 'Classes held',
-                    value: conducted is num ? conducted : 0,
+                    value: conducted is num ? '${conducted.toInt()}' : '0',
                     icon: Icons.event_available_outlined,
                   ),
                 ],
               ),
             ),
-            if (pcts.isNotEmpty) ...[
-              const SizedBox(height: 22),
-              Text(
-                'Attendance distribution',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
-              const SizedBox(height: 12),
-              Reveal(
-                child: BarDistribution(
-                  bars: [
-                    BarDatum(
-                      '90–100%',
-                      pcts.where((p) => p >= 90).length,
-                      const Color(0xff176451),
-                    ),
-                    BarDatum(
-                      '75–89%',
-                      pcts.where((p) => p >= 75 && p < 90).length,
-                      const Color(0xff3f9e6b),
-                    ),
-                    BarDatum(
-                      '50–74%',
-                      pcts.where((p) => p >= 50 && p < 75).length,
-                      const Color(0xff9a6a00),
-                    ),
-                    BarDatum(
-                      'Below 50%',
-                      pcts.where((p) => p < 50).length,
-                      const Color(0xffa22f2f),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ],
-          const SizedBox(height: 16),
-          Wrap(
-            spacing: 12,
-            runSpacing: 8,
-            crossAxisAlignment: WrapCrossAlignment.center,
-            children: [
-              SizedBox(
-                width: 240,
-                child: TextField(
-                  controller: _search,
-                  onChanged: (_) => setState(() {}),
-                  decoration: const InputDecoration(
-                    isDense: true,
-                    prefixIcon: Icon(Icons.search, size: 20),
-                    hintText: 'Search name or enrolment',
-                  ),
-                ),
-              ),
-              FilterChip(
-                label: Text('Below $attendanceThreshold%'),
-                selected: _belowOnly,
-                onSelected: (v) => setState(() => _belowOnly = v),
-              ),
-              OutlinedButton.icon(
-                onPressed: students.isEmpty ? null : _exportCsv,
-                icon: const Icon(Icons.download, size: 18),
-                label: const Text('Export CSV'),
-              ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          if (students.isEmpty)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: _EmptyHint(
-                icon: conducted == 0
-                    ? Icons.insights_outlined
-                    : Icons.search_off_outlined,
-                title: conducted == 0
-                    ? 'No published sessions yet'
-                    : 'No students match',
-                message: conducted == 0
-                    ? 'Publish attendance for a session and the semester overview builds up here.'
-                    : 'Try a different name or clear the Below $attendanceThreshold% filter.',
-              ),
-            )
-          else
+            const SizedBox(height: AppSpace.xl),
             LayoutBuilder(
-              builder: (context, box) => SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SizedBox(
-                  width: box.maxWidth < _tableMin ? _tableMin : box.maxWidth,
-                  child: Column(
+              builder: (context, box) {
+                final marks = _marks(theme, MarkTotals(all));
+                final bands = _bands(theme, pcts);
+                if (box.maxWidth >= 720 && pcts.isNotEmpty) {
+                  return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _headerRow(),
-                      const Divider(height: 1),
-                      for (final s in students) ...[
-                        _studentRow(context, s),
-                        const Divider(height: 1),
-                      ],
+                      Expanded(child: marks),
+                      const SizedBox(width: AppSpace.xxl),
+                      Expanded(child: bands),
                     ],
-                  ),
-                ),
-              ),
+                  );
+                }
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    marks,
+                    if (pcts.isNotEmpty) ...[
+                      const SizedBox(height: AppSpace.xl),
+                      bands,
+                    ],
+                  ],
+                );
+              },
             ),
+            const SizedBox(height: AppSpace.xl),
+            Text('Students', style: theme.textTheme.titleMedium),
+            const SizedBox(height: AppSpace.md),
+            _controls(theme, students.length, all.length),
+            const SizedBox(height: AppSpace.md),
+            if (students.isEmpty)
+              EmptyState(
+                icon: Icons.search_off_outlined,
+                title: 'No students match',
+                message:
+                    'Try a different name or clear the Below $attendanceThreshold% filter.',
+                compact: true,
+              )
+            else
+              LayoutBuilder(builder: (context, box) => _list(box, students)),
+          ],
         ],
       ),
     );
   }
 
-  static Widget _cell(double? width, int flex, Widget child) =>
-      width == null
+  // --- Mark and percentage distributions -------------------------------------
+
+  Widget _marks(ThemeData theme, MarkTotals t) {
+    final items = <(String, int, Color)>[
+      ('Present', t.present, AppTone.success),
+      if (t.late > 0) ('Late', t.late, const Color(0xff3f9e6b)),
+      ('Absent', t.absent, AppTone.danger),
+      if (t.unassessed > 0) ('Unassessed', t.unassessed, AppTone.neutral),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Attendance marks', style: theme.textTheme.titleMedium),
+        const SizedBox(height: AppSpace.xs),
+        Text(
+          'Every mark recorded across published sessions',
+          style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppSpace.md),
+        if (t.total == 0)
+          const Text('No marks have been published yet.')
+        else ...[
+          Semantics(
+            label: [
+              for (final (label, n, _) in items) '$label $n',
+            ].join(', '),
+            child: ExcludeSemantics(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(AppRadius.pill),
+                child: SizedBox(
+                  height: 14,
+                  child: Row(
+                    children: [
+                      for (final (_, n, color) in items)
+                        if (n > 0)
+                          Expanded(
+                            flex: n,
+                            child: ColoredBox(color: color),
+                          ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: AppSpace.md),
+          Wrap(
+            spacing: AppSpace.lg,
+            runSpacing: AppSpace.sm,
+            children: [
+              for (final (label, n, color) in items)
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 10,
+                      height: 10,
+                      decoration: BoxDecoration(
+                        color: color,
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 6),
+                    Flexible(
+                      child: Text(
+                        '$label $n (${(100 * n / t.total).toStringAsFixed(0)}%)',
+                        style: const TextStyle(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                  ],
+                ),
+            ],
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _bands(ThemeData theme, List<num> pcts) {
+    if (pcts.isEmpty) return const SizedBox.shrink();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text('Attendance distribution', style: theme.textTheme.titleMedium),
+        const SizedBox(height: AppSpace.xs),
+        Text(
+          'Students by percentage band',
+          style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
+        ),
+        const SizedBox(height: AppSpace.sm),
+        Reveal(
+          child: BarDistribution(
+            bars: [
+              BarDatum(
+                '90–100%',
+                pcts.where((p) => p >= 90).length,
+                AppTone.success,
+              ),
+              BarDatum(
+                '75–89%',
+                pcts.where((p) => p >= 75 && p < 90).length,
+                const Color(0xff3f9e6b),
+              ),
+              BarDatum(
+                '50–74%',
+                pcts.where((p) => p >= 50 && p < 75).length,
+                AppTone.warning,
+              ),
+              BarDatum(
+                'Below 50%',
+                pcts.where((p) => p < 50).length,
+                AppTone.danger,
+              ),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
+  // --- Search, filter, sort -----------------------------------------------------
+
+  Widget _controls(ThemeData theme, int shown, int total) {
+    final onVariant = theme.colorScheme.onSurfaceVariant;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        LayoutBuilder(
+          builder: (context, box) => SizedBox(
+            width: math.min(box.maxWidth, 360),
+            child: TextField(
+              controller: _search,
+              onChanged: (_) => setState(() {}),
+              decoration: const InputDecoration(
+                isDense: true,
+                prefixIcon: Icon(Icons.search, size: 20),
+                hintText: 'Search name or enrolment',
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: AppSpace.md),
+        Wrap(
+          spacing: AppSpace.sm,
+          runSpacing: AppSpace.sm,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            FilterChip(
+              label: Text('Below $attendanceThreshold%'),
+              selected: _belowOnly,
+              onSelected: (v) => setState(() => _belowOnly = v),
+            ),
+            Text(
+              'Sort',
+              style: TextStyle(fontWeight: FontWeight.w600, color: onVariant),
+            ),
+            for (final (label, col, asc) in const [
+              ('Name', 0, true),
+              ('Enrolment', 1, true),
+              ('Lowest %', 3, true),
+              ('Highest %', 3, false),
+            ])
+              ChoiceChip(
+                label: Text(label),
+                selected: _sortCol == col && _asc == asc,
+                onSelected: (_) => _sortTo(col, asc),
+              ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.sm),
+        Wrap(
+          spacing: AppSpace.md,
+          runSpacing: AppSpace.xs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text('Showing $shown of $total', style: TextStyle(color: onVariant)),
+            OutlinedButton.icon(
+              onPressed: shown == 0 ? null : _exportCsv,
+              icon: const Icon(Icons.download, size: 18),
+              label: const Text('Export CSV'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  // --- Student list ----------------------------------------------------------------
+
+  Widget _list(BoxConstraints box, List<Json> students) {
+    final scale = MediaQuery.textScalerOf(context).scale(1).clamp(1.0, 2.0);
+    if (box.maxWidth < 560 * math.min(scale, 1.4)) {
+      return Column(
+        children: [
+          for (final s in students) ...[
+            _studentCard(context, s),
+            const SizedBox(height: AppSpace.sm),
+          ],
+        ],
+      );
+    }
+    final tableMin = _tableMin * scale;
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: SizedBox(
+        width: box.maxWidth < tableMin ? tableMin : box.maxWidth,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _headerRow(scale),
+            const Divider(height: 1),
+            for (final s in students) ...[
+              _studentRow(context, s, scale),
+              const Divider(height: 1),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  static Widget _cell(double? width, int flex, Widget child) => width == null
       ? Expanded(flex: flex, child: child)
       : SizedBox(width: width, child: child);
 
-  Widget _headerRow() {
+  Widget _headerRow(double scale) {
     Widget h(
       String label,
       int? col,
@@ -419,14 +646,14 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
       children: [
         h('Student', 0, null, flex: 3),
         h('Enrolment', 1, null, flex: 2),
-        h('Present', 2, _numW, right: true),
-        h('Absent', null, _numW, right: true),
-        h('%', 3, _pctW, right: true),
+        h('Present', 2, _numW * scale, right: true),
+        h('Absent', null, _numW * scale, right: true),
+        h('%', 3, _pctW * scale, right: true),
       ],
     );
   }
 
-  Widget _studentRow(BuildContext context, Json s) {
+  Widget _studentRow(BuildContext context, Json s, double scale) {
     Widget cell(double? w, String text, {int flex = 1, bool right = false}) =>
         _cell(
           w,
@@ -439,36 +666,27 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
             ),
           ),
         );
-    final pct = s['percentage'];
     return Row(
       children: [
         cell(null, '${s['official_name']}', flex: 3),
         cell(null, '${s['enrollment_number']}', flex: 2),
-        cell(_numW, '${s['attended']}', right: true),
-        cell(_numW, '${s['absent']}', right: true),
+        cell(_numW * scale, '${s['attended']}', right: true),
+        cell(_numW * scale, '${s['absent']}', right: true),
         SizedBox(
-          width: _pctW,
+          width: _pctW * scale,
           child: Padding(
             padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 4),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.end,
               mainAxisSize: MainAxisSize.min,
               children: [
-                Text(
-                  pct == null ? '—' : '${(pct as num).toStringAsFixed(1)}%',
-                  style: TextStyle(
-                    fontWeight: FontWeight.w700,
-                    color: pct == null
-                        ? Theme.of(context).colorScheme.onSurfaceVariant
-                        : percentColor(pct),
-                  ),
-                ),
-                if (pct is num) ...[
+                _pctPill(s),
+                if (s['percentage'] is num) ...[
                   const SizedBox(height: 6),
                   TrackBar(
-                    value: pct / 100,
-                    color: percentColor(pct),
-                    height: 6,
+                    value: (s['percentage'] as num) / 100,
+                    color: attendanceTone(s),
+                    height: 5,
                   ),
                 ],
               ],
@@ -476,6 +694,77 @@ class _AttendanceOverviewState extends State<AttendanceOverview> {
           ),
         ),
       ],
+    );
+  }
+
+  /// The percentage as a colour-coded pill; the warning icon marks students
+  /// below the threshold so colour is never the only cue.
+  Widget _pctPill(Json s) {
+    final pct = s['percentage'];
+    if (pct is! num) {
+      return const TonePill('No data');
+    }
+    return TonePill(
+      '${pct.toStringAsFixed(1)}%',
+      tone: attendanceTone(s),
+      icon: belowAttendanceThreshold(s) ? Icons.warning_amber_outlined : null,
+    );
+  }
+
+  Widget _studentCard(BuildContext context, Json s) {
+    final theme = Theme.of(context);
+    final onVariant = theme.colorScheme.onSurfaceVariant;
+    final unassessed = unassessedCount(s).toInt();
+    final assessed = (s['assessed'] as num?)?.toInt() ?? 0;
+    final pct = s['percentage'];
+    return Container(
+      padding: const EdgeInsets.all(AppSpace.md),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(AppRadius.md),
+        border: Border.all(color: theme.colorScheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '${s['official_name']}',
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontWeight: FontWeight.w700),
+                    ),
+                    Text(
+                      '${s['enrollment_number']}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 13, color: onVariant),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: AppSpace.sm),
+              _pctPill(s),
+            ],
+          ),
+          if (pct is num) ...[
+            const SizedBox(height: AppSpace.sm),
+            ThresholdBar(value: pct.toDouble(), color: attendanceTone(s), height: 6),
+          ],
+          const SizedBox(height: AppSpace.sm),
+          Text(
+            'Present ${s['attended'] ?? 0} · Absent ${s['absent'] ?? 0} · $assessed assessed'
+            '${unassessed > 0 ? ' · $unassessed unassessed' : ''}',
+            style: TextStyle(fontSize: 12, color: onVariant),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -491,7 +780,7 @@ class _InlineError extends StatelessWidget {
       padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
       decoration: BoxDecoration(
         color: scheme.error.withValues(alpha: .07),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(AppRadius.md),
         border: Border.all(color: scheme.error.withValues(alpha: .25)),
       ),
       child: Row(
@@ -500,41 +789,6 @@ class _InlineError extends StatelessWidget {
           const SizedBox(width: 10),
           Expanded(child: Text(message)),
           TextButton(onPressed: onRetry, child: const Text('Retry')),
-        ],
-      ),
-    );
-  }
-}
-
-/// A quiet empty state for use inside a panel (no nested card).
-class _EmptyHint extends StatelessWidget {
-  const _EmptyHint({
-    required this.icon,
-    required this.title,
-    required this.message,
-  });
-  final IconData icon;
-  final String title, message;
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 20),
-      child: Column(
-        children: [
-          Icon(icon, size: 32, color: scheme.onSurfaceVariant),
-          const SizedBox(height: 10),
-          Text(
-            title,
-            textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.titleMedium,
-          ),
-          const SizedBox(height: 4),
-          Text(
-            message,
-            textAlign: TextAlign.center,
-            style: TextStyle(color: scheme.onSurfaceVariant),
-          ),
         ],
       ),
     );

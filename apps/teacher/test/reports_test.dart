@@ -254,4 +254,75 @@ void main() {
     expect(keys[3], isNot(keys[2]));
     await tester.pumpWidget(const SizedBox());
   });
+
+  for (final (width, scale) in [(320.0, 1.0), (320.0, 2.0), (390.0, 2.0)]) {
+    testWidgets('Reports fit at $width px and text x$scale', (tester) async {
+      final h = (await tester.runAsync(() => harness()))!;
+      addTearDown(() => tester.runAsync(h.dispose));
+      h.services.api.dio.httpClientAdapter = RoutesAdapter((r) async {
+        if (r.path.startsWith('/v1/reports/')) {
+          return jsonResponse({
+            'deliveries': [
+              {'status': 'failed'},
+              {'status': 'sent'},
+            ],
+            'email_configured': true,
+          });
+        }
+        return jsonResponse({
+          'items': [
+            {
+              'id': 'final-report',
+              'kind': 'final',
+              'source_version': 3,
+              'status': 'ready',
+              'created_at': '2026-11-02T10:30:00Z',
+            },
+            {
+              'id': 'draft-report',
+              'kind': 'draft',
+              'source_version': 2,
+              'status': 'processing',
+              'created_at': '2026-11-01T10:30:00Z',
+            },
+          ],
+        });
+      });
+      tester.view.physicalSize = Size(width, 1600);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: appTheme(),
+          home: MediaQuery(
+            data: MediaQueryData(
+              size: Size(width, 1600),
+              textScaler: TextScaler.linear(scale),
+            ),
+            child: Scaffold(
+              body: SingleChildScrollView(
+                child: TeacherReports(
+                  api: h.services.api,
+                  institute: institute,
+                  sessionId: 'session',
+                  supabaseUrl: 'https://fixture.supabase.invalid',
+                  sessionVersion: 1,
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Final report · version 3'), findsOneWidget);
+      expect(find.text('Draft report · version 2'), findsOneWidget);
+      expect(find.text('Download PDF'), findsOneWidget);
+      expect(find.text('Email faculty link'), findsOneWidget);
+      expect(find.text('Processing'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    });
+  }
 }

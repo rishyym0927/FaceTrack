@@ -83,7 +83,7 @@ async def claim(conn, worker):
         return await document_claim(conn, worker)
     job = await one(
         conn,
-        """SELECT j.id FROM app.jobs j JOIN app.captures c ON c.institute_id=j.institute_id AND c.id=j.capture_id
+        """SELECT j.id, c.session_id FROM app.jobs j JOIN app.captures c ON c.institute_id=j.institute_id AND c.id=j.capture_id
     JOIN app.sessions s ON s.institute_id=c.institute_id AND s.id=c.session_id
     JOIN app.model_releases m ON m.institute_id=s.institute_id AND m.id=s.model_release_id
     WHERE j.institute_id=:i AND j.kind='recognition' AND j.state IN ('queued','retry_wait') AND j.available_at<=now() AND j.attempts<3
@@ -95,13 +95,25 @@ async def claim(conn, worker):
         from .documents import claim as document_claim
 
         return await document_claim(conn, worker)
-    return dict(
+    claimed = dict(
         await one(
             conn,
-            "UPDATE app.jobs SET state='leased',stage='leased',attempts=attempts+1,lease_epoch=lease_epoch+1,lease_owner=:w,lease_expires_at=now()+interval '120 seconds' WHERE institute_id=:i AND id=:id RETURNING id,lease_epoch,generation",
+            "UPDATE app.jobs SET state='leased',stage='leased',attempts=attempts+1,lease_epoch=lease_epoch+1,lease_owner=:w,lease_expires_at=now()+interval '120 seconds' WHERE institute_id=:i AND id=:id RETURNING id,lease_epoch,generation,capture_id,attempts,(extract(epoch FROM now()-available_at)*1000)::int AS queue_wait_ms",
             {"i": worker["institute_id"], "w": worker["id"], "id": job["id"]},
         )
     )
+    # How long the job waited for a worker (since it became available), with every id needed to
+    # follow the class: one line per claim, in the API log.
+    logs.event(
+        "job_claimed",
+        job_id=claimed["id"],
+        capture_id=claimed["capture_id"],
+        session_id=job["session_id"],
+        attempts=claimed["attempts"],
+        epoch=claimed["lease_epoch"],
+        queue_wait_ms=claimed["queue_wait_ms"],
+    )
+    return {k: claimed[k] for k in ("id", "lease_epoch", "generation")}
 
 
 async def capture_context(conn, worker, job):
@@ -226,6 +238,9 @@ async def input_data(conn, worker, job, settings):
         "profile_hash": cfg["settings_hash"],
         "roster_hash": s["roster_hash"],
         "roster": people,
+        # Ids only, so the worker's own log lines can name the class and the segment.
+        "session_id": str(s["id"]),
+        "capture_id": str(job["capture_id"]),
     }, asset
 
 
@@ -433,7 +448,9 @@ async def complete(conn, worker, job_id, body, settings):
     logs.event(
         "recognition_complete",
         session_id=s["id"],
+        capture_id=job["capture_id"],
         job_id=job_id,
+        attempts=job["attempts"],
         roster=len(roster),
         recognised=len(body.proposals),
         unknown_observations=body.unknown_observations,

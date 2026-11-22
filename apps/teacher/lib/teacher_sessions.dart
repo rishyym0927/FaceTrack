@@ -15,6 +15,7 @@ import 'classroom_scan.dart';
 import 'classroom_pending.dart';
 import 'processing_progress.dart';
 import 'recognition_board.dart';
+import 'review_card.dart' show initialsOf;
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
 import 'unload_warning.dart';
@@ -708,6 +709,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
   bool foreground = true;
   AppLifecycleListener? lifecycle;
   int loadGeneration = 0;
+
+  /// When the app left the screen during a scan (for the diagnostics timeline).
+  DateTime? pausedAt;
+  void _notePaused(String why) {
+    if (!scanActive || pausedAt != null) return;
+    pausedAt = DateTime.now();
+    services.diagnostics.record('scan_paused', sessionId: widget.id, code: why);
+  }
+
   @override
   void initState() {
     super.initState();
@@ -721,14 +731,26 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       onHide: () {
         foreground = false;
         poll?.cancel();
+        _notePaused('hidden');
       },
       onPause: () {
         foreground = false;
         poll?.cancel();
+        _notePaused('paused');
         if (!scanActive) unawaited(camera.interrupt());
       },
       onResume: () {
         foreground = true;
+        final since = pausedAt;
+        if (since != null) {
+          pausedAt = null;
+          services.diagnostics.record(
+            'scan_resumed',
+            sessionId: widget.id,
+            code: 'resumed',
+            seconds: DateTime.now().difference(since).inMilliseconds / 1000,
+          );
+        }
         unawaited(load(keepDecisions: true));
       },
     );
@@ -909,6 +931,13 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
       _schedulePoll();
     } catch (e) {
       if (mounted && current == loadGeneration) {
+        services.diagnostics.record(
+          'recognition_load_failed',
+          sessionId: widget.id,
+          route: '/v1/sessions/${widget.id}/attendance',
+          status: e is AppFailure ? e.status : null,
+          code: e is AppFailure ? e.code : null,
+        );
         setState(
           () => error = e is AppFailure
               ? e
@@ -1367,9 +1396,15 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         title: 'Correct published attendance',
         button: 'Publish correction',
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(row['official_name']),
+            Text(
+              row['official_name'] as String? ?? 'Student',
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: AppSpace.md),
             DropdownButtonFormField<String>(
+              isExpanded: true,
               initialValue: status,
               decoration: const InputDecoration(labelText: 'Attendance'),
               items: [
@@ -1487,22 +1522,22 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
           const SizedBox(height: 16),
         ],
         Panel(
+          padding: MediaQuery.sizeOf(context).width < 600 ? 16 : 24,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               SessionSteps(status: status, captured: captured),
-              const SizedBox(height: 10),
+              const SizedBox(height: AppSpace.sm),
               Text(
                 sessionStepHint(status, captured: captured),
                 style: TextStyle(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  height: 1.4,
                 ),
               ),
               if (['scheduled', 'open'].contains(status)) ...[
-                const SizedBox(height: 12),
-                Wrap(
-                  spacing: 12,
-                  runSpacing: 8,
+                const SizedBox(height: AppSpace.lg),
+                _StepActions(
                   children: [
                     if (status == 'scheduled')
                       FilledButton.icon(
@@ -1541,22 +1576,43 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
         const SizedBox(height: 16),
         if (status == 'open') ...[
           Panel(
+            padding: MediaQuery.sizeOf(context).width < 600 ? 16 : 24,
             child: Column(
+              key: const ValueKey('capture-panel'),
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  'Classroom capture',
-                  style: Theme.of(context).textTheme.titleLarge,
+                _PanelHeading(
+                  icon: Icons.videocam_outlined,
+                  title: 'Classroom capture',
+                  subtitle: canRecord
+                      ? 'Scan the room with the camera. Clips upload while you scan.'
+                      : null,
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  canRecord
-                      ? 'Open the camera, then tap Start scan. Move slowly across the room and tap Stop scan when finished. Keep this page open while the clips upload.'
-                      : 'This session needs at least two students with approved face enrolments. Go to review to mark attendance manually, or open a new session after two enrolments are approved.',
-                ),
-                const SizedBox(height: 12),
-                Align(
-                  alignment: Alignment.centerLeft,
+                const SizedBox(height: AppSpace.md),
+                if (canRecord) ...[
+                  TonePill(
+                    '${rows.where((r) => r['recognition_eligible'] == true).length} of ${rows.length} students can be recognised',
+                    tone: AppTone.info,
+                    icon: Icons.face_outlined,
+                  ),
+                  const SizedBox(height: AppSpace.md),
+                  const _HowItWorks(
+                    steps: [
+                      'Open the camera, then tap Start scan.',
+                      'Move slowly across the room and pause on each group.',
+                      'Tap Stop scan when finished. Keep this page open while the clips upload.',
+                    ],
+                  ),
+                ] else
+                  const _Callout(
+                    icon: Icons.person_off_outlined,
+                    tone: AppTone.warning,
+                    text:
+                        'This session needs at least two students with approved face enrolments. Go to review to mark attendance manually, or open a new session after two enrolments are approved.',
+                  ),
+                const SizedBox(height: AppSpace.lg),
+                SizedBox(
+                  height: 52,
                   child: FilledButton.icon(
                     onPressed:
                         !canRecord ||
@@ -1648,6 +1704,7 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                         const Text('Tap the preview to focus.'),
                       Wrap(
                         spacing: 8,
+                        runSpacing: 4,
                         children: [
                           if (kIsWeb)
                             TextButton.icon(
@@ -1692,18 +1749,32 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
                     ],
                     if (camera.error != null) Text(camera.error!),
                     if (camera.recording)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 8),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.fiber_manual_record,
-                              color: Color(0xffc62828),
-                              size: 16,
-                            ),
-                            const SizedBox(width: 6),
-                            Text('Recording ${camera.elapsed} / 15 seconds'),
-                          ],
+                      Semantics(
+                        liveRegion: true,
+                        child: Container(
+                          margin: const EdgeInsets.symmetric(vertical: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: AppTone.tint(AppTone.danger, .08),
+                            borderRadius: BorderRadius.circular(AppRadius.pill),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(
+                                Icons.fiber_manual_record,
+                                color: Color(0xffc62828),
+                                size: 16,
+                              ),
+                              const SizedBox(width: 6),
+                              Flexible(
+                                child: Text(
+                                  'Recording ${camera.elapsed} / 15 seconds',
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     if (camera.clip != null) ...[
@@ -1805,12 +1876,19 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
             message:
                 'Approve subject membership in the Students tab before opening a new session.',
           )
-        else if (editable || finalised)
+        else if (finalised)
+          PublishedAttendance(
+            session: s,
+            rows: rows,
+            busy: busy,
+            onCorrect: correct,
+          )
+        else if (editable)
           AttendanceReviewTable(
             rows: rows,
             decisions: decisions,
             editable: editable,
-            finalised: finalised,
+            finalised: false,
             busy: busy,
             onChanged: (id, status) => setState(() {
               decisions[id] = status;
@@ -1826,48 +1904,17 @@ class _TeacherSessionDetailState extends ConsumerState<TeacherSessionDetail> {
               'Choose Present or Absent for ${counts.toCheck} more students.',
             ),
           ),
-        if (finalised) ...[
-          const SizedBox(height: 16),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xff176451).withValues(alpha: .07),
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(
-                color: const Color(0xff176451).withValues(alpha: .25),
-              ),
-            ),
-            child: Row(
-              children: [
-                const Icon(Icons.verified_outlined, color: Color(0xff176451)),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    publishedNote(s['attendance_revision'] as int? ?? 1),
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                ),
-              ],
+        if (!['scheduled', 'open', 'cancelled'].contains(status))
+          _ReportsSection(
+            published: finalised,
+            reports: TeacherReports(
+              api: services.api,
+              institute: institute,
+              sessionId: widget.id,
+              supabaseUrl: services.config.supabaseUrl,
+              sessionVersion: s['version'] as int,
             ),
           ),
-        ],
-        if (!['scheduled', 'open', 'cancelled'].contains(status)) ...[
-          const SectionTitle('Reports'),
-          Text(
-            'Download the attendance report as PDF or CSV. The final report is ready once attendance is published.',
-            style: TextStyle(
-              color: Theme.of(context).colorScheme.onSurfaceVariant,
-            ),
-          ),
-          const SizedBox(height: 12),
-          TeacherReports(
-            api: services.api,
-            institute: institute,
-            sessionId: widget.id,
-            supabaseUrl: services.config.supabaseUrl,
-            sessionVersion: s['version'] as int,
-          ),
-        ],
       ],
     );
     if (!editable) return page;
@@ -1963,6 +2010,11 @@ class SessionSteps extends StatelessWidget {
         : at == steps.length
         ? 'Published'
         : 'Step ${at + 1} of ${steps.length} · ${steps[at]}';
+    final tone = at < 0
+        ? AppTone.neutral
+        : at == steps.length
+        ? AppTone.success
+        : scheme.primary;
     return Semantics(
       label: label,
       child: ExcludeSemantics(
@@ -1970,33 +2022,120 @@ class SessionSteps extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             if (at >= 0)
-              Row(
-                children: [
-                  for (var i = 0; i < steps.length; i++)
-                    Expanded(
-                      child: Padding(
-                        padding: EdgeInsets.only(
-                          right: i == steps.length - 1 ? 0 : 6,
-                        ),
-                        child: Container(
-                          height: 6,
-                          decoration: BoxDecoration(
-                            borderRadius: BorderRadius.circular(99),
-                            color: i < at
-                                ? scheme.primary
-                                : i == at
-                                ? scheme.primary.withValues(alpha: .55)
-                                : scheme.outlineVariant,
+              LayoutBuilder(
+                builder: (context, box) {
+                  // Names under the dots only when each has room; the heading names the
+                  // current step either way.
+                  final named =
+                      box.maxWidth / steps.length >= 92 &&
+                      MediaQuery.textScalerOf(context).scale(1) <= 1.3;
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (var i = 0; i < steps.length; i++) ...[
+                        if (i > 0)
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.only(top: 13),
+                              child: Container(
+                                height: 3,
+                                decoration: BoxDecoration(
+                                  borderRadius: BorderRadius.circular(99),
+                                  color: i <= at ? scheme.primary : scheme.outlineVariant,
+                                ),
+                              ),
+                            ),
                           ),
+                        _StepDot(
+                          index: i,
+                          state: i < at
+                              ? _DotState.done
+                              : i == at
+                              ? _DotState.current
+                              : _DotState.todo,
+                          label: named ? steps[i] : null,
                         ),
-                      ),
-                    ),
-                ],
+                      ],
+                    ],
+                  );
+                },
               ),
-            if (at >= 0) const SizedBox(height: 10),
-            Text(label, style: Theme.of(context).textTheme.titleMedium),
+            if (at >= 0) const SizedBox(height: AppSpace.md),
+            Row(
+              children: [
+                if (at == steps.length) ...[
+                  const Icon(Icons.verified_outlined, size: 20, color: AppTone.success),
+                  const SizedBox(width: AppSpace.sm),
+                ],
+                Flexible(
+                  child: Text(
+                    label,
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(color: tone),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+enum _DotState { done, current, todo }
+
+class _StepDot extends StatelessWidget {
+  const _StepDot({required this.index, required this.state, this.label});
+  final int index;
+  final _DotState state;
+  final String? label;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final filled = state != _DotState.todo;
+    final dot = Container(
+      width: 28,
+      height: 28,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        color: state == _DotState.done ? scheme.primary : scheme.surface,
+        border: Border.all(
+          color: filled ? scheme.primary : scheme.outlineVariant,
+          width: state == _DotState.current ? 3 : 2,
+        ),
+      ),
+      alignment: Alignment.center,
+      child: state == _DotState.done
+          ? Icon(Icons.check, size: 16, color: scheme.onPrimary)
+          : Text(
+              '${index + 1}',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w800,
+                color: filled ? scheme.primary : scheme.onSurfaceVariant,
+              ),
+            ),
+    );
+    if (label == null) return dot;
+    return SizedBox(
+      width: 64,
+      child: Column(
+        children: [
+          dot,
+          const SizedBox(height: 4),
+          Text(
+            label!,
+            textAlign: TextAlign.center,
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              fontSize: 11,
+              height: 1.2,
+              fontWeight: state == _DotState.current ? FontWeight.w800 : FontWeight.w500,
+              color: state == _DotState.todo ? scheme.onSurfaceVariant : scheme.onSurface,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -2473,4 +2612,713 @@ class _ScanUpload {
     state.uploaded = data['uploaded'] == true;
     return state;
   }
+}
+
+// -----------------------------------------------------------------------------
+// Published attendance
+// -----------------------------------------------------------------------------
+
+/// How a published mark came about, from what the attendance rows carry.
+///
+/// `source` is not used: every decision the teacher submits, including a confirmed camera
+/// suggestion, is stored as `teacher`. The assessment code says what the camera found.
+enum MarkOrigin { recognised, overridden, byHand, byHandNoEnrolment }
+
+MarkOrigin markOrigin(Json row) {
+  if (row['assessment_code'] == 'recognized') {
+    return finalStatus(row['status'] as String?) == 'present'
+        ? MarkOrigin.recognised
+        : MarkOrigin.overridden;
+  }
+  if (row['assessment_code'] == 'template_ineligible' ||
+      row['recognition_eligible'] == false) {
+    return MarkOrigin.byHandNoEnrolment;
+  }
+  return MarkOrigin.byHand;
+}
+
+extension MarkOriginText on MarkOrigin {
+  String get label => switch (this) {
+    MarkOrigin.recognised => 'Recognised by camera · confirmed by you',
+    MarkOrigin.overridden => 'Recognised by camera · you marked Absent',
+    MarkOrigin.byHand => 'Marked by hand',
+    MarkOrigin.byHandNoEnrolment => 'Marked by hand · no face enrolment',
+  };
+  IconData get icon => switch (this) {
+    MarkOrigin.recognised => Icons.center_focus_strong_outlined,
+    MarkOrigin.overridden => Icons.swap_horiz,
+    MarkOrigin.byHand => Icons.edit_outlined,
+    MarkOrigin.byHandNoEnrolment => Icons.person_off_outlined,
+  };
+}
+
+/// The reason typed with a correction. Ordinary review decisions carry none.
+String? correctionReason(Json row) {
+  final reason = (row['reason'] as String?)?.trim();
+  return reason == null || reason.isEmpty ? null : reason;
+}
+
+/// Totals for the published header, counted from the rows with the same folding of legacy
+/// statuses as the review bar.
+class PublishedSummary {
+  const PublishedSummary({
+    required this.total,
+    required this.present,
+    required this.absent,
+    required this.recognised,
+    required this.corrected,
+    required this.scanned,
+  });
+  factory PublishedSummary.of(List<Json> rows) {
+    var present = 0, absent = 0, recognised = 0, corrected = 0;
+    var scanned = false;
+    for (final row in rows) {
+      switch (finalStatus(row['status'] as String?)) {
+        case 'present':
+          present++;
+        case 'absent':
+          absent++;
+      }
+      if (markOrigin(row) == MarkOrigin.recognised) recognised++;
+      if (correctionReason(row) != null) corrected++;
+      if (row['assessment_code'] != null) scanned = true;
+    }
+    return PublishedSummary(
+      total: rows.length,
+      present: present,
+      absent: absent,
+      recognised: recognised,
+      corrected: corrected,
+      scanned: scanned,
+    );
+  }
+  final int total, present, absent, recognised, corrected;
+
+  /// Whether a camera scan was assessed for this session at all.
+  final bool scanned;
+  int get notAssessed => total - present - absent;
+  int get byHand => total - recognised;
+
+  /// Present out of everyone assessed Present or Absent; null when nobody was.
+  double? get percent {
+    final assessed = present + absent;
+    return assessed == 0 ? null : present * 100 / assessed;
+  }
+}
+
+enum PublishedFilter { all, present, absent, corrected }
+
+/// The published session: a success header with the totals, the roster grouped by mark with
+/// search and filters, and the corrections made since publishing.
+class PublishedAttendance extends StatefulWidget {
+  const PublishedAttendance({
+    super.key,
+    required this.session,
+    required this.rows,
+    required this.busy,
+    required this.onCorrect,
+  });
+  final Json session;
+  final List<Json> rows;
+  final bool busy;
+  final void Function(Json row) onCorrect;
+  @override
+  State<PublishedAttendance> createState() => _PublishedAttendanceState();
+}
+
+class _PublishedAttendanceState extends State<PublishedAttendance> {
+  String _search = '';
+  PublishedFilter _filter = PublishedFilter.all;
+
+  static int _byName(Json a, Json b) =>
+      '${a['official_name']}'.toLowerCase().compareTo('${b['official_name']}'.toLowerCase());
+
+  @override
+  Widget build(BuildContext context) {
+    final summary = PublishedSummary.of(widget.rows);
+    final revision = widget.session['attendance_revision'] as int? ?? 1;
+    final narrow = MediaQuery.sizeOf(context).width < 600;
+    final pad = narrow ? 16.0 : 24.0;
+    final query = _search.trim().toLowerCase();
+    final sorted = [...widget.rows]..sort(_byName);
+    List<Json> shown(String status) => [
+      for (final row in sorted)
+        if (finalStatus(row['status'] as String?) == status &&
+            (query.isEmpty ||
+                '${row['official_name']} ${row['enrollment_number']}'
+                    .toLowerCase()
+                    .contains(query)) &&
+            (_filter != PublishedFilter.corrected || correctionReason(row) != null))
+          row,
+    ];
+    final groups = [
+      if (_filter != PublishedFilter.absent)
+        ('Present', 'present', AppTone.success, Icons.check_circle_outline, shown('present')),
+      if (_filter != PublishedFilter.present)
+        ('Absent', 'absent', AppTone.danger, Icons.cancel_outlined, shown('absent')),
+      if (summary.notAssessed > 0 && _filter != PublishedFilter.present && _filter != PublishedFilter.absent)
+        ('Not assessed', 'unassessed', AppTone.neutral, Icons.help_outline, shown('unassessed')),
+    ];
+    final anyShown = groups.any((g) => g.$5.isNotEmpty);
+    final corrections = [for (final row in sorted) if (correctionReason(row) != null) row];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _PublishedHeader(summary: summary, revision: revision, padding: pad),
+        const SizedBox(height: AppSpace.lg),
+        Panel(
+          padding: pad,
+          child: Column(
+            key: const ValueKey('published-list'),
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Semantics(
+                header: true,
+                child: Text('Attendance list', style: Theme.of(context).textTheme.titleLarge),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Tap Correct on a student to publish a fix. Students see the new mark.',
+                style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: AppSpace.md),
+              TextField(
+                key: const ValueKey('published-search'),
+                onChanged: (text) => setState(() => _search = text),
+                decoration: const InputDecoration(
+                  prefixIcon: Icon(Icons.search),
+                  labelText: 'Search name or enrolment',
+                ),
+              ),
+              const SizedBox(height: AppSpace.md),
+              Wrap(
+                spacing: AppSpace.sm,
+                runSpacing: AppSpace.sm,
+                children: [
+                  for (final (filter, label) in [
+                    (PublishedFilter.all, 'All · ${summary.total}'),
+                    (PublishedFilter.present, 'Present · ${summary.present}'),
+                    (PublishedFilter.absent, 'Absent · ${summary.absent}'),
+                    if (summary.corrected > 0)
+                      (PublishedFilter.corrected, 'Corrected · ${summary.corrected}'),
+                  ])
+                    ChoiceChip(
+                      label: Text(label),
+                      selected: _filter == filter,
+                      onSelected: (_) => setState(() => _filter = filter),
+                    ),
+                ],
+              ),
+              if (!anyShown)
+                const Padding(
+                  padding: EdgeInsets.only(top: AppSpace.lg),
+                  child: EmptyState(
+                    compact: true,
+                    icon: Icons.search_off,
+                    title: 'No students match.',
+                    message: 'Clear the search or choose All.',
+                  ),
+                ),
+              for (final (label, _, tone, icon, rows) in groups)
+                if (rows.isNotEmpty) ...[
+                  const SizedBox(height: AppSpace.lg),
+                  _GroupHeader(label: label, count: rows.length, tone: tone, icon: icon),
+                  for (final row in rows) ...[
+                    const Divider(height: 1),
+                    _PublishedRow(
+                      key: ValueKey('published-row-${row['student_id']}'),
+                      row: row,
+                      busy: widget.busy,
+                      onCorrect: widget.onCorrect,
+                    ),
+                  ],
+                ],
+            ],
+          ),
+        ),
+        if (corrections.isNotEmpty) ...[
+          const SizedBox(height: AppSpace.lg),
+          Panel(
+            padding: pad,
+            child: Column(
+              key: const ValueKey('published-corrections'),
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.edit_note, color: AppTone.warning),
+                    const SizedBox(width: AppSpace.sm),
+                    Expanded(
+                      child: Semantics(
+                        header: true,
+                        child: Text(
+                          'Correction notes · ${corrections.length}',
+                          style: Theme.of(context).textTheme.titleLarge,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'The latest correction note for each corrected student. A student corrected more than once shows only the newest note; earlier versions stay on record.',
+                  style: TextStyle(color: Theme.of(context).colorScheme.onSurfaceVariant),
+                ),
+                const SizedBox(height: AppSpace.sm),
+                for (final row in corrections) ...[
+                  const Divider(height: 1),
+                  _CorrectionEntry(row: row),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _PublishedHeader extends StatelessWidget {
+  const _PublishedHeader({required this.summary, required this.revision, required this.padding});
+  final PublishedSummary summary;
+  final int revision;
+  final double padding;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final times = revision - 1;
+    final banner = Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 44,
+          height: 44,
+          decoration: BoxDecoration(
+            color: AppTone.tint(AppTone.success, .12),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: const Icon(Icons.verified_outlined, color: AppTone.success),
+        ),
+        const SizedBox(width: AppSpace.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                header: true,
+                child: const Text(
+                  'Attendance published',
+                  key: ValueKey('published-title'),
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: AppTone.success),
+                ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                'Students can see their attendance.',
+                style: TextStyle(color: scheme.onSurfaceVariant),
+              ),
+              if (times > 0) ...[
+                const SizedBox(height: AppSpace.sm),
+                TonePill(
+                  'Corrected $times ${times == 1 ? 'time' : 'times'}',
+                  tone: AppTone.warning,
+                  icon: Icons.edit_note,
+                ),
+              ],
+            ],
+          ),
+        ),
+      ],
+    );
+    final stats = StatGrid(
+      minTileWidth: 100,
+      children: [
+        StatTile(label: 'Present', value: summary.present, icon: Icons.check_circle_outline, accent: AppTone.success),
+        StatTile(label: 'Absent', value: summary.absent, icon: Icons.cancel_outlined, accent: AppTone.danger),
+        StatTile(label: 'Students', value: summary.total, icon: Icons.groups_2_outlined, accent: AppTone.neutral),
+        if (summary.notAssessed > 0)
+          StatTile(label: 'Not assessed', value: summary.notAssessed, icon: Icons.help_outline, accent: AppTone.neutral),
+        if (summary.scanned)
+          StatTile(label: 'By camera', value: summary.recognised, icon: Icons.center_focus_strong_outlined, accent: AppTone.info),
+        if (summary.scanned)
+          StatTile(label: 'By hand', value: summary.byHand, icon: Icons.edit_outlined, accent: AppTone.neutral),
+      ],
+    );
+    final ring = Center(
+      child: PercentRing(value: summary.percent, size: 112, caption: 'present'),
+    );
+    return Panel(
+      accent: true,
+      padding: padding,
+      child: Column(
+        key: const ValueKey('published-summary'),
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Semantics(label: publishedNote(revision), child: banner),
+          const SizedBox(height: AppSpace.lg),
+          LayoutBuilder(
+            builder: (context, box) => box.maxWidth >= 560
+                ? Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [ring, const SizedBox(width: AppSpace.xl), Expanded(child: stats)],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [ring, const SizedBox(height: AppSpace.lg), stats],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _GroupHeader extends StatelessWidget {
+  const _GroupHeader({required this.label, required this.count, required this.tone, required this.icon});
+  final String label;
+  final int count;
+  final Color tone;
+  final IconData icon;
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: AppSpace.sm),
+    child: Semantics(
+      header: true,
+      label: '$label, $count',
+      child: ExcludeSemantics(
+        child: Row(
+          children: [
+            Icon(icon, size: 20, color: tone),
+            const SizedBox(width: AppSpace.sm),
+            Flexible(
+              child: Text(
+                label,
+                style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16, color: tone),
+              ),
+            ),
+            const SizedBox(width: AppSpace.sm),
+            TonePill('$count', tone: tone),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+class _PublishedRow extends StatelessWidget {
+  const _PublishedRow({super.key, required this.row, required this.busy, required this.onCorrect});
+  final Json row;
+  final bool busy;
+  final void Function(Json row) onCorrect;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final status = finalStatus(row['status'] as String?);
+    final tone = status == 'present'
+        ? AppTone.success
+        : status == 'absent'
+        ? AppTone.danger
+        : AppTone.neutral;
+    final name = row['official_name'] as String? ?? 'Student';
+    final origin = markOrigin(row);
+    final number = row['enrollment_number'] as String?;
+    final avatar = CircleAvatar(
+      radius: 20,
+      backgroundColor: AppTone.tint(tone, .12),
+      child: Text(
+        initialsOf(name),
+        style: TextStyle(fontWeight: FontWeight.w800, fontSize: 14, color: tone),
+      ),
+    );
+    final details = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(name, style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+        if (number != null)
+          Text(number, style: TextStyle(fontSize: 13, color: scheme.onSurfaceVariant)),
+        const SizedBox(height: AppSpace.xs),
+        Wrap(
+          spacing: AppSpace.sm,
+          runSpacing: AppSpace.xs,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(origin.icon, size: 14, color: scheme.onSurfaceVariant),
+                const SizedBox(width: 4),
+                Flexible(
+                  child: Text(
+                    origin.label,
+                    style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+                  ),
+                ),
+              ],
+            ),
+            if (correctionReason(row) != null)
+              const TonePill('Corrected', tone: AppTone.warning, icon: Icons.edit_note),
+          ],
+        ),
+      ],
+    );
+    final correct = TextButton.icon(
+      onPressed: busy ? null : () => onCorrect(row),
+      style: TextButton.styleFrom(minimumSize: const Size(48, 44)),
+      icon: const Icon(Icons.edit_outlined, size: 18),
+      label: const Text('Correct'),
+    );
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
+      child: LayoutBuilder(
+        builder: (context, box) {
+          final stacked = box.maxWidth < 440 || MediaQuery.textScalerOf(context).scale(1) > 1.3;
+          return Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              avatar,
+              const SizedBox(width: AppSpace.md),
+              Expanded(
+                child: stacked
+                    ? Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [details, Align(alignment: Alignment.centerLeft, child: correct)],
+                      )
+                    : Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [Expanded(child: details), const SizedBox(width: AppSpace.sm), correct],
+                      ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CorrectionEntry extends StatelessWidget {
+  const _CorrectionEntry({required this.row});
+  final Json row;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final mark = finalStatus(row['status'] as String?);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: AppSpace.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Wrap(
+            spacing: AppSpace.sm,
+            runSpacing: AppSpace.xs,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            children: [
+              Text(
+                row['official_name'] as String? ?? 'Student',
+                style: Theme.of(context).textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
+              ),
+              if (finalStatuses.contains(mark)) StatusBadge(mark),
+            ],
+          ),
+          const SizedBox(height: AppSpace.xs),
+          Text(
+            'Reason: ${correctionReason(row)}',
+            style: TextStyle(color: scheme.onSurfaceVariant, height: 1.35),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// The reports area: what can be downloaded now, kept apart from the attendance and
+/// corrections above it.
+class _ReportsSection extends StatelessWidget {
+  const _ReportsSection({required this.published, required this.reports});
+  final bool published;
+  final Widget reports;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      key: const ValueKey('reports-section'),
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const SizedBox(height: AppSpace.xl),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: scheme.primary.withValues(alpha: .10),
+                borderRadius: BorderRadius.circular(AppRadius.md),
+              ),
+              child: Icon(Icons.description_outlined, color: scheme.primary),
+            ),
+            const SizedBox(width: AppSpace.md),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Semantics(
+                    header: true,
+                    child: Text('Reports', style: Theme.of(context).textTheme.titleLarge),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    published
+                        ? 'Download the final attendance report as PDF or CSV. A corrected publication creates a new report version.'
+                        : 'Download the attendance report as PDF or CSV. The final report is ready once attendance is published.',
+                    style: TextStyle(color: scheme.onSurfaceVariant, height: 1.35),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppSpace.sm),
+        reports,
+      ],
+    );
+  }
+}
+
+/// Raises the minimum height of the page's buttons to a comfortable touch target.
+ThemeData _tallButtons(ThemeData t, {double height = 48}) {
+  final min = WidgetStatePropertyAll(Size(64, height));
+  ButtonStyle tall(ButtonStyle? base) =>
+      (base ?? const ButtonStyle()).copyWith(minimumSize: min);
+  return t.copyWith(
+    filledButtonTheme: FilledButtonThemeData(style: tall(t.filledButtonTheme.style)),
+    outlinedButtonTheme: OutlinedButtonThemeData(style: tall(t.outlinedButtonTheme.style)),
+    textButtonTheme: TextButtonThemeData(style: tall(t.textButtonTheme.style)),
+  );
+}
+
+/// The buttons for the current step: side by side when there is room, else one per row.
+class _StepActions extends StatelessWidget {
+  const _StepActions({required this.children});
+  final List<Widget> children;
+  @override
+  Widget build(BuildContext context) => Theme(
+    data: _tallButtons(Theme.of(context)),
+    child: LayoutBuilder(
+      builder: (context, box) => box.maxWidth < 480
+          ? Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                for (final child in children)
+                  Padding(padding: const EdgeInsets.only(bottom: AppSpace.sm), child: child),
+              ],
+            )
+          : Wrap(spacing: AppSpace.md, runSpacing: AppSpace.sm, children: children),
+    ),
+  );
+}
+
+/// An icon tile, a title and an optional one-line explanation.
+class _PanelHeading extends StatelessWidget {
+  const _PanelHeading({required this.icon, required this.title, this.subtitle});
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: .10),
+            borderRadius: BorderRadius.circular(AppRadius.md),
+          ),
+          child: Icon(icon, color: scheme.primary),
+        ),
+        const SizedBox(width: AppSpace.md),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Semantics(
+                header: true,
+                child: Text(title, style: Theme.of(context).textTheme.titleLarge),
+              ),
+              if (subtitle != null)
+                Text(subtitle!, style: TextStyle(color: scheme.onSurfaceVariant, height: 1.35)),
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Numbered instructions.
+class _HowItWorks extends StatelessWidget {
+  const _HowItWorks({required this.steps});
+  final List<String> steps;
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (final (i, text) in steps.indexed)
+          Padding(
+            padding: const EdgeInsets.only(bottom: AppSpace.sm),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Container(
+                  width: 24,
+                  height: 24,
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: .10),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Text(
+                    '${i + 1}',
+                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: scheme.primary),
+                  ),
+                ),
+                const SizedBox(width: AppSpace.md),
+                Expanded(child: Text(text, style: const TextStyle(height: 1.35))),
+              ],
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+/// A tinted note with an icon: a warning or a hint inside a panel.
+class _Callout extends StatelessWidget {
+  const _Callout({required this.icon, required this.tone, required this.text});
+  final IconData icon;
+  final Color tone;
+  final String text;
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(AppSpace.md),
+    decoration: BoxDecoration(
+      color: AppTone.tint(tone, .09),
+      borderRadius: BorderRadius.circular(AppRadius.md),
+      border: Border.all(color: AppTone.tint(tone, .3)),
+    ),
+    child: Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 20, color: tone),
+        const SizedBox(width: AppSpace.md),
+        Expanded(child: Text(text, style: const TextStyle(height: 1.35))),
+      ],
+    ),
+  );
 }

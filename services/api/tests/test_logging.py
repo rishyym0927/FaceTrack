@@ -123,7 +123,7 @@ async def test_client_events_are_accepted_and_logged_without_identity(backend, c
         headers=b.headers("teacher"),
         json=batch(session_id=session, attempt=2, code="CONNECTION", seconds=4.5, bytes=1234),
     )
-    assert response.status_code == 202 and response.json() == {"accepted": 1}
+    assert response.status_code == 202 and response.json() == {"accepted": 1, "rejected": 0}
     entry = lines(caplog, "client_event")[-1]
     assert entry["kind"] == "upload_retry" and entry["session_id"] == session
     assert entry["attempt"] == 2 and entry["client"] == "teacher" and entry["platform"] == "android"
@@ -147,14 +147,119 @@ async def test_client_events_require_sign_in(backend):
         {"name": "api_error", "route": "https://evil.invalid/x"},
         {"name": "api_error", "status": 99},
         {"name": "segment_recorded", "bytes": -1},
+        {"name": "upload_done", "age_ms": 10**9},
     ],
 )
-async def test_client_events_reject_anything_off_the_whitelist(backend, event):
+async def test_client_events_reject_anything_off_the_whitelist(backend, caplog, event):
+    caplog.set_level(logging.INFO, logger=LOGGER)
     body = {"app": "student", "platform": "web", "events": [event]}
     response = await backend.client.post(
         "/v1/client-events", headers=backend.headers("student1"), json=body
     )
-    assert response.status_code == 422, response.text
+    # The batch is answered, the event is skipped and counted, and nothing it carried is logged.
+    assert response.status_code == 202, response.text
+    assert response.json() == {"accepted": 0, "rejected": 1}
+    assert not lines(caplog, "client_event")
+    assert lines(caplog, "client_events_rejected")[-1]["count"] == 1
+    for fragment in ("evil.invalid", "a@b.invalid", "free text", "quotes", "login_form"):
+        assert fragment not in caplog.text
+
+
+async def test_one_unknown_event_does_not_cost_the_rest_of_the_batch(backend, caplog):
+    caplog.set_level(logging.INFO, logger=LOGGER)
+    session = "44444444-4444-4444-4444-444444444444"
+    body = {
+        "app": "teacher",
+        "platform": "web",
+        "events": [
+            {"name": "segment_recorded", "session_id": session, "count": 1, "bytes": 99},
+            {"name": "event_from_a_newer_app"},
+            {"name": "camera_recovered", "session_id": session, "code": "switched"},
+            {"name": "upload_done", "session_id": session, "count": 1, "duration_ms": 8000},
+        ],
+    }
+    response = await backend.client.post(
+        "/v1/client-events", headers=backend.headers("teacher"), json=body
+    )
+    assert response.status_code == 202 and response.json() == {"accepted": 3, "rejected": 1}
+    assert [e["kind"] for e in lines(caplog, "client_event")] == [
+        "segment_recorded",
+        "camera_recovered",
+        "upload_done",
+    ]
+    warning = lines(caplog, "client_events_rejected")[-1]
+    assert warning["level"] == "warning" and warning["count"] == 1
+
+
+async def test_events_report_when_they_happened_and_on_what_kind_of_device(backend, caplog):
+    caplog.set_level(logging.INFO, logger=LOGGER)
+    body = {
+        "app": "student",
+        "platform": "android",
+        "version": "abc1234",
+        "device_class": "phone",
+        "network": "cellular",
+        "net_class": "3g",
+        "downlink_mbps": 1.4,
+        "rtt_ms": 300,
+        "events": [
+            {"name": "scan_paused", "code": "hidden", "age_ms": 5000},
+            {"name": "scan_resumed", "code": "resumed", "seconds": 4.2},
+            {"name": "recognition_load_failed", "route": "/v1/sessions/{id}/attendance", "status": 503},
+        ],
+    }
+    response = await backend.client.post(
+        "/v1/client-events", headers=backend.headers("student1"), json=body
+    )
+    assert response.status_code == 202
+    first, second, third = lines(caplog, "client_event")
+    assert first["device_class"] == "phone" and first["network"] == "cellular"
+    assert first["net_class"] == "3g" and first["downlink_mbps"] == 1.4 and first["rtt_ms"] == 300
+    # event_at is the arrival time minus age_ms: five seconds earlier than this line's own ts
+    from datetime import datetime
+
+    arrived = datetime.fromisoformat(first["ts"])
+    happened = datetime.fromisoformat(first["event_at"])
+    assert 4.5 < (arrived - happened).total_seconds() < 6
+    assert "event_at" not in second and second["seconds"] == 4.2
+    assert third["kind"] == "recognition_load_failed" and third["http_status"] == 503
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [
+        {"device_class": "Pixel 7 Pro"},  # a model name is not a class
+        {"network": "Hostel-WiFi-5G"},  # an SSID must never be accepted
+        {"net_class": "5g"},
+        {"rtt_ms": -1},
+    ],
+)
+async def test_device_and_network_context_is_a_fixed_vocabulary(backend, extra):
+    body = {**batch(), **extra}
+    response = await backend.client.post(
+        "/v1/client-events", headers=backend.headers("teacher"), json=body
+    )
+    assert response.status_code == 422
+
+
+def test_every_event_the_apps_emit_is_on_the_whitelist():
+    """The Dart whitelist and the server's must be the same list; a name missing on the server
+    used to make the whole batch fail (camera_recovered)."""
+    import re
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parents[3]
+    dart = (root / "packages/app_core/lib/src/diagnostics.dart").read_text()
+    known = re.search(r"static const knownEvents = \{(.*?)\};", dart, re.S).group(1)
+    names = set(re.findall(r"'([a-z_]+)'", known))
+    assert names == set(client_events.EVENT_NAMES)
+    emitted = set()
+    for source in ("apps/teacher/lib", "apps/student/lib", "packages/capture/lib"):
+        for path in (root / source).rglob("*.dart"):
+            emitted |= set(
+                re.findall(r"onEvent\??\.call\(\s*'([a-z_]+)'", path.read_text())
+            )
+    assert emitted <= set(client_events.EVENT_NAMES), emitted - set(client_events.EVENT_NAMES)
 
 
 async def test_client_events_batches_are_bounded(backend):
@@ -254,3 +359,36 @@ def test_uvicorn_tracebacks_and_secret_text_are_redacted(caplog):
     assert message.startswith("Unhandled ValueError at ") and info is None and text is None
     assert "ada@example.test" not in message and "0001" not in message
     assert "ada@example.test" not in seen[1][0] and "token=abc" not in seen[1][0]
+
+
+def test_timings_with_a_redacted_word_in_the_name_still_reach_the_log():
+    """embedding_ms is a duration: it contains the banned word 'embedding' but must be logged."""
+    timings = {"decoding_ms": 10.5, "embedding_ms": 220.25, "embed_every": 2.0, "embedded_faces": 40.0}
+    entry = logs.record("recognition_complete", timings=timings, embedding_ms=5)
+    assert entry["timings"] == timings and entry["embedding_ms"] == 5
+    # only durations get the exemption
+    entry = logs.record("probe", embedding_score=0.9, vector_ms=1, quality={"embedding": 1, "ok": 2})
+    assert "embedding_score" not in entry and entry["quality"] == {"ok": 2}
+
+
+def test_a_recognition_summary_keeps_every_diagnostic_field():
+    entry = logs.record(
+        "recognition_complete",
+        session_id="s",
+        capture_id="c",
+        job_id="j",
+        roster=24,
+        recognised=20,
+        quality={"sampled_frames": 80, "detections": 70, "quality_rejects": 44, "duplicate_frames": 0},
+        reject_reasons={"blur": 6, "small": 37, "edge": 1},
+        face_px_median=78,
+        sample_fps=4.01,
+        queue_wait_ms=1200,
+        attempts=1,
+        timings={"processing_total_ms": 3587.2, "embedding_ms": 900.0},
+        reasons={"recognized": 20, "not_seen": 3, "look_alike": 1},
+    )
+    for key in ("capture_id", "queue_wait_ms", "attempts", "face_px_median", "sample_fps"):
+        assert key in entry, key
+    assert entry["reject_reasons"] == {"blur": 6, "small": 37, "edge": 1}
+    assert entry["reasons"] == {"recognized": 20, "not_seen": 3, "look_alike": 1}

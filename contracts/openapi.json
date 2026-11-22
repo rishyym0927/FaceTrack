@@ -13053,14 +13053,98 @@
             ],
             "title": "Version"
           },
+          "device_class": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "phone",
+                  "tablet",
+                  "desktop",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Class"
+          },
+          "network": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "wifi",
+                  "cellular",
+                  "ethernet",
+                  "offline",
+                  "unknown"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Network"
+          },
+          "net_class": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "slow-2g",
+                  "2g",
+                  "3g",
+                  "4g"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Net Class"
+          },
+          "downlink_mbps": {
+            "anyOf": [
+              {
+                "type": "number",
+                "maximum": 100000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Downlink Mbps"
+          },
+          "rtt_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 600000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rtt Ms"
+          },
           "events": {
             "items": {
               "$ref": "#/components/schemas/ClientEvent"
             },
             "type": "array",
             "maxItems": 50,
-            "minItems": 1,
             "title": "Events"
+          },
+          "rejected": {
+            "type": "integer",
+            "maximum": 50.0,
+            "minimum": 0.0,
+            "title": "Rejected",
+            "default": 0
           }
         },
         "additionalProperties": false,
@@ -13079,13 +13163,17 @@
             "enum": [
               "scan_started",
               "scan_stopped",
+              "scan_paused",
+              "scan_resumed",
               "segment_recorded",
               "upload_retry",
               "upload_failed",
               "upload_done",
               "camera_failed",
               "camera_interrupted",
+              "camera_recovered",
               "camera_switched",
+              "recognition_load_failed",
               "api_error",
               "app_error"
             ],
@@ -13204,6 +13292,19 @@
               }
             ],
             "title": "Count"
+          },
+          "age_ms": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "maximum": 86400000.0,
+                "minimum": 0.0
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Age Ms"
           }
         },
         "additionalProperties": false,

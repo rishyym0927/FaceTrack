@@ -139,10 +139,18 @@ class RecognitionBoard extends StatelessWidget {
     required this.entries,
     this.maxHeight = 200,
     this.onDark = true,
+    this.query = '',
+    this.attentionOnly = false,
   });
   final List<BoardEntry> entries;
   final double maxHeight;
   final bool onDark;
+
+  /// Narrows the list (not the summary above it) to names or numbers containing this text.
+  final String query;
+
+  /// Hides recognised students, leaving the ones who still need another pass.
+  final bool attentionOnly;
 
   Color _tone(RecognitionState s) => onDark ? s.color : s.colorOnLight;
 
@@ -154,8 +162,13 @@ class RecognitionBoard extends StatelessWidget {
       counts[e.state] = counts[e.state]! + 1;
     }
     final recognised = counts[RecognitionState.recognized]!;
-    final sorted = [...entries]
-      ..sort((a, b) {
+    final needle = query.trim().toLowerCase();
+    final sorted = [
+      for (final e in entries)
+        if ((!attentionOnly || e.state != RecognitionState.recognized) &&
+            (needle.isEmpty || '${e.name} ${e.number ?? ''}'.toLowerCase().contains(needle)))
+          e,
+    ]..sort((a, b) {
         final byState = a.state.order.compareTo(b.state.order);
         return byState != 0 ? byState : a.name.compareTo(b.name);
       });
@@ -172,7 +185,18 @@ class RecognitionBoard extends StatelessWidget {
             fontWeight: FontWeight.w700,
           ),
         ),
-        const SizedBox(height: 6),
+        const SizedBox(height: 8),
+        ClipRRect(
+          borderRadius: BorderRadius.circular(4),
+          child: LinearProgressIndicator(
+            key: const ValueKey('board-bar'),
+            value: recognised / entries.length,
+            minHeight: 6,
+            color: _tone(RecognitionState.recognized),
+            backgroundColor: onDark ? Colors.white24 : Colors.black12,
+          ),
+        ),
+        const SizedBox(height: 8),
         Wrap(
           alignment: WrapAlignment.center,
           spacing: 12,
@@ -185,18 +209,29 @@ class RecognitionBoard extends StatelessWidget {
                   children: [
                     Icon(s.icon, size: 14, color: _tone(s)),
                     const SizedBox(width: 4),
-                    Text(
+                    Flexible(
+                      child: Text(
                       '${counts[s]} ${s.label.toLowerCase()}',
                       style: TextStyle(
                         color: onDark ? Colors.white70 : Colors.black54,
                         fontSize: 12,
                       ),
                     ),
+                    ),
                   ],
                 ),
           ],
         ),
         const SizedBox(height: 6),
+        if (sorted.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 16),
+            child: Text(
+              'No students match.',
+              key: const ValueKey('board-empty'),
+              style: TextStyle(color: onDark ? Colors.white70 : Colors.black54),
+            ),
+          ),
         ConstrainedBox(
           constraints: BoxConstraints(maxHeight: maxHeight),
           child: ListView.builder(
@@ -208,7 +243,7 @@ class RecognitionBoard extends StatelessWidget {
                 label: '${e.name}, ${e.state.label}',
                 child: Padding(
                   key: ValueKey('board-${e.id}'),
-                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  padding: const EdgeInsets.symmetric(vertical: 6),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [

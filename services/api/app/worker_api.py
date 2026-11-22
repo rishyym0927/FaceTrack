@@ -458,6 +458,7 @@ async def fail(conn, worker, identifier, body):
         "job_failed",
         level=logging.WARNING,
         job_id=identifier,
+        capture_id=job.get("capture_id"),
         kind=job["kind"],
         code=body.code,
         attempts=job["attempts"],
