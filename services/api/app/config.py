@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import SecretStr, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -23,6 +23,7 @@ class Settings(BaseSettings):
     enrollment_bucket: str = "facetrack-enrollment-dev"
     template_keys: dict[str, SecretStr] = {}
     template_key_id: str = "v1"
+    attendance_threshold_percent: int = Field(default=75, ge=1, le=100)
 
     @field_validator("supabase_url")
     @classmethod

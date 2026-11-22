@@ -445,6 +445,9 @@ def create_app(settings: Settings | None = None, *, auth_transport=None):
     from .attendance import install as install_attendance
 
     install_attendance(app, engine, settings, principal, storage)
+    from .projection import install as install_projection
+
+    install_projection(app, engine, settings, principal)
     from .documents import install as install_documents
 
     install_documents(app, engine, settings, principal, storage, auth)

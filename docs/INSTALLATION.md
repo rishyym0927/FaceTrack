@@ -410,6 +410,7 @@ These tests simulate browser camera and upload behavior. Use the [camera validat
 | `SUPABASE_SERVICE_ROLE_KEY` | Optional | Lets admins create login accounts from the Admin tab; blank disables only that option |
 | `ENVIRONMENT` | Optional | Defaults to `development`. |
 | `WORKER_MAX_LEASES` | Optional | Jobs one worker identity may hold at once (default 2, at most 16). Keep it equal to the agent's `WORKER_SLOTS`; with 1 only one segment is processed at a time |
+| `ATTENDANCE_THRESHOLD_PERCENT` | Optional | Minimum attendance percentage used by the student projection (`/v1/me/attendance-projection`), 1–100, default 75. The apps still show their own 75% constant elsewhere |
 | `RESEND_API_KEY`, `RESEND_FROM` | Optional | Faculty report email; blank disables delivery |
 | `FACULTY_REPORT_URL` | Email only | Teacher (faculty) application base URL |
 

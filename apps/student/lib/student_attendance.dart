@@ -5,6 +5,7 @@ import 'package:facetrack_core/facetrack_core.dart';
 import 'package:facetrack_models/facetrack_models.dart';
 
 import 'student_notifications.dart' show attendanceThreshold;
+import 'student_projection.dart';
 import 'student_ui.dart';
 
 const _present = studentGreen, _absent = studentRed;
@@ -497,6 +498,11 @@ class _StudentAttendanceState extends ConsumerState<StudentAttendance>
               Expanded(child: Text(advice)),
             ],
           ),
+          if (subject != null)
+            ProjectionNote(
+              key: ValueKey('projection:$subject'),
+              offeringId: subject!,
+            ),
         ],
       ),
     );
