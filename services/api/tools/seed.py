@@ -75,7 +75,7 @@ def seed(conn, users):
         raise ValueError(
             "Supply exactly six distinct controlled demo accounts using the documented labels."
         )
-    for name, user in users.items():
+    for user in users.values():
         auth = conn.execute(
             "SELECT email,email_confirmed_at FROM auth.users WHERE id=%s", (UUID(user["id"]),)
         ).fetchone()

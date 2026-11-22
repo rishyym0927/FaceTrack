@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import jwt
+import psycopg
 import pytest
 from sqlalchemy import text
 
@@ -228,7 +229,7 @@ async def test_runtime_rls_constraints_and_pool_context_reset(backend):
             assert (await conn.execute(text("SELECT id FROM app.offerings"))).all() == []
     await engine.dispose()
     with connect(b.urls["owner"]) as conn:
-        with pytest.raises(Exception):
+        with pytest.raises(psycopg.errors.IntegrityError):
             conn.execute(
                 """INSERT INTO app.offerings(institute_id,course_id,term_id,class_group_id,title)
                 VALUES (%s,%s,%s,%s,'Invalid cross-tenant course')""",
