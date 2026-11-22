@@ -16,6 +16,7 @@ import 'classroom_pending.dart';
 import 'processing_progress.dart';
 import 'recognition_board.dart';
 import 'review_card.dart' show initialsOf;
+import 'scan_quality.dart';
 import 'teacher_timetable.dart';
 import 'teacher_reports.dart';
 import 'unload_warning.dart';
@@ -2490,8 +2491,9 @@ CaptureQuality? captureQuality(Json capture) {
     );
   }
   if (usable * 2 < faces) {
+    final cause = rejectCause(quality);
     return CaptureQuality(
-      'The camera did not get a clear view of enough faces. Check the attendance marks and record another clip if needed. $_retakeTips',
+      'The camera did not get a clear view of enough faces. ${cause == null ? '' : '$cause '}Check the attendance marks and record another clip if needed. $_retakeTips',
       poor: true,
     );
   }
