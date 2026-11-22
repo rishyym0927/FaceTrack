@@ -357,3 +357,59 @@ def test_database_results_join_the_report(monkeypatch):
     assert "best similarity of non-recognised students" in text
     assert all(sql.lstrip().startswith(("SELECT", "SET", "SHOW")) for sql in conn.executed)
     assert re.search(r"-\s*\d", text)  # sanity: tables rendered
+
+
+def rows_of(*items):
+    return [{"status": s, "source": src, "code": c, "reason": "-", "count": n} for s, src, c, n in items]
+
+
+def test_review_effort_counts_what_the_teacher_changed():
+    effort = report.review_effort(rows_of(
+        ("present", "ml", "recognized", 18),
+        ("absent", "teacher", "recognized", 2),          # false accepts removed
+        ("present", "teacher", "not_recognized", 1),     # a miss added
+        ("absent", "ml", "not_recognized", 2),
+        ("present", "teacher", "limited_capture", 1),    # another miss added
+        ("present", "teacher", "template_ineligible", 1),  # no face enrolment, marked by hand
+    ))
+    assert effort["proposed"] == 20 and effort["removed"] == 2
+    assert effort["not_proposed"] == 4 and effort["added"] == 2
+    assert effort["changed"] == 4 and effort["judged"] == 24 and effort["changed_pct"] == 16.7
+    assert effort["manual_no_face"] == 1 and effort["undecided"] == 0
+
+
+def test_review_effort_handles_empty_and_undecided_rows():
+    assert report.review_effort([])["changed_pct"] is None
+    assert "nothing to compare" in report.review_effort_lines(report.review_effort([]))[0]
+    effort = report.review_effort(rows_of(("unassessed", "none", "not_recognized", 3), ("unassessed", "ml", "recognized", 1)))
+    assert effort["undecided"] == 4 and effort["changed"] == 0
+    assert any("no teacher decision yet" in line for line in report.review_effort_lines(effort))
+
+
+def test_review_effort_appears_in_the_report_without_personal_data(monkeypatch):
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "postgresql://u:p@h/db")
+    data = {
+        "session": [("finalized", 2, T0, T0, T0 + timedelta(hours=1))],
+        "roster": [(24,)],
+        "attendance": [("present", "ml", "recognized", "-", 20), ("absent", "teacher", "recognized", "-", 1),
+                       ("present", "teacher", "not_recognized", "-", 2)],
+    }
+    conn = FakeConnection(data)
+    db = report.Database(connect=lambda url: conn)
+    events, total = report.read_events(healthy())
+    text = report.make_report(events, total, SESSION, 10**9, db, None, "test")
+    assert "Teacher review effort" in text and "removed 1 of them" in text and "marked 2 present" in text
+    assert "Changed 3 of 23" in text and "not an accuracy rate" in text
+
+
+def test_several_sessions_get_a_rollup(monkeypatch):
+    monkeypatch.setenv("MIGRATION_DATABASE_URL", "postgresql://u:p@h/db")
+    data = {
+        "session": [("finalized", 1, T0, T0, T0 + timedelta(hours=1))],
+        "roster": [(24,)],
+        "attendance": [("present", "ml", "recognized", "-", 10), ("absent", "teacher", "recognized", "-", 1)],
+    }
+    db = report.Database(connect=lambda url: FakeConnection(data))
+    text = report.rollup([SESSION, OTHER], db)
+    assert "Across 2 session(s)" in text and "proposed 22" in text
+    assert report.rollup([SESSION], report.Database(connect=lambda url: FakeConnection({}))) == ""

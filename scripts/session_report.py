@@ -838,6 +838,58 @@ def findings_for(sid, mine, jobs, db_info, resources, errors, slow, all_events, 
 # ----------------------------------------------------------------------------------------------
 # report assembly
 # ----------------------------------------------------------------------------------------------
+PRESENT = {"present", "late"}
+ABSENT = {"absent", "excused"}
+NOT_PROPOSED = {"not_recognized", "limited_capture"}
+
+
+def review_effort(rows):
+    """How much the teacher changed what the system proposed, from the grouped attendance rows.
+
+    The system's own proposal is overwritten when the teacher decides, so this is inferred by
+    comparing the assessment code with the final status. It is a review-effort figure, not an
+    accuracy measurement. Counts only: no student is identified."""
+    out = {"proposed": 0, "removed": 0, "added": 0, "not_proposed": 0, "manual_no_face": 0, "undecided": 0}
+    for r in rows:
+        n, code, status = r["count"], r["code"], r["status"]
+        if code == "recognized":
+            out["proposed"] += n
+            if status in ABSENT:
+                out["removed"] += n
+            elif status not in PRESENT:
+                out["undecided"] += n
+        elif code in NOT_PROPOSED:
+            out["not_proposed"] += n
+            if status in PRESENT:
+                out["added"] += n
+            elif status not in ABSENT:
+                out["undecided"] += n
+        elif code == "template_ineligible" and status in PRESENT:
+            out["manual_no_face"] += n
+    judged = out["proposed"] + out["not_proposed"]
+    out["changed"] = out["removed"] + out["added"]
+    out["judged"] = judged
+    out["changed_pct"] = round(100 * out["changed"] / judged, 1) if judged else None
+    return out
+
+
+def review_effort_lines(effort):
+    if not effort["judged"]:
+        return ["- Teacher review effort: nothing to compare yet (no recognised or unrecognised students with a face enrolment)."]
+    lines = [
+        f"- Teacher review effort: the system proposed {effort['proposed']} student(s) as present; the teacher removed "
+        f"{effort['removed']} of them. Of {effort['not_proposed']} not proposed, the teacher marked {effort['added']} present. "
+        f"Changed {effort['changed']} of {effort['judged']} ({effort['changed_pct']}%)."
+    ]
+    if effort["manual_no_face"]:
+        lines.append(f"- {effort['manual_no_face']} student(s) without a face enrolment were marked present by hand (not counted above).")
+    if effort["undecided"]:
+        lines.append(f"- {effort['undecided']} row(s) have no teacher decision yet, so the figure may still change.")
+    lines.append("  _Inferred by comparing the system's reason with the final status; the original proposal is not stored. "
+                 "A review-effort figure, not an accuracy rate._")
+    return lines
+
+
 def render_session(sid, analysis, db_info, coverage, all_events):
     mine, captures, job_ids = analysis.for_session(sid, db_info)
     start, end = window(mine, db_info)
@@ -958,6 +1010,7 @@ def render_session(sid, analysis, db_info, coverage, all_events):
         out += ["", "Final attendance records:", "",
                 table(["status", "source", "assessment", "reason", "students"],
                       [[r["status"], r["source"], r["code"], r["reason"], r["count"]] for r in db_info["attendance"]])]
+        out += ["", *review_effort_lines(review_effort(db_info["attendance"]))]
     out.append("")
 
     # captures (database) ---------------------------------------------------------------------------------------------------
@@ -1009,6 +1062,24 @@ def render_session(sid, analysis, db_info, coverage, all_events):
     return "\n".join(out)
 
 
+def rollup(selected, db):
+    """Counts added up across the sessions in the window. Aggregates only."""
+    rows, used = [], 0
+    for sid in selected:
+        info = load_session_db(db, sid)
+        if info and info.get("attendance"):
+            rows += info["attendance"]
+            used += 1
+    if not used:
+        return ""
+    effort = review_effort(rows)
+    reasons = Counter()
+    for r in rows:
+        reasons[r["reason"] if r["reason"] != "-" else r["code"]] += r["count"]
+    return "\n".join([f"## Across {used} session(s)", "", *review_effort_lines(effort), "",
+                      f"- final per-student state, all sessions: {histogram_line(reasons)}"])
+
+
 def make_report(events, total_lines, target, since_seconds, db=None, live_now=None, sources="", out_of_scope_note=""):
     analysis = Analysis(events)
     anchor = live_now or (events[-1].ts if events else datetime.now(UTC))
@@ -1053,6 +1124,8 @@ def make_report(events, total_lines, target, since_seconds, db=None, live_now=No
     if not selected:
         body.append("No class activity found in this window. Other sessions appear only when someone scans, uploads or opens/closes them; "
                     "pass a session id explicitly or widen `--since`.")
+    if len(selected) > 1 and db_ok:
+        body.append(rollup(selected, db))
     viewed = {e.get("session_id") for e in events if e.get("session_id")} - set(selected)
     if viewed and not explicit:
         body.append(f"\n_Sessions that were only viewed (no scan or upload): {', '.join(short(v) for v in sorted(viewed))}._")

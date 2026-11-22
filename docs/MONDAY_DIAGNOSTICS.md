@@ -112,3 +112,9 @@ Write down (paper or phone notes):
 
 The report states what the data shows. If a finding is missing, that is not proof it did not
 happen: check the coverage line at the top and the database section.
+
+## Teacher review effort
+
+When the database is reachable, each session's report ends its recognition section with one line saying how much the teacher changed what the system proposed: students removed from the proposed-present list, students added that were not proposed, and the changed share. With `--since 7d` and no target, the report also ends with an "Across N session(s)" roll-up of the same figures.
+
+This is a review-effort figure, not an accuracy rate. The system's original proposal is overwritten when the teacher decides, so the report infers the change by comparing the recorded reason (`recognized`, `not_recognized`, `limited_capture`) with the final status. Rows with no teacher decision yet are counted separately. Students without a face enrolment who were marked by hand are listed apart. The figure has counts only; no student is identified.
